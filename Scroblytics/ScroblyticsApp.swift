@@ -341,11 +341,13 @@ private struct LibraryCommands: Commands {
 /// Replaces the Help menu's default item with the app's own Help window.
 private struct HelpCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openURL) private var openURL
 
     var body: some Commands {
         CommandGroup(replacing: .help) {
             Button("Scroblytics Help") { openWindow(id: "help") }
                 .keyboardShortcut("?", modifiers: .command)
+            Button("Privacy Policy") { openURL(AppIdentity.privacyPolicyURL) }
         }
     }
 }
@@ -402,6 +404,21 @@ enum SettingsTab: String {
     static let storageKey = "settings.selectedTab"
 }
 
+/// Settings › General › Privacy: where the privacy policy is, and the Help article on what leaves the Mac.
+struct PrivacySettingsSection: View {
+    var body: some View {
+        Section("Privacy") {
+            Text("Scroblytics has no accounts, analytics or tracking. The policy lists what stays on your Mac and every service the app contacts.")
+                .font(AppTypography.supporting)
+                .foregroundStyle(.secondary)
+            Link("Privacy Policy", destination: AppIdentity.privacyPolicyURL)
+                .font(AppTypography.supporting)
+                .help("Opens the privacy policy in your web browser.")
+            HelpLinkButton(articleID: "what-leaves-your-mac", title: "What leaves your Mac")
+        }
+    }
+}
+
 private struct AppearanceSettingsView: View {
     @Binding var appearance: AppearancePreference
     @AppStorage(AppCalendars.weekStartKey) private var weekStartDay = WeekStart.monday.rawValue
@@ -430,6 +447,8 @@ private struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
                 HelpLinkButton(articleID: "offline-mode", title: "What Offline mode does")
             }
+
+            PrivacySettingsSection()
 
             Section("Dates") {
                 Picker("Week starts on", selection: $weekStartDay) {

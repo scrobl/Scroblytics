@@ -13,6 +13,10 @@ enum LayoutSnapshots {
             snapshotAskEngine(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_PRIVACY"] {
+            snapshotPrivacy(into: folder)
+            return
+        }
         guard let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT"] else { return }
         Task { @MainActor in
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -71,6 +75,31 @@ enum LayoutSnapshots {
                     host.cacheDisplay(in: host.bounds, to: rep)
                     if let png = rep.representation(using: .png, properties: [:]) {
                         try? png.write(to: URL(fileURLWithPath: folder).appending(path: "rows-\(Int(width)).png"))
+                    }
+                }
+            }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_PRIVACY=<folder>`: the Settings › General privacy section at the Settings window's width and wider.
+    @MainActor
+    private static func snapshotPrivacy(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                for width in [560, 760] as [CGFloat] {
+                    let view = Form { PrivacySettingsSection() }.formStyle(.grouped)
+                        .frame(width: width).environment(\.colorScheme, scheme == "dark" ? .dark : .light)
+                    let host = NSHostingView(rootView: view)
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 220), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: appearance)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: width, height: 220))
+                    for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "privacy-\(scheme)-\(Int(width)).png"))
                     }
                 }
             }

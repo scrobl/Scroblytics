@@ -59,6 +59,13 @@ enum HelpChecks {
         let hits = articles.flatMap { article in forbidden.filter { article.searchText.contains($0) }.map { "\(article.id): \($0)" } }
         check("no forbidden text", hits.isEmpty, hits.joined(separator: ", "))
 
+        // The privacy policy link: one URL, shown in Help, and a well-formed https address to the published policy.
+        let policy = AppIdentity.privacyPolicyURLString
+        check("the privacy policy URL is https and points at PRIVACY.md", URL(string: policy)?.scheme == "https" && policy.hasSuffix("/PRIVACY.md"), policy)
+        for id in ["what-leaves-your-mac", "welcome"] {
+            check("the \(id) article links the privacy policy", articles.first { $0.id == id }?.searchText.contains(policy.lowercased()) == true)
+        }
+
         print("\(HelpContent.sections.count) sections, \(articles.count) articles, \(HelpFieldDefinitions.text.count) field definitions")
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)

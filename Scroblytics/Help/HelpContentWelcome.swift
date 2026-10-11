@@ -22,6 +22,7 @@ extension HelpContent {
                     "The most important reference is the [Field reference](help://fields-overview): precise definitions of every value you can see, filter or sort by. [Measures & definitions](help://metrics-plays-time) explains rank, movement, milestones, turnover and the rest.",
                     "If you wonder why a number looks different on two screens, read [Names, albums and artists](help://concepts-identity) and [Dates, weeks and time zones](help://concepts-time).",
                     "No internet? Turn on [Offline mode](help://offline-mode) and everything on your Mac keeps working.",
+                    "What the app stores and which services it contacts: [What leaves your Mac](help://what-leaves-your-mac), and the published [Privacy Policy](\(AppIdentity.privacyPolicyURLString)).",
                     "Hovering over most column headers, controls and badges shows a short explanation.",
                 ]),
                 .callout(.note, "Your Last.fm account stays the source of truth for your plays. The app only ever changes Last.fm when you connect Track Actions and choose to love a track or edit tags, and it tells you before it does. Everything else you create (corrections, saved queries, custom images) is stored only on your Mac; see [Backup and restore](help://data-backup)."),

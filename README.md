@@ -3,7 +3,7 @@
 A native Mac app for exploring and managing your [Last.fm](https://www.last.fm) listening history.
 
 Scroblytics copies your scrobbles to your Mac and keeps them there. You can browse them, chart them over time, ask questions about
-them in plain English, and tidy up the details that Last.fm itself can't. It has no account, no analytics and no server of its own.
+them in plain English, and tidy up the details that Last.fm itself can't. It has no account and no server of its own.
 
 > **Beta (0.9.0).** It is usable every day but still young. Please report anything that looks wrong.
 

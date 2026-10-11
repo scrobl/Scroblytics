@@ -88,6 +88,18 @@ The app's daily "newer version available" notice reads GitHub's release list. Fo
 `vX.Y.Z` (for example `v0.9.1`, matching `MARKETING_VERSION`), and the release must be **published** (not a draft). Pre-releases are
 announced too, while the app is in beta.
 
+## When a user sends a crash report
+
+`release.sh` keeps each release's debug symbols in `build/release/dsyms/<version>/` (back that folder up: without the exact build's dSYM a
+crash report can't be read). To turn a report (`.ips`, from Console › Crash Reports or `~/Library/Logs/DiagnosticReports/`) into function
+names and line numbers:
+
+```bash
+python3 -I scripts/symbolicate-crash.py ~/Downloads/Scroblytics-2026-….ips
+```
+
+It matches the report's build ID to the saved symbols, and prints the exception, the crashed thread and the first frames of the others.
+
 ## Trying the script without a certificate
 
 `scripts/release.sh --test-package` does every step except Developer ID signing and notarization, signs with your development

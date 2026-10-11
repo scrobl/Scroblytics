@@ -143,6 +143,14 @@ else
 fi
 [ -d "$app" ] || fail "the exported app is missing."
 
+# Keep this build's debug symbols: a crash report from a user can only be turned into function names with the dSYM of the exact build
+# (scripts/symbolicate-crash.py reads them from here). The work folder is wiped on the next run, so they are copied out.
+if [ "$test_package" = 0 ]; then
+  mkdir -p "$out/dsyms/$version"
+  rm -rf "$out/dsyms/$version/Scroblytics.app.dSYM"
+  ditto "$archive/dSYMs/Scroblytics.app.dSYM" "$out/dsyms/$version/Scroblytics.app.dSYM" && ok "debug symbols kept in build/release/dsyms/$version" || warn "couldn't keep the debug symbols"
+fi
+
 # ---------------------------------------------------------------------------------------------------------- 4. Verify the app
 verify_app() {
   local app="$1" info="$1/Contents/Info.plist" bin="$1/Contents/MacOS/Scroblytics" details ents

@@ -1,0 +1,37 @@
+name: Scroblytics
+options:
+  bundleIdPrefix: app.scroblytics
+targets:
+  Scroblytics:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - Scroblytics
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.scroblytics.Scroblytics
+        DEVELOPMENT_TEAM: GZSS69ZNX8
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "0.9.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_ENTITLEMENTS: Config/Scroblytics.entitlements
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_FILE: Config/Info-extra.plist
+        INFOPLIST_KEY_CFBundleDisplayName: Scroblytics
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+schemes:
+  Scroblytics:
+    build:
+      targets:
+        Scroblytics: all
+    run:
+      config: Debug
+    archive:
+      config: Release

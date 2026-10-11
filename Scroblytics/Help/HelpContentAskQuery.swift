@@ -1,0 +1,78 @@
+import Foundation
+
+extension HelpContent {
+    static let askQuerySection = HelpSection(id: "ask-query", title: "Ask & Query", articles: [
+        HelpArticle(
+            id: "ask",
+            title: "Ask",
+            summary: "Type a request in plain English; the app turns it into filters and shows you before it runs.",
+            blocks: [
+                .paragraph("Click the sparkles button in the toolbar (or use Ask in Query). Type something like “albums I’ve played more than 20 times but not in the last year”. Ask turns the sentence into the same conditions the [Query](help://query-basics) builder uses."),
+                .heading("You always see it first"),
+                .paragraph("Nothing runs until you confirm. A review card, “Here’s how I understood that”, shows the filters as chips, any caveats, and any **vague words it turned into numbers** (for example “a lot” became 50 plays) so you can adjust them. Then choose **Run**, **Edit filters instead**, or **Save…**. If the reading is wrong, edit the filters, or rephrase."),
+                .heading("What it can do"),
+                .bullets([
+                    "Threshold, gap and ranking requests over artists, albums or tracks: “top 25 tracks of 2019”, “loved tracks I haven’t played in a year”, “artists I’ve listened to on more than 200 different days”.",
+                    "Periods: “this year”, “last month”, “last 90 days”. Decades: “the 90s” means release years 1990–1999. For gaps a month is 30 days and a year 365.",
+                    "Tags, loved status, and caps: “N per artist”, “the top song from each album”, “one album per release year”. A cap is not a total: “top 10 songs, 1 per artist” sets both. A bare “each year” isn’t read as a cap, since it could mean the year something was played; say “release year”.",
+                    "“Find 25 songs similar to X” is sent to [Similar Sounds](help://tool-similar-sounds) (Last.fm lookups), not turned into filters. The on-device engine can’t do these.",
+                ]),
+                .paragraph("The results grid shows the fields your request sorts on, filters on or groups by (for example **Release year** when you ask for one album from each release year), then Plays and Last played to round it out. Artist and album are already shown under each name."),
+                .paragraph("The example sentence shown in the empty box is chosen from things Ask can actually do, and changes each time you open it; press **Tab** or **Try it** to use it. The box clears after a query runs."),
+                .heading("Engines and privacy"),
+                .paragraph("Which model reads your sentence, what is sent, and how keys are stored are covered in [Ask engines and their API keys](help://ask-keys). Larger cloud models are noticeably more accurate than the on-device model. Always check the chips against what you meant."),
+                .paragraph("A small line under the Ask box always names the model that will answer (for example “Claude (Anthropic) · claude-sonnet-5-5”). When it is the on-device model it also warns that capabilities and results are limited. **Change in Settings** on that line opens Settings › Ask, and the line updates as soon as you change the choice."),
+            ]
+        ),
+        HelpArticle(
+            id: "query-basics",
+            title: "Query: building conditions",
+            summary: "Groups, operators, sorting and limits.",
+            blocks: [
+                .paragraph("Query finds artists, albums or tracks that match conditions, shows chosen columns, and sorts them. Pick **Find** (Artists, Albums or Tracks), add conditions, and run. Every field is defined in the [Field reference](help://fields-overview), and hovering any field name shows a short definition."),
+                .heading("Combining conditions"),
+                .bullets([
+                    "Conditions inside one **group** must **all** be true (AND). A query matches when **any** group matches (OR). With no groups, everything matches.",
+                    "Saved sets (Sets menu) store the whole query; the menu also has templates, such as Time Machine comparisons.",
+                ]),
+                .heading("Operators by type"),
+                .table(headers: ["Type", "Operators"], rows: [
+                    ["Number", "=, ≠, >, ≥, <, ≤, between (inclusive)"],
+                    ["Text", "is, is not, contains, does not contain, starts with, does not start with, ends with, does not end with, contains whole word. Case, accents and width are ignored."],
+                    ["Date", "before, after, on, between — by whole local days (release dates by UTC days)"],
+                    ["Yes/no", "is yes, is no"],
+                    ["Tags", "is any of, is all of, is none of, is not all of"],
+                ]),
+                .paragraph("Every type also has **has a value** and **is missing**. How empty and pending cells behave is in [Missing and pending values](help://concepts-missing-pending)."),
+                .heading("Sorting and limits"),
+                .bullets([
+                    "Sort by several keys; rows with no value always sort last. Remaining ties fall back to name, then artist. Tag lists can’t be sorted. **Shuffle** randomizes.",
+                    "The row **limit** is applied after sorting and after the caps (Scope › **At most N per artist / per album / per release year**, all of which can be used together). Per artist isn’t available when finding artists; per album applies only to tracks, and a track with no album is never capped by album; per release year applies to albums and tracks, and anything whose release year is missing, or still being looked up, is never capped by year (the year is the Release year field’s own value).",
+                    "Number fields have units: Duration is typed in minutes, Time listened in hours, and percentage-style fields as fractions (0.25 is 25%).",
+                ]),
+                .paragraph("Choosing which columns to show, and in what order, is separate from the conditions. A column can carry its own date range to show two periods side by side; see [Periods and date scopes](help://query-periods)."),
+            ]
+        ),
+        HelpArticle(
+            id: "query-periods",
+            title: "Query: periods, date scopes and “as of”",
+            summary: "The ways a query can limit which plays count.",
+            blocks: [
+                .paragraph("A query can limit which plays are counted in four different ways. They do different things."),
+                .table(headers: ["Setting", "Where", "Effect"], rows: [
+                    ["**Period**", "Scope & limit › Only count plays in a period", "Plays outside From–To are ignored before anything is computed. “From” and “To” are both optional."],
+                    ["**Certain days or hours**", "Scope & limit › Only count plays on certain days or hours", "Counts only plays on the chosen weekdays and within the hour range (it can wrap past midnight), in local time."],
+                    ["**As of**", "Scope & limit › Evaluate as of a date", "Sets “now” for relative fields such as “days since last played” and “last N days”. Normally the moment you run it."],
+                    ["**Date scope / baseline** (per column)", "A column’s own date range", "That column is computed over its own range and ignores the Period and the days/hours filter. Comparison columns (Plays change, Rank movement) need a scope **and** a baseline; the default is the last 30 days against the same 30 days a year earlier."],
+                ]),
+                .heading("Kinds of date scope"),
+                .bullets([
+                    "All time; up to now; the last N days (N × 24 hours ending at “as of”, not calendar days).",
+                    "A calendar unit — the day, week, month, quarter or year containing “as of” — from its start to its last second. The week starts on the day set in Settings › General (Monday by default). A relative scope can be shifted back by whole units.",
+                    "An absolute From/To, either end optional.",
+                ]),
+                .callout(.note, "Fields that need history up to a point (Fading Favorites, Climb, Milestones, Turnover) are computed from the plays up to the **end** of their scope, with “now” moved to that end. That’s how you can ask for “what was fading as of last March”."),
+            ]
+        ),
+    ])
+}

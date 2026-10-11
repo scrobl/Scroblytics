@@ -1,0 +1,72 @@
+import Foundation
+
+/// A short, human-readable piece of an interpreted query — what the user confirms before anything runs.
+struct AskChip: Identifiable, Hashable, Sendable {
+    enum Kind: Sendable { case target, condition, alternative, sort, limit }
+    let id = UUID()
+    let kind: Kind
+    let text: String
+    /// The field's own `help`, for the chip's tooltip.
+    var help: String? = nil
+    /// The field's caveat, if it has one.
+    var caveat: String? = nil
+}
+
+/// Describes a `QuerySpec` in words, from the same titles and labels the builder itself shows: a field's
+/// title (which already carries its parameters and date scope), the operator's label, and each operand in
+/// the unit a person would say it in.
+enum AskChips {
+    static func describe(_ spec: QuerySpec, registry: QueryFieldRegistry) -> [AskChip] {
+        var chips = [AskChip(kind: .target, text: spec.target.rawValue.capitalized + "s")]
+        for (index, group) in spec.groups.enumerated() {
+            if index > 0 { chips.append(AskChip(kind: .alternative, text: "or")) }
+            for condition in group {
+                let field = try? registry.field(condition.field.id)
+                chips.append(AskChip(kind: .condition, text: describe(condition, target: spec.target, registry: registry), help: field?.help, caveat: field?.caveat))
+            }
+        }
+        if let filter = spec.playFilter, !filter.isEmpty {
+            chips.append(AskChip(kind: .condition, text: "Only plays: " + filter.label))
+        }
+        for sort in spec.sorts {
+            switch sort.key {
+            case .shuffle: chips.append(AskChip(kind: .sort, text: "Random order"))
+            case .field(let ref):
+                let title = (try? registry.resolve(ref, target: spec.target).title) ?? ref.id
+                chips.append(AskChip(kind: .sort, text: "Sorted by \(title) \(sort.direction == .descending ? "↓" : "↑")"))
+            }
+        }
+        if let limit = spec.limit { chips.append(AskChip(kind: .limit, text: "Top \(limit.formatted())")) }
+        if let perArtist = spec.groupLimit?.perArtist { chips.append(AskChip(kind: .limit, text: "≤\(perArtist) per artist")) }
+        if let perAlbum = spec.groupLimit?.perAlbum { chips.append(AskChip(kind: .limit, text: "≤\(perAlbum) per album")) }
+        if let perYear = spec.groupLimit?.perReleaseYear { chips.append(AskChip(kind: .limit, text: "≤\(perYear) per release year")) }
+        return chips
+    }
+
+    static func describe(_ condition: QueryCondition, target: QueryTarget, registry: QueryFieldRegistry) -> String {
+        guard let resolved = try? registry.resolve(condition.field, target: target) else { return condition.field.id }
+        let operands = condition.operands.map { display($0, field: resolved.field) }
+        let value: String
+        switch condition.op.arity {
+        case .none: value = ""
+        case .two: value = operands.joined(separator: " and ")
+        default: value = operands.joined(separator: ", ")
+        }
+        return [resolved.title, condition.op.label, value].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    private static func display(_ value: QueryValue, field: QueryField) -> String {
+        switch value {
+        case .number(let stored):
+            if case .percent = field.column.style { return (stored * 100).formatted(.number.precision(.fractionLength(0...1))) + "%" }
+            let shown = AskOperand.shown(stored, for: field)
+            if case .year = field.column.style { return String(Int(shown.rounded())) }
+            let text = shown.formatted(.number.precision(.fractionLength(0...2)))
+            return field.inputUnit.map { "\(text) \($0.label)" } ?? text
+        case .text(let s): return "“\(s)”"
+        case .bool(let b): return b ? "yes" : "no"
+        case .date(let d): return d.formatted(date: .abbreviated, time: .omitted)
+        case .tags(let t): return t.map { "“\($0)”" }.joined(separator: ", ")
+        }
+    }
+}

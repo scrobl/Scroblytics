@@ -1,0 +1,27 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+.ask-eval/
+
+# Local build secrets (see Config/Secrets.example.xcconfig)
+Config/Secrets.xcconfig
+
+# Words that must never ship (read by scripts/release.sh); kept out of the repo on purpose
+Config/forbidden-terms.local

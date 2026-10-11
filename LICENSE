@@ -1,0 +1,37 @@
+Scroblytics — Proprietary License
+
+Copyright (c) 2026 Jeffrey Blucher. All rights reserved.
+
+1. Ownership. Scroblytics (the "Software"), including its source code, artwork, text and documentation, is the property of the
+   copyright holder above. It is licensed, not sold. No rights are granted except those stated here.
+
+2. Use. You may download, install and run the unmodified Software, as released by the copyright holder, on Mac computers that you
+   own or control, free of charge, for your own personal, non-commercial use.
+
+3. Restrictions. Without the copyright holder's prior written permission you may not:
+   (a) copy, redistribute, sell, rent, sublicense, host or otherwise make the Software, or any part of it, available to others,
+       in source or binary form;
+   (b) modify the Software or create derivative works from it, or use any part of its source code, artwork or text in another
+       project;
+   (c) remove or alter any copyright, attribution or licence notice;
+   (d) use the name "Scroblytics" or its icon to identify another product or service, or to suggest endorsement.
+
+4. Source code. Where the source code is made viewable (for example in a public repository) it is provided for reading and for
+   reporting problems. Viewing it does not grant any right beyond those in section 2.
+
+5. Third-party services and names. The Software works with services owned by others (including Last.fm, Deezer, GetSongBPM,
+   MusicBrainz, Apple Music and optional AI providers). Your use of those services is governed by their own terms, and you are
+   responsible for complying with them, including those of any API key you register. The Software is independent and is not
+   affiliated with, endorsed by or sponsored by any of them. All third-party names and trademarks belong to their owners.
+
+6. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. The Software can change data in your Last.fm profile
+   and in your Music library only when you confirm an action; you are responsible for keeping backups of data you care about.
+
+7. Limitation of liability. TO THE FULLEST EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+8. Termination. This licence ends automatically if you breach it. On termination you must stop using the Software and delete your
+   copies.
+
+9. Privacy. How the Software handles data is described in PRIVACY.md.

@@ -157,6 +157,7 @@ struct EntityStatsHeaderSection: View {
     @Environment(\.modelContext) private var modelContext
     @State private var effectiveImageURL: String?
     @State private var artworkRefreshID = UUID()
+    @State private var isShowingArtwork = false
     let entity: TopChartsEntity
     let name: String
     /// Artist name, shown under `name` — nil only for an artist page itself.
@@ -217,6 +218,13 @@ struct EntityStatsHeaderSection: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(.separator.opacity(0.45), lineWidth: 1)
+        }
+        .sheet(isPresented: $isShowingArtwork) {
+            ArtworkPreviewSheet(
+                name: name,
+                imageURL: effectiveImageURL ?? imageURL,
+                placeholderSystemName: imageTarget.kind == .artist ? "person.fill" : "music.note"
+            )
         }
         .task(id: imageTarget) { reloadImage() }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { notification in
@@ -295,6 +303,32 @@ struct EntityStatsHeaderSection: View {
     }
 
     private var artwork: some View {
+        Group {
+            if canShowLargerArtwork {
+                Button {
+                    isShowingArtwork = true
+                } label: {
+                    artworkThumbnail
+                }
+                .buttonStyle(.plain)
+                .help("View larger artwork")
+                .accessibilityLabel("View larger artwork for \(name)")
+            } else {
+                artworkThumbnail
+            }
+        }
+        .entityContextMenu(
+            target: imageTarget,
+            currentImageURL: effectiveImageURL ?? imageURL,
+            onFixAlbumMatch: onFixAlbumMatch,
+            onImageRefreshed: { refreshedURL in
+                effectiveImageURL = refreshedURL
+                artworkRefreshID = UUID()
+            }
+        )
+    }
+
+    private var artworkThumbnail: some View {
         ArtworkImage(urlString: effectiveImageURL ?? imageURL, contentMode: .fill) {
             Color.clear
                 .overlay {
@@ -307,15 +341,10 @@ struct EntityStatsHeaderSection: View {
         .frame(width: AppArtworkSizing.tileMaximum, height: AppArtworkSizing.tileMaximum)
         .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .entityContextMenu(
-            target: imageTarget,
-            currentImageURL: effectiveImageURL ?? imageURL,
-            onFixAlbumMatch: onFixAlbumMatch,
-            onImageRefreshed: { refreshedURL in
-                effectiveImageURL = refreshedURL
-                artworkRefreshID = UUID()
-            }
-        )
+    }
+
+    private var canShowLargerArtwork: Bool {
+        entity != .track && (effectiveImageURL ?? imageURL) != nil
     }
 
     private func reloadImage() {
@@ -418,6 +447,41 @@ struct EntityStatsHeaderSection: View {
         return "every \(days) days"
     }
 
+}
+
+private struct ArtworkPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let name: String
+    let imageURL: String?
+    let placeholderSystemName: String
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text(name)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            ArtworkImage(urlString: imageURL, contentMode: .fit) {
+                Color.clear
+                    .overlay {
+                        Image(systemName: placeholderSystemName)
+                            .font(.system(size: 72))
+                            .foregroundStyle(.tertiary)
+                    }
+            }
+            .frame(width: 560, height: 560)
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityLabel("Artwork for \(name)")
+        }
+        .padding(20)
+    }
 }
 
 /// Milestone formatting (`formatMilestone`/`milestoneTier`/

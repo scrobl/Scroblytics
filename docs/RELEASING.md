@@ -82,6 +82,30 @@ The DMG itself is tested **once per release**, as below, not for every change.
 
 If a problem turns up after step 4, fix it, raise the version and rebuild: never replace the files on a tag you have already pushed.
 
+## Test on macOS 15 before publishing
+
+The development Mac runs a newer macOS than many users, and a crash that only exists on macOS 15 (Swift's concurrency runtime there
+behaves differently) went out in 0.9.1 because of it. Before publishing, run the release candidate on a macOS 15 machine; a virtual
+machine on this Mac is enough:
+
+1. Get **Tart** (free, https://github.com/cirruslabs/tart): download the notarized `tart.tar.gz` from its releases page (the Homebrew
+   formula is unreliable), check `codesign -dv tart.app` shows Cirrus Labs, and run
+   `tart clone ghcr.io/cirruslabs/macos-sequoia-vanilla:latest scroblytics-sequoia` (about 24 GB) then
+   `tart run scroblytics-sequoia --no-graphics`. The guest user is `admin` / `admin`, with Remote Login on; `tart ip` gives its address.
+   macOS needs **Local Network** permission for the app you run ssh from.
+2. Copy the app to the VM (a DMG copied over ssh has no download marker, so Gatekeeper is not tested there) and run it. To exercise a
+   real first import safely, run a copy with the test hooks (`xcodebuild -configuration Release OTHER_SWIFT_FLAGS='$(inherited) -DDEBUG'`),
+   re-sign it ad hoc with a profile bundle id, and launch it with `open -n --stderr log --env CFFIXED_USER_HOME=… --env
+   SCROBLYTICS_PROFILE=<name> --env SCROBLYTICS_PROFILE_SEED_LASTFM=<username>:<api key>`. That seeds a real, read-only account
+   into the profile's own Keychain item. Delete the profile's Keychain item before each launch, or macOS shows a permission dialog you
+   cannot see. Never put a key in the repository.
+3. Pass criteria: a first import of a large library finishes, the app then runs 6 more minutes with the Overview open (artwork, tags and
+   popularity all working), three relaunches of 4 minutes each survive, and `~/Library/Logs/DiagnosticReports` has no new Scroblytics
+   report. Last time the crash appeared within about 2 minutes. A task group (`withTaskGroup`) started from the Overview's refresh was
+   the trigger; don't reintroduce one there without this test.
+
+Crash reports from users are read with `scripts/symbolicate-crash.py` (see above).
+
 ## What the update notice needs
 
 The app's daily "newer version available" notice reads GitHub's release list. For a release to be announced its tag must be named

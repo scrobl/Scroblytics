@@ -248,6 +248,12 @@ ok "checksum written: $dmg_name.sha256"
 # ---------------------------------------------------------------------------------------------------------- 8. What's left for a person
 notes="$out/${label}RELEASE_NOTES-$version.md"
 last_tag="$(git -C "$root" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+written_notes="$root/docs/release-notes/v$version.md"
+if [ -f "$written_notes" ]; then
+  cp "$written_notes" "$notes"
+  ok "release notes: using docs/release-notes/v$version.md"
+else
+  warn "no docs/release-notes/v$version.md; the notes below are only a list of commit subjects"
 {
   echo "# Scroblytics $version"
   echo
@@ -255,6 +261,7 @@ last_tag="$(git -C "$root" describe --tags --abbrev=0 --match 'v*' 2>/dev/null |
   echo
   git -C "$root" log --pretty='- %s' ${last_tag:+"$last_tag..HEAD"}
 } >"$notes"
+fi
 # Early commit subjects can mention things that must never be published; they are left out of the draft.
 if [ -n "$forbidden" ] && grep -q -i -E "$forbidden" "$notes"; then
   dropped="$(grep -c -i -E "$forbidden" "$notes")"

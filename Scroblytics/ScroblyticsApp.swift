@@ -168,6 +168,7 @@ struct ScroblyticsApp: App {
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()
         TestProfile.seedAccountIfRequested()
+        TestProfile.seedRealLastfmAccountIfRequested()
         Task { @MainActor in
             TestProfile.autoConnectIfRequested()
             TestProfile.stopAfterIfRequested()

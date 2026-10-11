@@ -56,6 +56,17 @@ enum TestProfile {
         ))
     }
 
+    /// With `SCROBLYTICS_PROFILE_SEED_LASTFM=username:apikey`, saves a REAL Last.fm account into the test profile's own Keychain item (never
+    /// the real one: the profile has its own), so a profile can run a true, read-only first import without typing into the Welcome screen.
+    /// Only under a test profile, and only while the profile has no account yet. Nothing is written to Last.fm.
+    static func seedRealLastfmAccountIfRequested() {
+        guard name != nil, let pair = ProcessInfo.processInfo.environment["SCROBLYTICS_PROFILE_SEED_LASTFM"],
+              LastfmCredentialsStore.load() == nil else { return }
+        let parts = pair.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return }
+        try? LastfmCredentialsStore.save(LastfmCredentials(username: parts[0], apiKey: parts[1], apiSecret: nil, sessionKey: nil))
+    }
+
     /// With `SCROBLYTICS_PROFILE_AUTOCONNECT=username:apikey` (stand-in server only), fills in the account form and presses
     /// Test & Save a few seconds after launch, as a person would, and prints what happened. For repeatable first-run
     /// tests of each stand-in scenario without typing.

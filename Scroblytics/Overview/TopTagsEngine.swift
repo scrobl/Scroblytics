@@ -29,7 +29,6 @@ struct TopTagEntry: Identifiable, Hashable {
 @MainActor
 enum TopTagsEngine {
     static let defaultLimit = 10
-    private static let fetchConcurrency = 5
 
     static func fetch(
         context: ModelContext, range: DateRange, credentials: LastfmCredentials?, limit: Int = defaultLimit
@@ -78,32 +77,19 @@ enum TopTagsEngine {
         guard !toFetch.isEmpty, let credentials else { return result }
         let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
 
-        var index = 0
-        while index < toFetch.count {
-            let batch = toFetch[index..<min(index + fetchConcurrency, toFetch.count)]
-            let fetched = await withTaskGroup(of: (String, [String]?).self) { group in
-                for name in batch {
-                    group.addTask {
-                        do {
-                            return (name, try await client.fetchArtistTopTags(artist: name))
-                        } catch {
-                            return (name, nil) // transient failure — leave uncached, retry next time
-                        }
-                    }
-                }
-                var collected: [(String, [String]?)] = []
-                for await item in group { collected.append(item) }
-                return collected
+        // One lookup at a time. This used to fetch five artists at once in a task group, but a Last.fm request
+        // is spaced out by `LastfmPacer` anyway (so the group gained no speed), and that group, started from here
+        // while an import was writing, aborted the app on macOS 15 ("pure virtual function called" inside Swift's
+        // task completion, reproduced and traced to this loop). Don't bring concurrency back without a test on macOS 15.
+        for name in toFetch {
+            try Task.checkCancellation()
+            // A transient failure (nil) is left uncached and tried again next time.
+            guard let tags = try? await client.fetchArtistTopTags(artist: name) else { continue }
+            result[name] = tags
+            if let artist = try findArtist(named: name, context: context) {
+                artist.communityTags = tags
+                artist.communityTagsResolvedAt = Date()
             }
-            for (name, tags) in fetched {
-                guard let tags else { continue }
-                result[name] = tags
-                if let artist = try findArtist(named: name, context: context) {
-                    artist.communityTags = tags
-                    artist.communityTagsResolvedAt = Date()
-                }
-            }
-            index += fetchConcurrency
         }
         try context.save()
         return result

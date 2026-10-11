@@ -319,6 +319,8 @@ struct OverviewView: View {
     @State private var almostMilestones: [MilestoneUpcoming] = []
     @State private var topTags: [TopTagEntry] = []
     @State private var topTagsLoading = false
+    /// A refresh arrived while a Top Tags run was going; run once more when it ends.
+    @State private var topTagsRerunRequested = false
     @State private var albumTurnoverEntries: [AlbumTurnoverEngine.AlbumTurnoverOverviewEntry] = []
     @State private var albumTurnoverLoading = false
     @State private var reverbPicks: [ReverbRow] = []
@@ -636,12 +638,22 @@ struct OverviewView: View {
             topTags = []
             return
         }
+        // One run at a time: every refresh used to start another run that looked up the same artists again. A refresh that
+        // arrives while a run is going is remembered and run once when it ends, so the card still ends up current.
+        if topTagsLoading {
+            topTagsRerunRequested = true
+            return
+        }
         let range = currentRange
         topTagsLoading = true
         Task {
             // Offline mode: use only the tags already cached (no credentials means no lookups).
             topTags = (try? await TopTagsEngine.fetch(context: modelContext, range: range, credentials: ConnectivityGate.isOffline ? nil : credentials)) ?? []
             topTagsLoading = false
+            if topTagsRerunRequested {
+                topTagsRerunRequested = false
+                loadTopTags()
+            }
         }
     }
 

@@ -37,6 +37,9 @@ Everything is explained in the app under **Help**.
 2. Open it and drag **Scroblytics** to **Applications**.
 3. Open the app and follow the Welcome screen.
 
+Scroblytics tells you when a newer release exists (once a day, and you can turn that off); it never updates itself, so you download
+the new disk image from the Releases page the same way.
+
 Releases are signed and notarized by Apple's process, so macOS will only ask the usual "downloaded from the internet" question the
 first time. Each release also includes a SHA-256 checksum file if you want to verify the download.
 

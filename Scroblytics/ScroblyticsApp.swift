@@ -165,6 +165,8 @@ struct ScroblyticsApp: App {
         LayoutSnapshots.runHeadlessIfRequested(container: modelContainer)
         LovedAuditChecks.runHeadlessIfRequested(container: modelContainer)
         QueryCapChecks.runHeadlessIfRequested()
+        RateLimitChecks.runHeadlessIfRequested()
+        UpdateChecks.runHeadlessIfRequested()
         TestProfile.seedAccountIfRequested()
         Task { @MainActor in
             TestProfile.autoConnectIfRequested()
@@ -218,6 +220,7 @@ struct ScroblyticsApp: App {
             FileCommands(dataManagementCommands: dataManagementCommands)
             AppViewCommands(showsNowPlayingShelf: $showsNowPlayingShelf)
             LibraryCommands()
+            UpdateCommands()
             HelpCommands()
             #if DEBUG
             DebugCommands()
@@ -338,6 +341,15 @@ private struct LibraryCommands: Commands {
     }
 }
 
+/// "Check for Updates…" under the app's About item.
+private struct UpdateCommands: Commands {
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { Task { await UpdateStore.shared.checkNowAndTell() } }
+        }
+    }
+}
+
 /// Replaces the Help menu's default item with the app's own Help window.
 private struct HelpCommands: Commands {
     @Environment(\.openWindow) private var openWindow
@@ -449,6 +461,8 @@ private struct AppearanceSettingsView: View {
             }
 
             PrivacySettingsSection()
+
+            UpdateSettingsSection()
 
             Section("Dates") {
                 Picker("Week starts on", selection: $weekStartDay) {

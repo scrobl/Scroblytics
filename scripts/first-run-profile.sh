@@ -26,6 +26,8 @@ real_prefix="app.scroblytics.Scroblytics"
 profiles_root="/tmp/scroblytics-profiles"
 
 find_app() {
+  # SCROBLYTICS_APP_PATH points at another build of the Debug app (for comparing two versions).
+  if [ -n "${SCROBLYTICS_APP_PATH:-}" ]; then echo "$SCROBLYTICS_APP_PATH"; return; fi
   local dir
   dir="$(xcodebuild -project "$root/Scroblytics.xcodeproj" -scheme Scroblytics -destination 'platform=macOS' -showBuildSettings 2>/dev/null \
     | awk -F' = ' '/^ *BUILT_PRODUCTS_DIR =/ {print $2; exit}')"
@@ -64,13 +66,15 @@ fi
 name="${1:?usage: first-run-profile.sh <name> [--reset] [--fake <scenario>] [--port N] | --selftest}"
 shift
 [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || { echo "Profile names are lowercase letters, digits and hyphens." >&2; exit 1; }
-reset=0; scenario=""; port=8765; seed=0; user_env=()
+reset=0; scenario=""; port=8765; seed=0; user_env=(); latency_ms=0; release_version=9.9.9
 while [ $# -gt 0 ]; do
   case "$1" in
     --reset) reset=1 ;;
     --fake) scenario="${2:?scenario}"; shift ;;
     --port) port="${2:?port}"; shift ;;
     --seed) seed=1 ;;
+    --latency-ms) latency_ms="${2:?milliseconds}"; shift ;;
+    --release-version) release_version="${2:?version or down}"; shift ;;
     --env) user_env+=("${2:?KEY=VALUE}"); shift ;;
     *) echo "Unknown option $1" >&2; exit 1 ;;
   esac
@@ -114,10 +118,12 @@ trap cleanup EXIT
 
 extra_env=()
 if [ -n "$scenario" ]; then
-  python3 -I "$root/scripts/fake-lastfm.py" --scenario "$scenario" --port "$port" &
+  python3 -I "$root/scripts/fake-lastfm.py" --scenario "$scenario" --port "$port" --latency-ms "$latency_ms" --release-version "$release_version" &
   fake_pid=$!
   for _ in $(seq 1 30); do curl -s "http://127.0.0.1:$port/__stats" >/dev/null 2>&1 && break; sleep 0.2; done
   extra_env+=("SCROBLYTICS_LASTFM_BASE_URL=http://127.0.0.1:$port/2.0/")
+  # The update notice asks the same stand-in (not GitHub) for the release list.
+  extra_env+=("SCROBLYTICS_UPDATE_FEED_URL=http://127.0.0.1:$port/repos/scrobl/Scroblytics/releases?per_page=10")
 fi
 
 if [ "$seed" -eq 1 ]; then

@@ -25,6 +25,8 @@ struct SyncProgress: Sendable {
     let newScrobbles: Int
     let processedScrobbles: Int
     let progressTotal: Int
+    /// Set while the import is waiting out Last.fm's rate limit: how many seconds until it tries again.
+    var waitingSeconds: Int? = nil
 
     var fractionCompleted: Double? {
         guard progressTotal > 0 else { return nil }
@@ -192,7 +194,15 @@ actor SyncEngine {
         var page = 1
         var totalPages = 1
         repeat {
-            let result = try await client.fetchRecentTracksPage(page: page, from: fromParam)
+            let waitingProgress = SyncProgress(
+                phase: .scrobbles, mode: .incremental, totalScrobbles: remotePlaycount, newScrobbles: expectedNew,
+                processedScrobbles: processed, progressTotal: max(expectedNew, processed)
+            )
+            let result = try await client.fetchRecentTracksPage(page: page, from: fromParam, onWait: { seconds in
+                var update = waitingProgress
+                update.waitingSeconds = seconds
+                progress(update)
+            })
             totalPages = result.totalPages
             let (a, u) = try upsert(result.scrobbles, confirmedAt: runStartedAt)
             added += a
@@ -436,8 +446,16 @@ actor SyncEngine {
                     throw SyncError.pageCapExceeded
                 }
                 let result: LastfmAPIClient.Page
+                let waitingProgress = SyncProgress(
+                    phase: .scrobbles, mode: mode, totalScrobbles: totalScrobbles, newScrobbles: newScrobbles,
+                    processedScrobbles: processed, progressTotal: totalScrobbles
+                )
                 do {
-                    result = try await client.fetchRecentTracksPage(page: page, to: to)
+                    result = try await client.fetchRecentTracksPage(page: page, to: to, onWait: { seconds in
+                        var update = waitingProgress
+                        update.waitingSeconds = seconds
+                        progress(update)
+                    })
                 } catch {
                     try checkpoint(state: state, nextPage: page, to: to, totalPages: totalPages, runIdentity: runIdentity)
                     throw error

@@ -32,6 +32,17 @@ enum TestProfile {
         return raw.hasSuffix("/") ? raw : raw + "/"
     }()
 
+    /// Where the update notice asks for the list of releases (`SCROBLYTICS_UPDATE_FEED_URL`), for testing it against a stand-in on
+    /// this Mac. Only under a test profile and only a loopback address, so a test can never be pointed at anyone else.
+    static let updateFeedURLOverride: URL? = {
+        guard let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_UPDATE_FEED_URL"], !raw.isEmpty else { return nil }
+        guard name != nil else { stop("SCROBLYTICS_UPDATE_FEED_URL only works under a test profile (SCROBLYTICS_PROFILE).") }
+        guard let url = URL(string: raw), ConnectivityGate.isLoopback(host: url.host) else {
+            stop("SCROBLYTICS_UPDATE_FEED_URL must point at this Mac (localhost / 127.0.0.1).")
+        }
+        return url
+    }()
+
     /// With `SCROBLYTICS_PROFILE_SEED_ACCOUNT=1`, a stand-in Last.fm server and a profile that has no account yet, saves
     /// made-up credentials (the app writes its own Keychain item, so macOS doesn't ask about access) so the app starts
     /// syncing at launch. Real credentials are never touched: a profile has its own item, and the stand-in server is

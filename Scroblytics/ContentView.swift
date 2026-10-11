@@ -20,7 +20,13 @@ private final class SyncProgressState {
         let modeChanged = progress?.mode != newProgress.mode
         let reachedEnd = newProgress.progressTotal > 0
             && newProgress.processedScrobbles >= newProgress.progressTotal
-        guard phaseChanged || modeChanged || reachedEnd || now.timeIntervalSince(lastPublishedAt) >= 0.1 else { return }
+        let waitChanged = progress?.waitingSeconds != newProgress.waitingSeconds
+        guard phaseChanged || modeChanged || reachedEnd || waitChanged || now.timeIntervalSince(lastPublishedAt) >= 0.1 else { return }
+        #if DEBUG
+        if waitChanged {
+            TestProfile.log(newProgress.waitingSeconds.map { "SYNC waiting \($0)s for Last.fm's rate limit" } ?? "SYNC rate-limit wait over; carrying on")
+        }
+        #endif
         progress = newProgress
         lastPublishedAt = now
         if pace == nil, newProgress.phase == .scrobbles, newProgress.processedScrobbles > 0 {
@@ -194,6 +200,7 @@ struct ContentView: View {
                 }
                 ImportStatusStrips(container: modelContainer, isSyncing: isSyncing, onResume: { startSync(full: false) })
                 OfflineStrip()
+                UpdateStrip()
                 BackgroundWorkStrip(store: backgroundWork)
             }
         }
@@ -724,7 +731,9 @@ private struct SyncProgressBanner: View {
 
     @ViewBuilder
     private var statusText: some View {
-        if let targetedTitle {
+        if let seconds = progress?.waitingSeconds {
+            Text("Last.fm asked the app to slow down. Waiting \(seconds) s, then it carries on.")
+        } else if let targetedTitle {
             Text(targetedTitle)
         } else if isFirstImport, progress?.mode.isFullHistory ?? true, progress?.phase != .lovedTracks {
             Text(progress?.phase == .scrobbles ? "Importing your history…" : "Preparing to import your history…")

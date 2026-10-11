@@ -83,7 +83,7 @@ extension LastfmAPIError: LocalizedError {
             switch code {
             case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync."
             case 26: return "Last.fm has suspended this API key."
-            case 29: return "Last.fm is rate-limiting requests. Try again in a moment."
+            case 29: return "Last.fm is limiting requests from this connection, even after waiting several minutes. Wait a few minutes, then press Retry."
             case 17: return "Last.fm needs a login to show this data. If you hid your recent listening in your Last.fm privacy settings, that is the cause."
             case 4, 9: return "Last.fm rejected the session. Reconnect Track Actions in Settings › Sync."
             case 8, 11, 16: return "Last.fm is temporarily unavailable. Try again shortly."
@@ -109,6 +109,14 @@ func describeSyncError(_ error: Error) -> String {
 /// 11 = service offline, 16 = temporary error, 29 = rate limit exceeded.
 private let transientLastfmCodes: Set<Int> = [8, 11, 16, 29]
 
+extension LastfmAPIError {
+    /// Last.fm's "rate limit exceeded" (error 29).
+    var isRateLimit: Bool {
+        if case .api(let code, _) = self { return code == 29 }
+        return false
+    }
+}
+
 func isTransient(_ error: LastfmAPIError) -> Bool {
     switch error {
     case .network: return true
@@ -129,6 +137,83 @@ enum LastfmEndpoint {
     static var host: String? { URL(string: base)?.host }
 }
 
+/// How the app keeps within Last.fm's request limit (about 5 requests a second per network address, averaged over five
+/// minutes): it never sends two requests closer together than `minGap`, and after Last.fm answers "rate limit exceeded"
+/// (error 29) it spaces them further apart for the rest of the session. Pure, so the arithmetic can be checked.
+struct LastfmPacing: Sendable {
+    var minGap: TimeInterval = 0.25
+    var widenedGap: TimeInterval = 0.6
+    private(set) var widened = false
+    private var lastSlot: TimeInterval?
+
+    /// How long to wait before a request that is ready at `now` may go, reserving its slot (so several waiting requests
+    /// are spaced out one after another).
+    mutating func delay(now: TimeInterval) -> TimeInterval {
+        let gap = widened ? widenedGap : minGap
+        let wait = lastSlot.map { max(0, $0 + gap - now) } ?? 0
+        lastSlot = now + wait
+        return wait
+    }
+
+    mutating func noteRateLimited() { widened = true }
+
+    /// How long until a background request may be booked if it must come at least `gaps` gaps after the last booked request.
+    func backgroundWait(now: TimeInterval, gaps: Double) -> TimeInterval {
+        let gap = widened ? widenedGap : minGap
+        return max(0, (lastSlot ?? -.infinity) + gap * gaps - now)
+    }
+}
+
+/// One pacer for every Last.fm read in the app, so the history import and the background lookups (tags, popularity) share the
+/// same budget. The import, and anything else a person is waiting for, goes first: while one has asked for a turn in the last few
+/// seconds, a background lookup keeps twice the usual distance from the last booked request, so the import never queues behind it.
+actor LastfmPacer {
+    static let shared = LastfmPacer()
+    private var pacing = LastfmPacing()
+    private var lastForegroundAt: TimeInterval?
+    /// How long after the last foreground request background lookups keep to the wider spacing.
+    private static let foregroundWindow: TimeInterval = 3
+
+    func waitForTurn(foreground: Bool) async throws {
+        if foreground {
+            lastForegroundAt = ProcessInfo.processInfo.systemUptime
+        } else {
+            while true {
+                let now = ProcessInfo.processInfo.systemUptime
+                let foregroundActive = lastForegroundAt.map { now - $0 < Self.foregroundWindow } ?? false
+                let wait = pacing.backgroundWait(now: now, gaps: foregroundActive ? 2 : 1)
+                if wait <= 0.001 { break }
+                try await Task.sleep(nanoseconds: UInt64(max(wait, 0.02) * 1_000_000_000))
+            }
+        }
+        let wait = pacing.delay(now: ProcessInfo.processInfo.systemUptime)
+        if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+    }
+
+    func noteRateLimited() { pacing.noteRateLimited() }
+}
+
+/// What to do when Last.fm answers "rate limit exceeded" (error 29): wait, then keep going, for up to `patience` in total.
+/// The first wait is `waits[0]`, the next `waits[1]`, and so on (the last one repeats).
+struct RateLimitPolicy: Sendable {
+    var waits: [TimeInterval] = [30, 60]
+    var patience: TimeInterval = 600
+
+    func wait(afterRateLimits count: Int) -> TimeInterval { waits[min(count, waits.count - 1)] }
+
+    /// The real policy; a DEBUG run can shrink every time by `SCROBLYTICS_RATELIMIT_TIME_SCALE` (e.g. 0.1) to test the waiting quickly.
+    static let standard: RateLimitPolicy = {
+        var policy = RateLimitPolicy()
+        #if DEBUG
+        if let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_RATELIMIT_TIME_SCALE"], let scale = Double(raw), scale > 0 {
+            policy.waits = policy.waits.map { $0 * scale }
+            policy.patience *= scale
+        }
+        #endif
+        return policy
+    }()
+}
+
 /// Thin wrapper over Last.fm's REST API (page size, retry count, and backoff schedule below).
 actor LastfmAPIClient {
     static let pageSize = 200
@@ -138,11 +223,13 @@ actor LastfmAPIClient {
     let username: String
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let rateLimitPolicy: RateLimitPolicy
 
-    init(apiKey: String, username: String, session: URLSession = .shared) {
+    init(apiKey: String, username: String, session: URLSession = .shared, rateLimitPolicy: RateLimitPolicy = .standard) {
         self.apiKey = apiKey
         self.username = username
         self.session = session
+        self.rateLimitPolicy = rateLimitPolicy
     }
 
     struct Page {
@@ -175,18 +262,46 @@ actor LastfmAPIClient {
         )
     }
 
-    /// One page of scrobble history, retried on transient failures with the
-    /// exponential backoff: 1s, 2s, 4s, 8s, capped at 15s.
-    func fetchRecentTracksPage(page: Int, from: Int? = nil, to: Int? = nil) async throws -> Page {
-        var attempt = 0
+    /// One page of scrobble history. A transient failure is retried with a short backoff (1s, 2s, 4s, 8s). A rate limit (error 29)
+    /// is different: the app waits as long as Last.fm needs (see `waitingOutRateLimits`) instead of giving up after a few seconds.
+    func fetchRecentTracksPage(
+        page: Int, from: Int? = nil, to: Int? = nil, onWait: (@Sendable (_ seconds: Int?) -> Void)? = nil
+    ) async throws -> Page {
+        try await waitingOutRateLimits(onWait: onWait) {
+            var attempt = 0
+            while true {
+                attempt += 1
+                do {
+                    return try await fetchRecentTracksPageOnce(page: page, from: from, to: to)
+                } catch let error as LastfmAPIError {
+                    guard isTransient(error), !error.isRateLimit, attempt < Self.maxRetries else { throw error }
+                    let delayMs = min(1000 * (1 << (attempt - 1)), 15_000)
+                    try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                }
+            }
+        }
+    }
+
+    /// Runs `body`; when Last.fm answers "rate limit exceeded" (error 29) waits (30 s, then 60 s each time, up to the policy's
+    /// patience in total, 10 minutes) and tries again. `onWait` hears the length of each wait, and `nil` once a request goes
+    /// through again, so the screen can say what is happening. Stopping cancels the wait at once. Past the patience the 29 is thrown.
+    private func waitingOutRateLimits<T>(
+        onWait: (@Sendable (_ seconds: Int?) -> Void)?, _ body: () async throws -> T
+    ) async throws -> T {
+        var rateLimits = 0
+        var waited: TimeInterval = 0
         while true {
-            attempt += 1
             do {
-                return try await fetchRecentTracksPageOnce(page: page, from: from, to: to)
-            } catch let error as LastfmAPIError {
-                guard isTransient(error), attempt < Self.maxRetries else { throw error }
-                let delayMs = min(1000 * (1 << (attempt - 1)), 15_000)
-                try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                let result = try await body()
+                if rateLimits > 0 { onWait?(nil) }
+                return result
+            } catch let error as LastfmAPIError where error.isRateLimit {
+                let wait = rateLimitPolicy.wait(afterRateLimits: rateLimits)
+                guard waited + wait <= rateLimitPolicy.patience else { throw error }
+                rateLimits += 1
+                waited += wait
+                onWait?(Int(wait.rounded(.up)))
+                try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }
     }
@@ -204,7 +319,7 @@ actor LastfmAPIClient {
         if let from { items.append(.init(name: "from", value: String(from))) }
         if let to { items.append(.init(name: "to", value: String(to))) }
 
-        let response: RecentTracksResponse = try await request(queryItems: items)
+        let response: RecentTracksResponse = try await request(queryItems: items, foreground: true)
         guard let totalPagesString = response.recenttracks.attr?.totalPages,
               let totalPages = Int(totalPagesString),
               let totalString = response.recenttracks.attr?.total,
@@ -236,7 +351,7 @@ actor LastfmAPIClient {
             .init(name: "api_key", value: apiKey),
             .init(name: "format", value: "json"),
         ]
-        let response: UserInfoResponse = try await request(queryItems: items)
+        let response: UserInfoResponse = try await request(queryItems: items, foreground: true)
         guard let playcount = Int(response.user.playcount) else {
             throw LastfmAPIError.malformedField("user.playcount non-numeric: \(response.user.playcount)")
         }
@@ -252,7 +367,7 @@ actor LastfmAPIClient {
             .init(name: "api_key", value: apiKey),
             .init(name: "format", value: "json"),
         ]
-        let response: UserInfoResponse = try await request(queryItems: items)
+        let response: UserInfoResponse = try await waitingOutRateLimits(onWait: nil) { try await request(queryItems: items, foreground: true) }
         guard let playcount = Int(response.user.playcount) else {
             throw LastfmAPIError.malformedField("user.playcount non-numeric: \(response.user.playcount)")
         }
@@ -278,7 +393,7 @@ actor LastfmAPIClient {
             .init(name: "limit", value: String(Self.pageSize)),
             .init(name: "page", value: String(page)),
         ]
-        let response: LovedTracksResponse = try await request(queryItems: items)
+        let response: LovedTracksResponse = try await request(queryItems: items, foreground: true)
         guard let totalPagesString = response.lovedtracks.attr?.totalPages,
               let totalPages = Int(totalPagesString) else {
             throw LastfmAPIError.malformedField("lovedtracks.@attr.totalPages missing or non-numeric")
@@ -611,11 +726,14 @@ actor LastfmAPIClient {
 
     // MARK: - Transport
 
-    private func request<T: Decodable>(queryItems: [URLQueryItem]) async throws -> T {
+    /// `foreground`: something a person is waiting for (the history import, the account check); it goes ahead of background
+    /// lookups when the request budget is shared.
+    private func request<T: Decodable>(queryItems: [URLQueryItem], foreground: Bool = false) async throws -> T {
         var components = URLComponents(string: LastfmEndpoint.base)!
         components.queryItems = queryItems
         guard let url = components.url else { throw LastfmAPIError.invalidResponse }
         try ConnectivityGate.check(host: url.host)
+        try await LastfmPacer.shared.waitForTurn(foreground: foreground)
 
         let data: Data
         let response: URLResponse
@@ -630,11 +748,13 @@ actor LastfmAPIClient {
         guard let http = response as? HTTPURLResponse else { throw LastfmAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             if let apiError = try? decoder.decode(LastfmErrorResponse.self, from: data) {
+                if apiError.error == 29 { await LastfmPacer.shared.noteRateLimited() }
                 throw LastfmAPIError.api(code: apiError.error, message: apiError.message)
             }
             throw LastfmAPIError.http(http.statusCode)
         }
         if let apiError = try? decoder.decode(LastfmErrorResponse.self, from: data) {
+            if apiError.error == 29 { await LastfmPacer.shared.noteRateLimited() }
             throw LastfmAPIError.api(code: apiError.error, message: apiError.message)
         }
         do {

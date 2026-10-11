@@ -19,8 +19,14 @@ Scenarios
   drops-mid-sync  after 5 history pages the connection is cut 3 times, then it recovers
   slow            every request takes 3 seconds
   flaky-key       works for 5 history pages, then error 10 (key revoked mid-import)
+  rate-limited-long   every history request answers error 29 for the first 90 s (--window N to change), then it recovers
+  strict-rate     Last.fm's real rule: more than 5 requests in any rolling second answer error 29 (6,000 scrobbles)
+  rate-limited-forever   every history request answers error 29, always
+  timing          10,000 scrobbles with no limits at all; use --latency-ms to simulate how slowly Last.fm answers
 
-GET /__stats returns what was served, and the dataset's own totals, as JSON, for cross-checking an import.
+GET /__stats returns what was served, and the dataset's own totals, as JSON, for cross-checking an import. It also reports the
+busiest second (max_requests_in_one_second), the shortest gap between history requests (min_history_gap_ms) and how many requests
+were answered with error 29 (rate_limit_answers).
 """
 import argparse
 import json
@@ -43,10 +49,20 @@ SCENARIOS = {
     "slow": "Every request takes 3 seconds",
     "slow-import": "4,000 scrobbles, each history page takes 1.5 seconds (to try Stop and Resume)",
     "flaky-key": "Works for 5 history pages, then the key is rejected (error 10)",
+    "rate-limited-long": "Every history request is rate-limited (error 29) for the first 90 seconds, then it recovers",
+    "strict-rate": "More than 5 requests in any rolling second are rate-limited (error 29), as Last.fm does; 6,000 scrobbles",
+    "rate-limited-forever": "Every history request is rate-limited (error 29), always",
+    "timing": "10,000 scrobbles, no limits; with --latency-ms, every history page takes that long (to time an import)",
 }
 PAGE_SIZE = 200
 NOW = int(time.time())
-SIZES = {"empty-account": 0, "small": 50, "medium": 2000, "large": 40000, "slow-import": 4000}
+SIZES = {"empty-account": 0, "small": 50, "medium": 2000, "large": 40000, "slow-import": 4000,
+         "rate-limited-long": 2000, "strict-rate": 6000, "rate-limited-forever": 2000, "timing": 10000}
+RATE_LIMIT_ERROR = (29, "Rate Limit Exceeded - Your IP has made too many requests in a short period", 429)
+STRICT_PER_SECOND = 5
+LONG_WINDOW_SECONDS = 90.0
+LATENCY_SECONDS = 0.0
+RELEASE_VERSION = "9.9.9"   # newest version the stand-in GitHub release list announces; "down" makes it answer HTTP 500
 ERRORS = {
     "bad-key": (10, "Invalid API key - You must be granted a valid key by last.fm", 403),
     "suspended-key": (26, "Suspended API key - Access for your account has been suspended, please contact Last.fm", 403),
@@ -82,6 +98,10 @@ class State:
         self.drops_left = 3
         self.served = {}
         self.history_pages_served = 0
+        self.request_times = []        # time.monotonic() of every request
+        self.history_times = []        # ... of every history request (limit > 1)
+        self.rate_limit_answers = 0
+        self.first_history_at = None
 
     def stats(self):
         return {
@@ -93,7 +113,23 @@ class State:
             "distinct_tracks": len({(r["artist"], r["track"]) for r in self.rows}),
             "requests_by_method": self.served,
             "history_pages_served": self.history_pages_served,
+            "max_requests_in_one_second": self.max_in_one_second(),
+            "min_history_gap_ms": self.min_history_gap_ms(),
+            "rate_limit_answers": self.rate_limit_answers,
+            "history_span_ms": round((self.history_times[-1] - self.history_times[0]) * 1000) if len(self.history_times) > 1 else None,
         }
+
+    def max_in_one_second(self):
+        times, best, lo = self.request_times, 0, 0
+        for hi in range(len(times)):
+            while times[hi] - times[lo] > 1.0:
+                lo += 1
+            best = max(best, hi - lo + 1)
+        return best
+
+    def min_history_gap_ms(self):
+        gaps = [b - a for a, b in zip(self.history_times, self.history_times[1:])]
+        return round(min(gaps) * 1000) if gaps else None
 
 
 def build_handler(state):
@@ -117,12 +153,46 @@ def build_handler(state):
             if url.path == "/__stats":
                 self._send(200, state.stats())
                 return
+            if url.path.startswith("/repos/scrobl/Scroblytics/releases"):
+                # A stand-in for GitHub's release list, for testing the "update available" notice.
+                if RELEASE_VERSION == "down":
+                    self._send(500, {"message": "stand-in: GitHub is down"})
+                    return
+                page = "https://github.com/scrobl/Scroblytics/releases/tag/v" + RELEASE_VERSION
+                self._send(200, [
+                    {"tag_name": "v0.9.0", "html_url": "https://github.com/scrobl/Scroblytics/releases/tag/v0.9.0", "draft": False, "prerelease": True},
+                    {"tag_name": "v" + RELEASE_VERSION, "html_url": page, "draft": False, "prerelease": True},
+                    {"tag_name": "v99.0.0", "html_url": "https://github.com/scrobl/Scroblytics/releases/tag/v99.0.0", "draft": True, "prerelease": False},
+                ])
+                return
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
             method = q.get("method", "")
+            now = time.monotonic()
+            is_history = method == "user.getRecentTracks" and int(q.get("limit", PAGE_SIZE)) > 1
             with state.lock:
                 state.served[method] = state.served.get(method, 0) + 1
+                state.request_times.append(now)
+                if is_history:
+                    state.history_times.append(now)
+                    if state.first_history_at is None:
+                        state.first_history_at = now
+                limited = False
+                if state.scenario == "strict-rate":
+                    recent = [t for t in state.request_times if now - t <= 1.0]
+                    limited = len(recent) > STRICT_PER_SECOND
+                elif state.scenario == "rate-limited-forever":
+                    limited = is_history
+                elif state.scenario == "rate-limited-long":
+                    limited = is_history and now - state.first_history_at < LONG_WINDOW_SECONDS
+                if limited:
+                    state.rate_limit_answers += 1
+            if limited:
+                self._error(*RATE_LIMIT_ERROR)
+                return
             if state.scenario == "slow":
                 time.sleep(3)
+            if is_history and LATENCY_SECONDS:
+                time.sleep(LATENCY_SECONDS)
             if state.scenario in ERRORS:
                 self._error(*ERRORS[state.scenario])
                 return
@@ -189,12 +259,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="small", choices=sorted(SCENARIOS))
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--window", type=float, default=90.0, help="seconds rate-limited-long keeps answering error 29")
+    ap.add_argument("--latency-ms", type=float, default=0.0, help="delay every history page by this long")
+    ap.add_argument("--release-version", default="9.9.9", help='newest version the stand-in release list announces ("down": answer HTTP 500)')
     ap.add_argument("--list", action="store_true", help="print the scenarios, one 'name<TAB>description' per line, and exit")
     args = ap.parse_args()
     if args.list:
         for name, detail in SCENARIOS.items():
             print(f"{name}\t{detail}")
         return
+    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION
+    RELEASE_VERSION = args.release_version
+    LONG_WINDOW_SECONDS = args.window
+    LATENCY_SECONDS = args.latency_ms / 1000.0
     state = State(args.scenario)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), build_handler(state))
     print(f"fake Last.fm: scenario={args.scenario} scrobbles={len(state.rows)} http://127.0.0.1:{args.port}/2.0/", flush=True)

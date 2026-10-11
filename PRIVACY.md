@@ -1,6 +1,6 @@
 # Scroblytics Privacy Policy
 
-*Last updated: 10 October 2026 (version 0.9.0, beta)*
+*Last updated: 11 October 2026 (version 0.9.0, beta)*
 
 Scroblytics is a Mac app for exploring your own listening history. It runs on your Mac and keeps your data there.
 **The developer of Scroblytics does not run any server for the app, does not collect your data, and has no analytics, advertising,
@@ -38,6 +38,7 @@ The app only contacts these services, and only the ones for features you use. Tu
 | **MusicBrainz** | Album release dates | Artist and album names. As MusicBrainz asks, requests identify the app and a project contact address. |
 | **Image servers** (Last.fm, Deezer) | Downloading artwork | An ordinary image request (your IP address is visible to the server, as with any download) |
 | **Apple's public catalogue** (`itunes.apple.com`) | *View in Apple Music*, only when you choose it | Artist, album or track name as search text |
+| **GitHub** (no sign-in) | Once a day, checking whether a newer version of Scroblytics has been released. You can turn this off in Settings. | An ordinary web request: your IP address and the app's name and version (for example "Scroblytics/0.9.0"). Nothing about you or your library. The app never downloads or installs anything by itself. |
 | **The Ask provider you choose** (optional) | Turning a sentence into a query | See below |
 
 Links such as *View in Last.fm* and *View Lyrics on Genius* open in your web browser only when you click them; the browser,

@@ -17,7 +17,7 @@ enum DurationEngine {
 
     static let progressNotification = Notification.Name("DurationEngineProgress")
 
-    private struct PendingTrack: Sendable {
+    struct PendingTrack: Sendable, Equatable {
         let artist: String
         let track: String
         let album: String?
@@ -195,18 +195,27 @@ enum DurationEngine {
     /// For callers (Top Charts' per-group ranking, Overview's Top Picks)
     /// that need to attribute duration back to individual scrobbles rather
     /// than a single running total.
+    /// One entry per distinct track (the newest play's album is the hint), found without normalizing a name for every single play:
+    /// a long history repeats the same tracks over and over, and this runs on the main actor each time a page asks for lengths.
+    nonisolated static func distinctTargets(_ scrobbles: [ScrobbleSnapshot]) -> [String: PendingTrack] {
+        var latest: [String: (artist: String, track: String, album: String)] = [:]
+        for s in scrobbles where !s.trackName.isEmpty {
+            latest[s.artistName + "\u{0}" + s.trackName] = (s.artistName, s.trackName, s.albumName)
+        }
+        var targets: [String: PendingTrack] = [:]
+        targets.reserveCapacity(latest.count)
+        for entry in latest.values {
+            targets[cacheKey(artist: entry.artist, track: entry.track)] = PendingTrack(
+                artist: entry.artist, track: entry.track, album: entry.album.isEmpty ? nil : entry.album
+            )
+        }
+        return targets
+    }
+
     static func resolveDurationLookup(
         context: ModelContext, client: DeezerAPIClient, scrobbles: [ScrobbleSnapshot]
     ) async -> [String: Int] {
-        var targets: [String: PendingTrack] = [:]
-        for s in scrobbles {
-            guard !s.trackName.isEmpty else { continue }
-            let key = cacheKey(artist: s.artistName, track: s.trackName)
-            targets[key] = PendingTrack(
-                artist: s.artistName, track: s.trackName,
-                album: s.albumName.isEmpty ? nil : s.albumName
-            )
-        }
+        let targets = distinctTargets(scrobbles)
 
         let snapshot = loadSnapshot(context: context)
         var lookup: [String: Int] = [:]

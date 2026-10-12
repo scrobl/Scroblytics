@@ -87,7 +87,7 @@ struct TrendsTagsChart: View {
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
-        .task(id: ComputeKey(metric: metric, inputs: inputs)) { await recompute() }
+        .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
     }
 
     private func change(_ row: TrendsTags.Row) -> Double? {
@@ -136,10 +136,10 @@ struct TrendsTagsChart: View {
     private func recompute() async {
         isLoading = true
         let (metric, inputs) = (self.metric, self.inputs)
-        let computed = await Task.detached(priority: .utility) {
+        let computed = await TrendsComputeGate.shared.run {
             TrendsTagsEngine.compute(scrobbles: inputs.scrobbles, snapshots: inputs.snapshots, range: inputs.range, compareRange: inputs.compareRange, metric: metric)
-        }.value
-        guard !Task.isCancelled else { return }
+        }
+        guard !Task.isCancelled, let computed else { return }
         tags = computed
         isLoading = false
     }

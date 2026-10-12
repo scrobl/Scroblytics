@@ -27,7 +27,11 @@ enum TrendEngine {
     /// fields would shift evening/morning plays across the boundary for any
     /// non-UTC timezone).
     static func bucketStart(_ date: Date, granularity: TrendGranularity) -> Date {
-        let calendar = AppCalendars.listening
+        bucketStart(date, granularity: granularity, calendar: AppCalendars.listening)
+    }
+
+    /// The same, with the calendar passed in: a loop over many plays builds it once instead of once per play.
+    static func bucketStart(_ date: Date, granularity: TrendGranularity, calendar: Calendar) -> Date {
         switch granularity {
         case .day: return calendar.startOfDay(for: date)
         case .week: return calendar.dateInterval(of: .weekOfYear, for: date)!.start
@@ -49,8 +53,9 @@ enum TrendEngine {
     /// regardless of which buckets actually have scrobbles.
     static func series(scrobbles: [ScrobbleSnapshot], range: DateRange, granularity: TrendGranularity) -> [TrendBucket] {
         var counts: [Date: Int] = [:]
+        let calendar = AppCalendars.listening
         for s in scrobbles where s.playedAt >= range.from && s.playedAt <= range.to {
-            let bucket = bucketStart(s.playedAt, granularity: granularity)
+            let bucket = bucketStart(s.playedAt, granularity: granularity, calendar: calendar)
             counts[bucket, default: 0] += 1
         }
         var result: [TrendBucket] = []

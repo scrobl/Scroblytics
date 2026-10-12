@@ -136,6 +136,18 @@ final class QueryBuilderModel {
     /// Rebuilds the background-resolved snapshots (read-only) and re-runs. Called when a warmer
     /// reports progress, so a query fills in as data arrives. The reads run on a background reader
     /// and bursts of progress reports are coalesced into one refresh.
+    /// While a long backlog of lookups is worked through they announce progress every few seconds; re-reading every snapshot and re-running
+    /// the query each time kept a big library busy. A background announcement refreshes at most once in `backgroundRefreshInterval`;
+    /// coming back to the tab still refreshes at once.
+    static let backgroundRefreshInterval: TimeInterval = 120
+    private var lastBackgroundRefreshAt = Date.distantPast
+
+    func refreshSnapshotsForBackgroundProgress() {
+        guard Date().timeIntervalSince(lastBackgroundRefreshAt) >= Self.backgroundRefreshInterval else { return }
+        lastBackgroundRefreshAt = Date()
+        refreshSnapshots()
+    }
+
     func refreshSnapshots() {
         // Nothing to refresh until the tab has loaded once (`loadScrobbles` loads every snapshot itself).
         guard !scrobbles.isEmpty else { return }

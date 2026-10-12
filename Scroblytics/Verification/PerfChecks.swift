@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftData
 
 #if DEBUG
@@ -87,6 +88,64 @@ enum PerfChecks {
             check("the popularity rebuild interval is 15 s for a small library", PopularityStore.snapshotRefreshInterval(recordCount: 0) == 15 && PopularityStore.snapshotRefreshInterval(recordCount: 5_000) == 15)
             check("it grows with the record count", PopularityStore.snapshotRefreshInterval(recordCount: 40_000) == 100)
             check("it never exceeds five minutes", PopularityStore.snapshotRefreshInterval(recordCount: 5_000_000) == 300)
+
+            // MARK: Trends: calendar built once per loop, and chart computations that don't pile up
+            let calendar = AppCalendars.listening
+            var sameBuckets = true
+            for n in 0..<2_000 {
+                let date = Date(timeIntervalSince1970: 1_500_000_000 + Double(n) * 86_413)
+                for granularity in [TrendGranularity.day, .week, .month]
+                where TrendEngine.bucketStart(date, granularity: granularity) != TrendEngine.bucketStart(date, granularity: granularity, calendar: calendar) { sameBuckets = false }
+            }
+            check("bucketing with a calendar built once gives the same buckets as building it each time", sameBuckets)
+
+            final class Tally: @unchecked Sendable {
+                let state = OSAllocatedUnfairLock(initialState: (running: 0, peak: 0, finished: 0))
+                func enter() { state.withLock { $0.running += 1; $0.peak = max($0.peak, $0.running) } }
+                func leave() { state.withLock { $0.running -= 1; $0.finished += 1 } }
+            }
+            let tally = Tally()
+            let results = await withTaskGroup(of: Int?.self) { group -> [Int?] in
+                for n in 0..<8 {
+                    group.addTask {
+                        await TrendsComputeGate.shared.run {
+                            tally.enter(); Thread.sleep(forTimeInterval: 0.15); tally.leave()
+                            return n
+                        }
+                    }
+                }
+                var all: [Int?] = []
+                for await result in group { all.append(result) }
+                return all
+            }
+            let observed = tally.state.withLock { $0 }
+            check("at most \(TrendsComputeGate.limit) chart computations run at once, and all eight finish", observed.peak <= TrendsComputeGate.limit && observed.finished == 8 && results.compactMap { $0 }.count == 8, "peak \(observed.peak)")
+            let blocker = Task { _ = await TrendsComputeGate.shared.run { Thread.sleep(forTimeInterval: 0.4); return 0 } }
+            let blocker2 = Task { _ = await TrendsComputeGate.shared.run { Thread.sleep(forTimeInterval: 0.4); return 0 } }
+            try? await Task.sleep(for: .milliseconds(60))
+            let late = Task { await TrendsComputeGate.shared.run { 42 } }
+            late.cancel()
+            let lateResult = await late.value
+            _ = await blocker.value; _ = await blocker2.value
+            check("a computation replaced before its turn is skipped instead of run", lateResult == nil)
+
+            // MARK: Track-length lookups work per distinct track, with the same targets as before
+            let base = Date(timeIntervalSince1970: 1_600_000_000)
+            var plays: [ScrobbleSnapshot] = []
+            for n in 0..<3_000 {
+                plays.append(ScrobbleSnapshot(
+                    artistName: ["Artist A", "artist a", "Artist B", "Artist C"][n % 4], albumName: n % 7 == 0 ? "" : "Album \(n % 5)",
+                    trackName: n % 53 == 0 ? "" : "Track \(n % 40)", imageURL: nil, playedAt: base.addingTimeInterval(Double(n) * 60)
+                ))
+            }
+            var oldTargets: [String: DurationEngine.PendingTrack] = [:]
+            for s in plays {
+                guard !s.trackName.isEmpty else { continue }
+                oldTargets[DurationEngine.cacheKey(artist: s.artistName, track: s.trackName)] = DurationEngine.PendingTrack(
+                    artist: s.artistName, track: s.trackName, album: s.albumName.isEmpty ? nil : s.albumName
+                )
+            }
+            check("the distinct-track targets are exactly what the per-play loop produced", DurationEngine.distinctTargets(plays) == oldTargets, "\(oldTargets.count)")
 
             // MARK: Speed on a big history (a copy), numbers only
             func footprintMB() -> Double {

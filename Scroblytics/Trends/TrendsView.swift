@@ -41,6 +41,8 @@ struct TrendsView: View {
     @State private var needsReload = false
     @State private var latestRequestID = UUID()
     @State private var reloadDebounceTask: Task<Void, Never>?
+    @State private var lastFullReloadAt = Date.distantPast
+    @State private var backgroundDataIsNewer = false
 
     private var rangeOptions: [DateRangeOption] { DateRangePresets.build(oldestScrobbleDate: oldestScrobbleDate) }
     private var currentRange: DateRange { (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).range() }
@@ -178,18 +180,9 @@ struct TrendsView: View {
             querySnapshots = nil
             requestReload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in
-            querySnapshots = nil
-            requestReload()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in
-            querySnapshots = nil
-            requestReload()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
-            querySnapshots = nil
-            requestReload()
-        }
+        .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in backgroundDataMoved() }
+        .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in backgroundDataMoved() }
+        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in backgroundDataMoved() }
     }
 
     private func applyOverviewFocus() {
@@ -204,10 +197,27 @@ struct TrendsView: View {
     // MARK: - Loading
 
     private func loadIfNeeded() async {
+        if isActive, backgroundDataIsNewer, hasLoaded {
+            // The background lookups moved on while this page wasn't showing.
+            querySnapshots = nil
+            needsReload = true
+        }
         guard isActive, !hasLoaded || needsReload else { return }
         needsReload = false
         await reload()
         hasLoaded = true
+    }
+
+    /// While a long backlog of lookups (tags, track lengths, release dates) is worked through, they announce progress every few seconds.
+    /// Recalculating every chart each time kept the page loading and the Mac busy, so the page refreshes for them at most once in
+    /// `backgroundRefreshInterval`, and otherwise when it is next opened.
+    static let backgroundRefreshInterval: TimeInterval = 180
+
+    private func backgroundDataMoved() {
+        backgroundDataIsNewer = true
+        guard isActive, hasLoaded, Date().timeIntervalSince(lastFullReloadAt) >= Self.backgroundRefreshInterval else { return }
+        querySnapshots = nil
+        requestReload()
     }
 
     private func requestReload() {
@@ -223,6 +233,8 @@ struct TrendsView: View {
     private func reload() async {
         let requestID = UUID()
         latestRequestID = requestID
+        lastFullReloadAt = Date()
+        backgroundDataIsNewer = false
         do {
             let all: [ScrobbleSnapshot]
             if let scrobbles { all = scrobbles } else {

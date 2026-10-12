@@ -61,6 +61,7 @@ struct TimelineView: View {
     @State private var isLoading = false
     @State private var hasLoaded = false
     @State private var needsReload = false
+    @State private var lastDurationReloadAt = Date.distantPast
     @State private var latestRequestID = UUID()
     @State private var reloadDebounceTask: Task<Void, Never>?
 
@@ -119,6 +120,8 @@ struct TimelineView: View {
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             guard settings.metric == .timeListened else { return }
+            // Track lengths are announced every few seconds during a long backlog, and each reload reads and ranks the whole history.
+            guard Date().timeIntervalSince(lastDurationReloadAt) >= 180 else { return }
             requestReload()
         }
     }
@@ -214,6 +217,7 @@ struct TimelineView: View {
     private func reload() async {
         let requestID = UUID()
         latestRequestID = requestID
+        lastDurationReloadAt = Date()
         isLoading = true
         defer { if latestRequestID == requestID { isLoading = false } }
         let metric = settings.metric

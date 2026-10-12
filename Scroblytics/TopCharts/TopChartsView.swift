@@ -54,6 +54,7 @@ struct TopChartsView: View {
     @State private var cache: [TopChartsCacheKey: TopChartsCacheValue] = [:]
     @State private var hasLoaded = false
     @State private var needsReload = false
+    @State private var lastDurationRefreshAt = Date.distantPast
     @State private var showsSlowLoadingIndicator = false
     @State private var slowLoadingTask: Task<Void, Never>?
     @State private var showsChartRace = false
@@ -145,6 +146,9 @@ struct TopChartsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             guard settings.metric == .timeListened else { return }
+            // Track lengths arrive every few seconds during a long backlog; re-ranking everything each time kept a big library busy.
+            guard Date().timeIntervalSince(lastDurationRefreshAt) >= 180 else { return }
+            lastDurationRefreshAt = Date()
             cache = cache.filter { $0.key.metric != TopChartsMetric.timeListened.rawValue }
             ChartRaceEngine.invalidateCache()
             requestReload()

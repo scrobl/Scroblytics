@@ -48,7 +48,7 @@ struct TrendsRankBumpChart: View {
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
-        .task(id: ComputeKey(entity: entity, topN: topN, metric: metric, inputs: inputs)) { await recompute() }
+        .task(id: ComputeKey(entity: entity, topN: topN, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
     }
 
     private var controls: some View {
@@ -177,10 +177,10 @@ struct TrendsRankBumpChart: View {
     private func recompute() async {
         isLoading = true
         let (target, n, metric, inputs) = (entity, topN, self.metric, self.inputs)
-        let computed = await Task.detached(priority: .utility) {
+        let computed = await TrendsComputeGate.shared.run {
             TrendsRankBumpEngine.compute(scrobbles: inputs.scrobbles, target: target, topN: n, range: inputs.range, metric: metric, durations: inputs.durations)
-        }.value
-        guard !Task.isCancelled else { return }
+        }
+        guard !Task.isCancelled, let computed else { return }
         hovered = nil
         data = computed
         isLoading = false

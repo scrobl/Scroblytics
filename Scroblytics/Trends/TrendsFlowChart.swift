@@ -79,7 +79,7 @@ struct TrendsFlowChart: View {
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
-        .task(id: ComputeKey(granularity: granularity, gap: gap, minTransitions: minTransitions, inputs: inputs)) { await recompute() }
+        .task(id: ComputeKey(granularity: granularity, gap: gap, minTransitions: minTransitions, inputs: inputs), priority: .utility) { await recompute() }
     }
 
     // MARK: - Controls
@@ -393,13 +393,13 @@ struct TrendsFlowChart: View {
     private func recompute() async {
         isLoading = true
         let (granularity, gap, minTransitions, inputs) = (self.granularity, self.gap, self.minTransitions, self.inputs)
-        let computed = await Task.detached(priority: .utility) {
+        let computed = await TrendsComputeGate.shared.run {
             TrendsFlowEngine.compute(
                 scrobbles: inputs.scrobbles, tags: inputs.snapshots.entityTags, granularity: granularity, gapMinutes: gap, minTransitions: minTransitions,
                 range: inputs.range, compareRange: inputs.compareRange
             )
-        }.value
-        guard !Task.isCancelled else { return }
+        }
+        guard !Task.isCancelled, let computed else { return }
         data = computed
         isLoading = false
     }

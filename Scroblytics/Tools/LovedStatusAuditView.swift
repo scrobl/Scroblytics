@@ -624,7 +624,7 @@ struct LovedStatusAuditView: View {
             let historyEntries: [LovedStatusAuditEngine.Entry]
             if let history { historyEntries = history } else {
                 let container = modelContainer
-                let snapshots = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+                let snapshots = try await ScrobbleHistoryCache.shared.snapshots(container: container)
                 var seen = Set<String>()
                 var distinct: [LovedStatusAuditEngine.Entry] = []
                 for s in snapshots where seen.insert("\(s.artistName)\u{0}\(s.trackName)").inserted {

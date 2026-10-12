@@ -147,6 +147,117 @@ enum PerfChecks {
             }
             check("the distinct-track targets are exactly what the per-play loop produced", DurationEngine.distinctTargets(plays) == oldTargets, "\(oldTargets.count)")
 
+            // MARK: One shared copy of the history
+            final class LoadCounter: @unchecked Sendable {
+                let state = OSAllocatedUnfairLock(initialState: (loads: 0, stampValue: 1))
+                var loads: Int { state.withLock { $0.loads } }
+                func countLoad() { state.withLock { $0.loads += 1 } }
+                func changeHistory() { state.withLock { $0.stampValue += 1 } }
+                var stampValue: Int { state.withLock { $0.stampValue } }
+            }
+            let counter = LoadCounter()
+            let stubDate = Date(timeIntervalSince1970: 1_650_000_000)
+            // Spelling variants of one artist, so merging them is visible.
+            let stubPlays: [ScrobbleSnapshot] = (0..<40).map { n in
+                ScrobbleSnapshot(artistName: n % 3 == 0 ? "the stubs" : "The Stubs", albumName: "A", trackName: "T\(n % 5)", imageURL: nil, playedAt: stubDate.addingTimeInterval(Double(n) * 60))
+            }
+            let stubContainer = container
+            let cache = ScrobbleHistoryCache(
+                loader: { _ in
+                    counter.countLoad()
+                    try await Task.sleep(for: .milliseconds(150))
+                    return (stubPlays, ScrobbleHistoryCache.Stamp(count: counter.stampValue, newest: stubDate))
+                },
+                stampReader: { _ in ScrobbleHistoryCache.Stamp(count: counter.stampValue, newest: stubDate) }
+            )
+            _ = await withTaskGroup(of: Int.self) { group in
+                for _ in 0..<10 { group.addTask { (try? await cache.snapshots(container: stubContainer))?.count ?? -1 } }
+                var all: [Int] = []
+                for await value in group { all.append(value) }
+                return all
+            }
+            check("ten callers asking at once cause one read of the history", counter.loads == 1, "\(counter.loads)")
+            _ = try? await cache.snapshots(container: stubContainer)
+            check("a later request reuses it while nothing has changed", counter.loads == 1, "\(counter.loads)")
+            counter.changeHistory()
+            _ = try? await cache.snapshots(container: stubContainer)
+            check("a changed stamp makes the next request read again", counter.loads == 2, "\(counter.loads)")
+            await cache.invalidate()
+            _ = try? await cache.snapshots(container: stubContainer)
+            check("invalidating forces a fresh read", counter.loads == 3, "\(counter.loads)")
+            let canonicalFromCache = (try? await cache.canonicalSnapshots(container: stubContainer)) ?? []
+            check("the canonical copy equals merging the artist spellings directly", canonicalFromCache.count == stubPlays.count
+                  && Set(canonicalFromCache.map(\.artistName)).count == 1
+                  && zip(canonicalFromCache, QueryIdentity.canonicalizingArtists(stubPlays)).allSatisfy { $0.artistName == $1.artistName && $0.trackName == $1.trackName && $0.playedAt == $1.playedAt })
+            _ = try? await cache.canonicalSnapshots(container: stubContainer)
+            check("asking for the canonical copy again does not read the history again", counter.loads == 3, "\(counter.loads)")
+
+            // The real reader against the scratch store: new plays are seen without anyone invalidating.
+            let realCache = ScrobbleHistoryCache()
+            let beforeCount = (try? await realCache.snapshots(container: container))?.count ?? -1
+            let extra = Scrobble(artistName: "Cache Check Artist", albumName: "Cache Check Album", trackName: "Cache Check Track", imageURL: nil, playedAt: Date().addingTimeInterval(86_400), lastConfirmedAt: Date())
+            context.insert(extra)
+            try? context.save()
+            let withExtra = (try? await realCache.snapshots(container: container))?.count ?? -1
+            context.delete(extra)
+            try? context.save()
+            let afterDelete = (try? await realCache.snapshots(container: container))?.count ?? -1
+            check("the real reader notices an added play and a removed one by itself", beforeCount >= 0 && withExtra == beforeCount + 1 && afterDelete == beforeCount, "\(beforeCount) \(withExtra) \(afterDelete)")
+
+            // MARK: Overview's launch work: the same answers, without re-reading the whole history per card or row
+            var rich: [ScrobbleSnapshot] = []
+            for n in 0..<6_000 {
+                rich.append(ScrobbleSnapshot(
+                    artistName: "Artist \(n % 7)", albumName: n % 5 == 0 ? "" : "Album \(n % 11)", trackName: "Track \(n % 13)", imageURL: nil,
+                    playedAt: Date(timeIntervalSince1970: 1_580_000_000 + Double(n) * 36_007)  // roughly 2.5 years, across daylight-saving changes
+                ))
+            }
+            let trendRange = DateRange(from: Date(timeIntervalSince1970: 1_600_000_000), to: Date(timeIntervalSince1970: 1_650_000_000))
+            func oldFetch(_ artist: String?, _ album: String?, _ track: String?) -> [TrendBucket] {
+                var filtered = rich
+                if let artist { filtered = filtered.filter { $0.artistName == artist } }
+                if let album { filtered = filtered.filter { $0.albumName == album } }
+                if let track { filtered = filtered.filter { $0.trackName == track } }
+                return TrendEngine.series(scrobbles: filtered, range: trendRange, granularity: TrendEngine.autoGranularity(trendRange))
+            }
+            var sameTrends = true
+            for (a, b, t) in [("Artist 3", nil, nil), ("Artist 2", "Album 4", nil), ("Artist 1", nil, "Track 5"), (nil, "Album 3", nil), ("Artist 6", "", "Track 2"), ("Nobody", nil, nil)] as [(String?, String?, String?)] {
+                let fresh = TrendEngine.fetch(scrobbles: rich, artist: a, album: b, track: t, range: trendRange)
+                let old = oldFetch(a, b, t)
+                if fresh.count != old.count || zip(fresh, old).contains(where: { $0.start != $1.start || $0.count != $1.count }) { sameTrends = false }
+            }
+            check("the single-pass trend series equals the filter-by-filter one for every combination", sameTrends)
+            let streakCalendar = AppCalendars.listening
+            var naiveDays: [String: Int] = [:]
+            for s in rich { naiveDays[ListeningStreakEngine.dayKey(s.playedAt, calendar: streakCalendar), default: 0] += 1 }
+            check("plays per day, counted a day at a time, equal the per-play count", ListeningStreakEngine.countsByDay(rich, calendar: streakCalendar) == naiveDays, "\(naiveDays.count) days")
+            let shuffledRich = rich.shuffled()
+            check("and also when the plays are not in order", ListeningStreakEngine.countsByDay(shuffledRich, calendar: streakCalendar) == naiveDays)
+
+            let mrmoNow = Date(timeIntervalSince1970: 1_700_000_000)
+            if let recent = MostRecentMostOftenEngine.compute(scrobbles: rich, recencyWindowDays: 4_000, minPlays: 2, sort: .plays, now: mrmoNow) {
+                var sparklinesMatch = !recent.rows.isEmpty
+                for row in recent.rows {
+                    let range = DateRange(from: row.firstPlayed, to: mrmoNow)
+                    let expected = TrendEngine.series(
+                        scrobbles: rich.filter { $0.artistName == row.artist && $0.trackName == row.title }, range: range, granularity: TrendEngine.autoGranularity(range)
+                    )
+                    if expected.count != row.sparkline.count || zip(expected, row.sparkline).contains(where: { $0.start != $1.start || $0.count != $1.count }) { sparklinesMatch = false }
+                }
+                check("each Most Recent / Most Often sparkline equals reading that track's plays directly (\(recent.rows.count) rows)", sparklinesMatch)
+            } else {
+                check("Most Recent / Most Often produced rows for the check", false)
+            }
+
+            let placeholder = "2a96cbd8b46e442fc41c2b86b821562f"
+            let probes = [
+                "https://lastfm.example/i/u/300x300/\(placeholder).png", "\(placeholder)", "x\(placeholder)", "\(placeholder)x", "", "2a96cbd8b46e442fc41c2b86b821562",
+                "https://lastfm.example/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562e.png", "ünï\(placeholder)çödé", "\(placeholder.prefix(20))\(placeholder)",
+                "https://img.example/cover.jpg", String(repeating: "2a96cbd8", count: 10), "😀\(placeholder)😀",
+            ]
+            check("the fast placeholder-picture test agrees with String.contains on every probe",
+                  probes.allSatisfy { TextNormalization.isLastfmPlaceholderImage($0) == $0.contains(placeholder) } && !TextNormalization.isLastfmPlaceholderImage(nil))
+
             // MARK: Speed on a big history (a copy), numbers only
             func footprintMB() -> Double {
                 var info = task_vm_info_data_t()

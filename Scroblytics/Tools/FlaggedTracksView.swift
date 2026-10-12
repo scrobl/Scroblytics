@@ -134,7 +134,7 @@ struct FlaggedTracksView: View {
         isLoading = true
         await flaggedTracksStore.load(container: modelContainer, force: true)
         do {
-            let scrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: modelContainer).fetchSortedSnapshots() }
+            let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
             let flags = flaggedTracksStore.snapshots
             let computedRows = await Task.detached(priority: .utility) {
                 FlaggedTracksEngine.rows(flags: flags, scrobbles: scrobbles)

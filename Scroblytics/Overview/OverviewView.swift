@@ -241,10 +241,9 @@ private struct OverviewDataSnapshot: Sendable {
 
 @ModelActor
 private actor OverviewDataReader {
-    func fetchSnapshot() throws -> OverviewDataSnapshot {
-        let scrobbles = QueryIdentity.canonicalizingArtists(try modelContext.fetch(
-            FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])
-        ).map(\.snapshot))
+    func fetchSnapshot() async throws -> OverviewDataSnapshot {
+        // The history is read once for every page (`ScrobbleHistoryCache`), already with artist spellings merged.
+        let scrobbles = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: modelContainer)
         let lovedSet = Set(try modelContext.fetch(FetchDescriptor<LovedTrackEntry>()).map(\.cacheKey))
         var imageLookup: [String: String] = [:]
 

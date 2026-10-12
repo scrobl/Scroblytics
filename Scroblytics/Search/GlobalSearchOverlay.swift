@@ -149,7 +149,7 @@ struct GlobalSearchOverlay: View {
         let container = modelContext.container
         let imageLookup = (try? ImageResolutionEngine.imageLookup(context: modelContext)) ?? [:]
         let snapshots = try? await offMain {
-            try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots()
+            try await ScrobbleHistoryCache.shared.snapshots(container: container)
         }
         if let snapshots {
             candidates = await Task.detached(priority: .userInitiated) {

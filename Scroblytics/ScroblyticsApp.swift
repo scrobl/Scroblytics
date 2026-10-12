@@ -201,6 +201,7 @@ struct ScroblyticsApp: App {
         #endif
         // The small activity log behind Help › Report a Problem. It stays on this Mac.
         Task { @MainActor in ActivityEvents.start() }
+        Task { @MainActor in ScrobbleHistoryCache.observeHistoryChanges() }
     }
 
     var body: some Scene {

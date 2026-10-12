@@ -20,7 +20,7 @@ enum AppleMusicPlaylistBuilder {
         perEntityLimit: Int = 50,
         totalLimit: Int = 1_000
     ) async throws -> [AppleMusicPlaylistTrack] {
-        let scrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+        let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
         let durations = DurationEngine.loadSnapshot(context: context).secondsLookup
         return await Task.detached(priority: .userInitiated) {
             let inRange = scrobbles.filter { $0.playedAt >= range.from && $0.playedAt <= range.to }

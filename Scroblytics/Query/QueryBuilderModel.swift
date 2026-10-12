@@ -218,7 +218,7 @@ final class QueryBuilderModel {
         do {
             let container = container
             scrobbles = try await offMain {
-                QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+                try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
             }
             oldestScrobbleDate = scrobbles.first?.playedAt
         } catch {

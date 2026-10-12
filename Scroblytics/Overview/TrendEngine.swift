@@ -52,12 +52,20 @@ enum TrendEngine {
     /// source walking `cursor` from the range's first bucket to its last
     /// regardless of which buckets actually have scrobbles.
     static func series(scrobbles: [ScrobbleSnapshot], range: DateRange, granularity: TrendGranularity) -> [TrendBucket] {
+        series(playedAt: scrobbles.lazy.map(\.playedAt), range: range, granularity: granularity)
+    }
+
+    /// The same series from just the play times.
+    static func series(playedAt times: some Sequence<Date>, range: DateRange, granularity: TrendGranularity) -> [TrendBucket] {
         var counts: [Date: Int] = [:]
         let calendar = AppCalendars.listening
-        for s in scrobbles where s.playedAt >= range.from && s.playedAt <= range.to {
-            let bucket = bucketStart(s.playedAt, granularity: granularity, calendar: calendar)
-            counts[bucket, default: 0] += 1
+        for time in times where time >= range.from && time <= range.to {
+            counts[bucketStart(time, granularity: granularity, calendar: calendar), default: 0] += 1
         }
+        return denseBuckets(counts, range: range, granularity: granularity)
+    }
+
+    private static func denseBuckets(_ counts: [Date: Int], range: DateRange, granularity: TrendGranularity) -> [TrendBucket] {
         var result: [TrendBucket] = []
         var cursor = bucketStart(range.from, granularity: granularity)
         let end = bucketStart(range.to, granularity: granularity)
@@ -72,10 +80,16 @@ enum TrendEngine {
     /// artist-only for Top artist, artist+album for Top album, artist+track
     /// (no album) for Top track.
     static func fetch(scrobbles all: [ScrobbleSnapshot], artist: String?, album: String?, track: String?, range: DateRange) -> [TrendBucket] {
-        var filtered = all
-        if let artist { filtered = filtered.filter { $0.artistName == artist } }
-        if let album { filtered = filtered.filter { $0.albumName == album } }
-        if let track { filtered = filtered.filter { $0.trackName == track } }
-        return series(scrobbles: filtered, range: range, granularity: autoGranularity(range))
+        // One pass, range first: this used to copy the whole history once per filter, for every card and every row that asked.
+        let granularity = autoGranularity(range)
+        let calendar = AppCalendars.listening
+        var counts: [Date: Int] = [:]
+        for s in all where s.playedAt >= range.from && s.playedAt <= range.to {
+            if let artist, s.artistName != artist { continue }
+            if let album, s.albumName != album { continue }
+            if let track, s.trackName != track { continue }
+            counts[bucketStart(s.playedAt, granularity: granularity, calendar: calendar), default: 0] += 1
+        }
+        return denseBuckets(counts, range: range, granularity: granularity)
     }
 }

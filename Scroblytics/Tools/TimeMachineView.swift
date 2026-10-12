@@ -426,7 +426,7 @@ struct TimeMachineView: View {
             } else {
                 let container = modelContainer
                 let fetched = try await offMain {
-                    try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots()
+                    try await ScrobbleHistoryCache.shared.snapshots(container: container)
                 }
                 all = QueryIdentity.canonicalizingArtists(fetched)
                 scrobbles = all

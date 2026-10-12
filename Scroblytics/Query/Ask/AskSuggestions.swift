@@ -332,7 +332,7 @@ final class AskSuggestionStore {
         defer { refreshing = false }
         isStale = false
         guard let canonical = try? await offMain({
-            QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+            try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
         }) else { return }
         let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
         let tagCounts = loaded.entityTags.vocabulary

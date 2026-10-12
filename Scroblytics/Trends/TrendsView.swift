@@ -239,7 +239,7 @@ struct TrendsView: View {
             let all: [ScrobbleSnapshot]
             if let scrobbles { all = scrobbles } else {
                 let container = modelContainer
-                all = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+                all = try await ScrobbleHistoryCache.shared.snapshots(container: container)
                 guard latestRequestID == requestID else { return }
                 scrobbles = all
                 oldestScrobbleDate = all.first?.playedAt
@@ -258,12 +258,16 @@ struct TrendsView: View {
                 querySnapshots = snapshots
                 dataVersion += 1
             }
-            let cachedCanonical = canonicalScrobbles
-            let (anyPlays, canonical) = await Task.detached(priority: .utility) {
-                let anyPlays = all.contains { $0.playedAt >= range.from && $0.playedAt <= range.to }
+            // Track identity here is the same one Query uses (artist spellings merged) — every chart below reads it. It is worked
+            // out once for the whole app (`ScrobbleHistoryCache`), not again for this page.
+            let canonical: [ScrobbleSnapshot]
+            if let cachedCanonical = canonicalScrobbles { canonical = cachedCanonical } else {
+                canonical = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+                guard latestRequestID == requestID else { return }
+            }
+            let anyPlays = await Task.detached(priority: .utility) {
+                all.contains { $0.playedAt >= range.from && $0.playedAt <= range.to }
                     || (compareRange.map { c in all.contains { $0.playedAt >= c.from && $0.playedAt <= c.to } } ?? false)
-                // Track identity here is the same one Query uses (artist spellings merged) — every chart below reads it.
-                return (anyPlays, cachedCanonical ?? QueryIdentity.canonicalizingArtists(all))
             }.value
             canonicalScrobbles = canonical
             volumeInputs = TrendsVolumeChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)

@@ -163,7 +163,7 @@ enum ReverbEngine {
         let now = Date()
         // One background read of the library, shared with the similar-sounds matching below.
         let container = context.container
-        let allScrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+        let allScrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
 
         // Auto-seed: distinct artists played in the last 14 days, capped to
         // the top 15 by play count within that window. First-encountered

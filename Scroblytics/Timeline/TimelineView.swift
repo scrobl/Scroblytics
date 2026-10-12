@@ -223,7 +223,7 @@ struct TimelineView: View {
         let metric = settings.metric
         do {
             let container = modelContainer
-            let scrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+            let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
             // Both helpers are main-actor isolated, so they run here rather than
             // inside the background reader.
             let snapshot = TimelineDataSnapshot(

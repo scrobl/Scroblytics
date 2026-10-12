@@ -274,7 +274,7 @@ struct ContentView: View {
         .environment(flaggedTracksStore)
         .toolRuntime(
             gapBadges: libraryGapBadgeStore, tagWriter: tagWriteRunner, work: backgroundWork, container: modelContainer,
-            askRouter: askSimilarRouter, askSuggestions: askSuggestions, onAskSimilar: { showingAsk = false; selectedTab = .tools },
+            askRouter: askSimilarRouter, askSuggestions: askSuggestions, nowPlaying: nowPlayingStore, onAskSimilar: { showingAsk = false; selectedTab = .tools },
             onAccountConnected: { startSync(full: false) },
             onStopRequested: { stopSync() }
         )

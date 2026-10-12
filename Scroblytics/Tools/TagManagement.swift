@@ -332,11 +332,12 @@ extension View {
     /// must outlive the Tag Management page). `ContentView`'s modifier chain is at the compiler's limit.
     func toolRuntime(
         gapBadges: LibraryGapBadgeStore, tagWriter: TagWriteRunner, work: BackgroundWorkStore, container: ModelContainer,
-        askRouter: AskSimilarRouter, askSuggestions: AskSuggestionStore, onAskSimilar: @escaping () -> Void,
+        askRouter: AskSimilarRouter, askSuggestions: AskSuggestionStore, nowPlaying: NowPlayingStore, onAskSimilar: @escaping () -> Void,
         onAccountConnected: @escaping () -> Void, onStopRequested: @escaping () -> Void
     ) -> some View {
         libraryGapBadges(gapBadges, container: container)
             .connectivityPrompt()
+            .environment(nowPlaying)
             .environment(tagWriter)
             .environment(askRouter)
             .environment(askSuggestions)

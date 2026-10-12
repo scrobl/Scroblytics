@@ -9,6 +9,10 @@ struct RabbitHoleView: View {
         var perAlbum = 0
         var knobs = RabbitHoleKnobs()
         var memory = RabbitHoleMemory()
+        var walkRule = RabbitHoleWalkRule.balanced
+        var walkLength = RabbitHoleWalkLength.minutes60
+        /// The steps the last walk added, so it can be taken off again.
+        var lastWalk: [UUID] = []
 
         init() {}
 
@@ -21,6 +25,9 @@ struct RabbitHoleView: View {
             perAlbum = try c.decodeIfPresent(Int.self, forKey: .perAlbum) ?? 0
             knobs = try c.decodeIfPresent(RabbitHoleKnobs.self, forKey: .knobs) ?? RabbitHoleKnobs()
             memory = try c.decodeIfPresent(RabbitHoleMemory.self, forKey: .memory) ?? RabbitHoleMemory()
+            walkRule = try c.decodeIfPresent(RabbitHoleWalkRule.self, forKey: .walkRule) ?? .balanced
+            walkLength = try c.decodeIfPresent(RabbitHoleWalkLength.self, forKey: .walkLength) ?? .minutes60
+            lastWalk = try c.decodeIfPresent([UUID].self, forKey: .lastWalk) ?? []
         }
     }
 
@@ -36,6 +43,12 @@ struct RabbitHoleView: View {
     @State private var scrobbles: [ScrobbleSnapshot]?
     @State private var library: RabbitHoleLibrary?
     @State private var poolSize: Int?
+    @Environment(NowPlayingStore.self) private var nowPlayingStore: NowPlayingStore?
+    @State private var isWalking = false
+    @State private var isStarting = false
+    @State private var walkProgress: RabbitHoleWalk.Progress?
+    @State private var walkNote: String?
+    @State private var walkTask: Task<Void, Never>?
     @State private var snapshots = QuerySnapshots()
     @State private var tagVocabulary: [QueryTagSuggestion] = []
     @State private var isSearching = false
@@ -91,6 +104,7 @@ struct RabbitHoleView: View {
                     emptyState
                 } else {
                     filters
+                    walkPanel
                     currentStep
                     treeView
                     candidatesView
@@ -140,9 +154,10 @@ struct RabbitHoleView: View {
         .confirmationDialog("Start over?", isPresented: $showingStartOverConfirmation, titleVisibility: .visible) {
             Button("Start Over", role: .destructive) {
                 options.tree = .empty
+                options.lastWalk = []
                 totalBeforeConditions = nil
                 errorMessage = nil
-                isSearching = true
+                walkNote = nil
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -164,6 +179,7 @@ struct RabbitHoleView: View {
                 isSearching = true
             }
             .buttonStyle(.borderedProminent)
+            startMenu
         } else {
             if path.count > 1 {
                 AppleMusicPlaylistExportButton(defaultPlaylistName: "Rabbit Hole") {
@@ -192,10 +208,16 @@ struct RabbitHoleView: View {
                 systemImage: "point.3.connected.trianglepath.dotted",
                 description: Text("Choose a track from your library and follow where Last.fm’s recommendations lead.")
             )
-            Button("Pick a Starting Track", systemImage: "plus") {
-                isSearching = true
+            HStack(spacing: 10) {
+                Button("Pick a Starting Track", systemImage: "plus") {
+                    isSearching = true
+                }
+                .buttonStyle(.borderedProminent)
+                startMenu
             }
-            .buttonStyle(.borderedProminent)
+            if let errorMessage {
+                Text(errorMessage).font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 280)
     }
@@ -451,6 +473,195 @@ struct RabbitHoleView: View {
         }
     }
 
+    // MARK: - Starting without searching
+
+    private var startMenu: some View {
+        Menu {
+            ForEach(RabbitHoleStart.allCases) { kind in
+                Button(kind.title, systemImage: kind.systemImage) { start(from: kind) }
+            }
+        } label: {
+            Label(isStarting ? "Finding a track…" : "Start from…", systemImage: "sparkles")
+        }
+        .menuIndicator(.visible)
+        .fixedSize()
+        .disabled(isStarting || library == nil)
+        .help("Start from what's playing, a favourite you've left alone, one of your top tracks, or a surprise.")
+    }
+
+    private func start(from kind: RabbitHoleStart) {
+        guard let library, !isStarting else { return }
+        errorMessage = nil
+        isStarting = true
+        Task {
+            defer { isStarting = false }
+            if ConnectivityGate.isOffline { errorMessage = "Offline mode is on. Go online to start from a suggestion."; return }
+            guard let credentials = LastfmCredentialsStore.load() else { errorMessage = "Connect Last.fm in Settings to start a Rabbit Hole."; return }
+            var rng = SystemRandomNumberGenerator()
+            let playing = nowPlayingStore?.track.map { (artist: $0.artist, track: $0.track) }
+            let shortlist = RabbitHoleSeeds.shortlist(kind, library: library, lovedKeys: snapshots.lovedKeys, nowPlaying: playing, using: &rng)
+            guard !shortlist.isEmpty else {
+                errorMessage = kind == .nowPlaying
+                    ? "Nothing is playing right now, or it isn't a track you've played before."
+                    : "No suitable track was found this way. Try another, or search for one."
+                return
+            }
+            let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
+            let provider = LastfmSimilarityProvider(client: client, store: SimilarityCacheStore(modelContainer: modelContainer))
+            let tags = snapshots.entityTags, bpm = snapshots.bpm, loved = snapshots.lovedKeys
+            let index = await RabbitHoleSeeds.firstViable(shortlist, minimum: kind == .nowPlaying ? 1 : RabbitHoleSeeds.minimumPool) { candidate in
+                let track = library.tracks[candidate]
+                let pool = try? await RabbitHoleCandidates.build(
+                    seeds: [RabbitHoleCandidates.Seed(artist: track.artist, track: track.name, weight: 1)], excluding: [], library: library,
+                    tags: tags, bpm: bpm, lovedKeys: loved, provider: provider
+                )
+                return pool?.count ?? 0
+            }
+            guard let index else {
+                errorMessage = "The tracks tried had too few similar tracks in your library. Try again, or search for one."
+                return
+            }
+            let track = library.tracks[index]
+            beginPath(with: RabbitHoleTrack(
+                artist: track.artist, track: track.name, album: track.album, imageURL: track.imageURL, playCount: track.plays,
+                lastPlayed: track.lastPlayed, matchScore: 0, source: kind.title
+            ))
+        }
+    }
+
+    // MARK: - Take steps for me
+
+    private var walkPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Take steps for me").font(AppTypography.sectionTitle)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { walkControls }
+                VStack(alignment: .leading, spacing: 8) { walkControls }
+            }
+            if let walkProgress, isWalking {
+                Text("Step \(walkProgress.tracksAdded) · \(Self.minutesText(walkProgress.seconds)) so far\(walkProgress.approximate ? " (about)" : "")")
+                    .font(AppTypography.compactMetadata)
+                    .foregroundStyle(.secondary)
+            } else if let walkNote {
+                Text(walkNote).font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            } else {
+                Text("Adds tracks to the path for you, one suggestion at a time, until the length is reached. Every step stays in the tree, so you can step back, and the whole path can be exported as a playlist.")
+                    .font(AppTypography.compactMetadata)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var walkControls: some View {
+        Picker("Length", selection: $options.walkLength) {
+            ForEach(RabbitHoleWalkLength.allCases) { Text($0.title).tag($0) }
+        }
+        .fixedSize()
+        .disabled(isWalking)
+        Picker("Choose", selection: $options.walkRule) {
+            ForEach(RabbitHoleWalkRule.allCases) { Text($0.title).tag($0) }
+        }
+        .fixedSize()
+        .disabled(isWalking)
+        .help("How each step picks one of the three: the closest match, a balanced choice, a wandering one, or the one you've played least recently.")
+        if isWalking {
+            Button("Stop", systemImage: "stop.circle") { walkTask?.cancel() }
+        } else {
+            Button("Take Steps", systemImage: "figure.walk") { startWalk() }
+                .buttonStyle(.borderedProminent)
+                .disabled(isGenerating || currentNode == nil)
+            if !options.lastWalk.isEmpty {
+                Button("Remove Last Walk", systemImage: "arrow.uturn.backward.circle") { removeLastWalk() }
+                    .help("Takes the steps the last walk added off the path again.")
+            }
+        }
+    }
+
+    private static func minutesText(_ seconds: Double) -> String {
+        let minutes = Int((seconds / 60).rounded())
+        return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
+    }
+
+    private func startWalk() {
+        guard !isWalking, !isGenerating, walkTask == nil else { return }
+        errorMessage = nil
+        walkNote = nil
+        walkProgress = RabbitHoleWalk.Progress()
+        isWalking = true
+        walkTask = Task { await performWalk() }
+    }
+
+    private func removeLastWalk() {
+        options.tree = RabbitHoleWalk.remove(walk: options.lastWalk, from: options.tree)
+        options.lastWalk = []
+        walkNote = "The last walk was taken off the path."
+        totalBeforeConditions = nil
+        invalidateAndRegenerate()
+        requestScrollToBottom()
+    }
+
+    private func performWalk() async {
+        defer {
+            isWalking = false
+            walkTask = nil
+        }
+        if ConnectivityGate.isOffline { errorMessage = "Offline mode is on. Go online to take steps."; return }
+        guard let credentials = LastfmCredentialsStore.load() else { errorMessage = "Connect Last.fm in Settings to take steps."; return }
+        await loadLibrary()
+        guard let library, let scrobbles else { return }
+        let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
+        let provider = LastfmSimilarityProvider(client: client, store: SimilarityCacheStore(modelContainer: modelContainer))
+        let snapshots = snapshots
+        let knobs = options.walkRule.knobs(base: options.knobs)
+        let groups = options.groups, perArtist = options.perArtist, perAlbum = options.perAlbum
+        var rng = SystemRandomNumberGenerator()
+        do {
+            let result = try await RabbitHoleWalk.run(
+                length: options.walkLength, rule: options.walkRule, tree: options.tree, memory: options.memory,
+                candidatesFor: { tree, node, memory in
+                    try await RabbitHoleEngine.generate(
+                        from: node.track, path: tree.path(to: node.id), groups: groups, perArtist: perArtist, perAlbum: perAlbum,
+                        knobs: knobs, memory: memory, library: library, scrobbles: scrobbles, snapshots: snapshots, provider: provider
+                    ).candidates
+                },
+                seconds: { track in
+                    switch snapshots.durations.resolution(forKey: DurationEngine.cacheKey(artist: track.artist, track: track.track)) {
+                    case .seconds(let value): Double(value)
+                    default: nil
+                    }
+                },
+                onProgress: { tree, progress in
+                    options.tree = tree
+                    walkProgress = progress
+                    // Keep the newest steps in view while the walk goes on.
+                    scrollToBottomRequest += 1
+                },
+                using: &rng
+            )
+            options.tree = result.tree
+            options.memory = result.memory
+            options.lastWalk = result.addedNodeIDs
+            let about = result.progress.approximate ? "about " : ""
+            let summary = "\(result.progress.tracksAdded) \(result.progress.tracksAdded == 1 ? "track" : "tracks") added, \(about)\(Self.minutesText(result.progress.seconds))."
+            switch result.ending {
+            case .reachedLength: walkNote = "Walk finished: \(summary)"
+            case .stoppedByUser: walkNote = "Walk stopped: \(summary)"
+            case .stepLimit: walkNote = "Walk stopped at the limit of \(RabbitHoleWalk.maxSteps) steps: \(summary)"
+            case .deadEnd: walkNote = "Walk stopped: it ran out of new suggestions. \(summary)"
+            case .failed(let message): walkNote = "Walk stopped: \(message) \(summary)"
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        // The last step has no suggestions yet; offer them with the page's own settings, and show them.
+        if currentNode?.candidates == nil { await generateCandidates() }
+        requestScrollToBottom()
+    }
+
     /// Why the three suggestions were offered, in plain words, and how many options remain behind them.
     @ViewBuilder
     private var whyThese: some View {
@@ -532,22 +743,22 @@ struct RabbitHoleView: View {
             source: options.tree.rootID == nil ? "Starting track" : "Added manually"
         )
         if options.tree.rootID == nil {
-            let id = UUID()
-            options.tree = RabbitHoleTree(
-                rootID: id,
-                nodes: [id: RabbitHoleNode(
-                    id: id,
-                    track: selected,
-                    parentID: nil,
-                    candidates: nil,
-                    childIDs: []
-                )],
-                currentID: id
-            )
-            Task { await generateCandidates() }
+            beginPath(with: selected)
         } else {
             choose(selected, from: options.tree.currentID)
         }
+    }
+
+    private func beginPath(with track: RabbitHoleTrack) {
+        let id = UUID()
+        options.tree = RabbitHoleTree(
+            rootID: id,
+            nodes: [id: RabbitHoleNode(id: id, track: track, parentID: nil, candidates: nil, childIDs: [])],
+            currentID: id
+        )
+        options.lastWalk = []
+        walkNote = nil
+        Task { await generateCandidates() }
     }
 
     private func choose(_ track: RabbitHoleTrack, from requestedParentID: UUID? = nil) {

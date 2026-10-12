@@ -115,6 +115,7 @@ struct ScroblyticsApp: App {
             AlbumTracklistCacheEntry.self, ReverbPoolCache.self, AlbumTurnoverCompletionCache.self,
             TrackDurationCacheEntry.self,
             TrackBPMCacheEntry.self,
+            SimilarityLookupCacheEntry.self,
             LovedTrackEntry.self,
             EntityCommunityTagCacheEntry.self,
             UserEntityTagCacheEntry.self,
@@ -169,6 +170,7 @@ struct ScroblyticsApp: App {
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
         PerfChecks.runHeadlessIfRequested(container: modelContainer)
+        RabbitHoleChecks.runHeadlessIfRequested(container: modelContainer)
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()
         Task { @MainActor in

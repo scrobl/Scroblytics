@@ -73,7 +73,19 @@ extension HelpContent {
             title: "Rabbit Hole",
             summary: "Follow recommendations from your own library, step by step.",
             blocks: [
-                .paragraph("Pick a starting track. At each step you choose one of **3 recommended tracks** from your library (the Similar Sounds machinery, seeded by the current track), never repeating tracks already on your path. Optional conditions and per-artist/album caps affect the next three recommendations. **Back One Step**, **New Suggestions**, **Add Track** and **Start Over** control the path. Only the current path is exported to an Apple Music playlist."),
+                .paragraph("Pick a starting track. At each step you choose one of **3 recommended tracks** from your library, never repeating tracks already on your path. Only tracks you have played are ever suggested. **Back One Step**, **New Suggestions**, **Add Track** and **Start Over** control the path. Only the current path is exported to an Apple Music playlist."),
+                .heading("Where the suggestions come from"),
+                .paragraph("Each step gathers candidates from several places, merges them, and then picks three. The reason for each suggestion is shown under **Why these three** and on the card."),
+                .bullets([
+                    "**Last.fm similar tracks** to the current track, and, with less weight, to the two steps before it, so the choices follow where you have been.",
+                    "**Similar artists**, when Last.fm knows few similar tracks for this one (many tracks have none): a few of your most-played tracks by each similar artist.",
+                    "**Two steps away**: when the pool is still small, the tracks similar to the best few suggestions.",
+                    "**Shared tags**: tracks by artists whose Last.fm tags overlap this track’s, where a rare tag counts for more than a common one such as “indie”. This uses data already on your Mac.",
+                    "**You play it next**: tracks you have often played right after this one (within ten minutes, at least twice, not just the next track of an album). This comes only from your own history.",
+                    "Small signals: a close tempo (where tempos are known), loved tracks, and favourites you have not played for a year.",
+                ]),
+                .heading("Steering and variety"),
+                .paragraph("**Lean toward** favours tracks you have not played for a long time (forgotten) or the loved and often-played ones (familiar). **Variety** goes from *stay close* (the best matches) to *wander* (weaker matches get a real chance). The three suggestions are chosen to differ in artist and genre, and **Avoid recent repeats** makes tracks you were shown or chose in the last week less likely to return. Your **conditions** and **per-artist/album limits** still apply first, and the page says how many more options are behind the three. **New Suggestions** reuses what Last.fm already said (kept on your Mac for 30 days), so it is quick."),
             ]
         ),
         HelpArticle(

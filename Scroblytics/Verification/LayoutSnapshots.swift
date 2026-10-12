@@ -17,6 +17,10 @@ enum LayoutSnapshots {
             snapshotUpdates(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_RABBITHOLE"] {
+            snapshotRabbitHole(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_DIAGNOSTICS"] {
             snapshotDiagnostics(into: folder, container: container)
             return
@@ -116,6 +120,59 @@ enum LayoutSnapshots {
                     await render(UpdateStripLine(current: AppVersion("0.9.0")!, release: release, onView: {}, onSkip: {}, onDismiss: {}), width: width, scheme: scheme, name: "strip")
                 }
                 await render(Form { UpdateSettingsSection() }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings")
+            }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_RABBITHOLE=<folder>`: the Rabbit Hole page with a made-up path, its suggestions and their reasons,
+    /// the new controls and the "why these three" list, at a few widths (scratch store only).
+    @MainActor
+    private static func snapshotRabbitHole(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            func track(_ name: String, _ artist: String, score: Int = 0, reasons: [RabbitHoleReason]? = nil) -> RabbitHoleTrack {
+                RabbitHoleTrack(artist: artist, track: name, album: "Album", imageURL: nil, playCount: 12, lastPlayed: nil, matchScore: score, source: "Last.fm similar", reasons: reasons)
+            }
+            let rootID = UUID(), childID = UUID()
+            let suggestions = [
+                track("Apocalypse", "Cigarettes After Sex", score: 61, reasons: [RabbitHoleReason(kind: .playedNext, text: "You often play it right after Seed Song (4 times)"), RabbitHoleReason(kind: .sharedTags, text: "Shares tags: dream pop, slowcore"), RabbitHoleReason(kind: .loved, text: "One of your loved tracks")]),
+                track("Alison", "Slowdive", score: 70, reasons: [RabbitHoleReason(kind: .similar, text: "Last.fm: similar to Second Song"), RabbitHoleReason(kind: .forgotten, text: "A favourite you haven't played for 2 years")]),
+                track("Nothing Sweet", "The Sundays", score: 55, reasons: [RabbitHoleReason(kind: .similarArtist, text: "By The Sundays, who Last.fm calls similar to Artist B")]),
+            ]
+            var options = RabbitHoleView.Options()
+            options.tree = RabbitHoleTree(
+                rootID: rootID,
+                nodes: [
+                    rootID: RabbitHoleNode(id: rootID, track: track("Seed Song", "Artist A"), parentID: nil, candidates: nil, childIDs: [childID]),
+                    childID: RabbitHoleNode(id: childID, track: track("Second Song", "Artist B", score: 80), parentID: rootID, candidates: suggestions, childIDs: []),
+                ],
+                currentID: childID
+            )
+            ToolFilterSettingsStore.save(options, toolId: "rabbitHole", context: container.mainContext)
+            for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                for width in [1100, 760] as [CGFloat] {
+                    let view = NavigationStack {
+                        RabbitHoleView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools))
+                    }
+                    .environment(LovedTracksStore())
+                    .environment(FlaggedTracksStore())
+                    .environment(PopularityStore())
+                    .environment(TagStore())
+                    .environment(LibraryGapBadgeStore())
+                    .modelContainer(container)
+                    .environment(\.colorScheme, scheme == "dark" ? .dark : .light)
+                    let host = NSHostingView(rootView: view.frame(width: width, height: 1250))
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 1250), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: appearance)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: width, height: 1250))
+                    for _ in 0..<10 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "rabbithole-\(scheme)-\(Int(width)).png"))
+                    }
+                }
             }
             exit(0)
         }

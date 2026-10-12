@@ -9,6 +9,8 @@ struct RabbitHoleTrack: Codable, Hashable, Identifiable, Sendable {
     let lastPlayed: Date?
     let matchScore: Int
     let source: String
+    /// Why it is offered, for the "why this track?" lines. Absent in paths saved before they existed.
+    var reasons: [RabbitHoleReason]? = nil
 
     var id: String {
         TextNormalization.lovedKey(artist: artist, track: track)
@@ -43,12 +45,17 @@ struct RabbitHoleTree: Codable, Equatable, Sendable {
 
 struct RabbitHoleGeneration: Sendable {
     let candidates: [RabbitHoleTrack]
+    /// How many tracks could be offered before the conditions were applied (path tracks already left out).
     let totalBeforeConditions: Int
+    /// How many were still allowed after the conditions and the per-artist/album limits' own reach: the pool the three were drawn from.
+    let poolSize: Int
 }
 
 @MainActor
 enum RabbitHoleEngine {
     static let candidatesPerStep = 3
+    /// The step's own track counts fully; the two before it count for less.
+    static let seedWeights: [Double] = [1, 0.5, 0.25]
 
     static func generate(
         from seed: RabbitHoleTrack,
@@ -56,84 +63,116 @@ enum RabbitHoleEngine {
         groups: [[QueryCondition]],
         perArtist: Int,
         perAlbum: Int,
+        knobs: RabbitHoleKnobs = RabbitHoleKnobs(),
+        memory: RabbitHoleMemory = RabbitHoleMemory(),
+        library: RabbitHoleLibrary,
         scrobbles: [ScrobbleSnapshot],
         snapshots: QuerySnapshots,
-        client: LastfmAPIClient
+        provider: any RabbitHoleSimilarityProviding
     ) async throws -> RabbitHoleGeneration {
-        let similarSeed = SimilarSeed(
-            kind: .track,
-            artist: seed.artist,
-            album: seed.album,
-            track: seed.track
+        var rng = SystemRandomNumberGenerator()
+        return try await generate(
+            from: seed, path: path, groups: groups, perArtist: perArtist, perAlbum: perAlbum, knobs: knobs, memory: memory,
+            library: library, scrobbles: scrobbles, snapshots: snapshots, provider: provider, now: Date(), using: &rng
         )
-        let pool = try await SimilarSoundsTool.generate(
-            seeds: [similarSeed],
-            scrobbles: scrobbles,
-            client: client
-        )
-        let pathKeys = Set(path.map(\.track.id))
-        let availableBeforeConditions = pool.candidates.filter {
-            !pathKeys.contains(TextNormalization.lovedKey(artist: $0.artist, track: $0.track))
-        }
+    }
 
-        let evaluated = try SimilarSoundsTool.evaluate(
-            pool: pool,
-            groups: groups,
-            columns: SimilarSoundsTool.defaultColumns,
-            scrobbles: scrobbles,
-            snapshots: snapshots,
-            arrangement: SimilarSoundsArrangement(
-                sort: .shuffled,
-                shuffleSeed: UInt64.random(in: 1...UInt64.max),
-                songLimit: nil,
-                perArtist: nil,
-                perAlbum: nil
+    static func generate(
+        from seed: RabbitHoleTrack,
+        path: [RabbitHoleNode],
+        groups: [[QueryCondition]],
+        perArtist: Int,
+        perAlbum: Int,
+        knobs: RabbitHoleKnobs,
+        memory: RabbitHoleMemory,
+        library: RabbitHoleLibrary,
+        scrobbles: [ScrobbleSnapshot],
+        snapshots: QuerySnapshots,
+        provider: any RabbitHoleSimilarityProviding,
+        now: Date,
+        using rng: inout some RandomNumberGenerator
+    ) async throws -> RabbitHoleGeneration {
+        // The step's track first, then the ones before it on this path.
+        var seedTracks = [seed]
+        seedTracks += path.reversed().map(\.track).filter { $0.id != seed.id }
+        let seeds = zip(seedTracks, seedWeights).map {
+            RabbitHoleCandidates.Seed(artist: $0.artist, track: $0.track, weight: $1)
+        }
+        let pathIndexes = Set(path.compactMap { library.index(artist: $0.track.artist, track: $0.track.track) })
+        let pathKeys = Set(path.map(\.track.id))
+
+        let scored = try await RabbitHoleCandidates.build(
+            seeds: seeds, excluding: pathIndexes, library: library, tags: snapshots.entityTags, bpm: snapshots.bpm,
+            lovedKeys: snapshots.lovedKeys, provider: provider, now: now
+        ).filter { !pathKeys.contains(library.tracks[$0.trackIndex].key) }
+
+        // The person's own conditions, evaluated by the same query engine as everywhere else.
+        let recommended = scored.map { candidate -> RecommendedCandidate in
+            let track = library.tracks[candidate.trackIndex]
+            let labels = candidate.reasons.map { Self.label(for: $0.kind) }
+            return RecommendedCandidate(
+                track: track.name, artist: track.artist, album: track.album, totalPlaycount: track.plays, lastPlayed: track.lastPlayed,
+                matchScore: Int(candidate.score.rounded()), sources: labels.isEmpty ? [candidate.topSource] : labels, topSource: candidate.topSource,
+                imageURL: track.imageURL
             )
+        }
+        let pool = SimilarSoundsTool.pool(candidates: recommended, seedResults: [])
+        let evaluated = try SimilarSoundsTool.evaluate(
+            pool: pool, groups: groups, columns: SimilarSoundsTool.defaultColumns, scrobbles: scrobbles, snapshots: snapshots,
+            arrangement: SimilarSoundsArrangement(sort: .shuffled, shuffleSeed: 1, songLimit: nil, perArtist: nil, perAlbum: nil)
         )
         let allowed = Set(evaluated.rows.map(\.id))
-        let pathArtistCounts = Dictionary(grouping: path, by: { normalized($0.track.artist) }).mapValues(\.count)
-        let pathAlbumCounts = Dictionary(grouping: path, by: {
-            albumKey(artist: $0.track.artist, album: $0.track.album)
-        }).mapValues(\.count)
-        var roundArtistCounts: [String: Int] = [:]
-        var roundAlbumCounts: [String: Int] = [:]
-        var candidates: [RabbitHoleTrack] = []
 
-        for candidate in pool.candidates.shuffled() {
-            let id = QueryEntityID(target: .track, artist: candidate.artist, name: candidate.track)
-            let key = TextNormalization.lovedKey(artist: candidate.artist, track: candidate.track)
-            guard allowed.contains(id), !pathKeys.contains(key) else { continue }
-
-            let artistKey = normalized(candidate.artist)
-            let candidateAlbumKey = albumKey(artist: candidate.artist, album: candidate.album)
-            if perArtist > 0,
-               pathArtistCounts[artistKey, default: 0] + roundArtistCounts[artistKey, default: 0] >= perArtist {
-                continue
-            }
-            if perAlbum > 0,
-               pathAlbumCounts[candidateAlbumKey, default: 0] + roundAlbumCounts[candidateAlbumKey, default: 0] >= perAlbum {
-                continue
-            }
-
-            roundArtistCounts[artistKey, default: 0] += 1
-            roundAlbumCounts[candidateAlbumKey, default: 0] += 1
-            candidates.append(RabbitHoleTrack(
-                artist: candidate.artist,
-                track: candidate.track,
-                album: candidate.album,
-                imageURL: candidate.imageURL,
-                playCount: candidate.totalPlaycount,
-                lastPlayed: candidate.lastPlayed,
-                matchScore: candidate.matchScore,
-                source: candidate.topSource
+        var items: [RabbitHoleSelector.Item] = []
+        var byKey: [String: RabbitHoleScoredCandidate] = [:]
+        for candidate in scored {
+            let track = library.tracks[candidate.trackIndex]
+            guard allowed.contains(QueryEntityID(target: .track, artist: track.artist, name: track.name)) else { continue }
+            items.append(RabbitHoleSelector.Item(
+                key: track.key, artistKey: normalized(track.artist), albumKey: albumKey(artist: track.artist, album: track.album),
+                topTag: snapshots.entityTags.tags(forArtist: track.artist)?.first?.lowercased(),
+                score: candidate.score, plays: track.plays, lastPlayed: track.lastPlayed, loved: snapshots.lovedKeys.contains(track.key)
             ))
-            if candidates.count == candidatesPerStep { break }
+            byKey[track.key] = candidate
         }
 
-        return RabbitHoleGeneration(
-            candidates: candidates,
-            totalBeforeConditions: availableBeforeConditions.count
+        let pathArtistCounts = Dictionary(grouping: path, by: { normalized($0.track.artist) }).mapValues(\.count)
+        let pathAlbumCounts = Dictionary(grouping: path, by: { albumKey(artist: $0.track.artist, album: $0.track.album) }).mapValues(\.count)
+        let picked = RabbitHoleSelector.pick(
+            items, count: candidatesPerStep, knobs: knobs, memory: memory, pathArtistCounts: pathArtistCounts,
+            pathAlbumCounts: pathAlbumCounts, perArtist: perArtist, perAlbum: perAlbum, now: now, using: &rng
         )
+
+        let candidates: [RabbitHoleTrack] = picked.compactMap { item in
+            guard let candidate = byKey[item.key] else { return nil }
+            let track = library.tracks[candidate.trackIndex]
+            return RabbitHoleTrack(
+                artist: track.artist, track: track.name, album: track.album, imageURL: track.imageURL, playCount: track.plays,
+                lastPlayed: track.lastPlayed, matchScore: Int(candidate.score.rounded()), source: candidate.topSource,
+                reasons: Self.topReasons(candidate.reasons)
+            )
+        }
+        return RabbitHoleGeneration(candidates: candidates, totalBeforeConditions: scored.count, poolSize: items.count)
+    }
+
+    /// The reasons worth showing, most telling first, at most three.
+    static func topReasons(_ reasons: [RabbitHoleReason]) -> [RabbitHoleReason] {
+        let order: [RabbitHoleReason.Kind] = [.playedNext, .similar, .viaStep, .similarArtist, .sharedTags, .forgotten, .loved, .tempo]
+        let ranked = reasons.sorted { (order.firstIndex(of: $0.kind) ?? 99) < (order.firstIndex(of: $1.kind) ?? 99) }
+        return Array(ranked.prefix(3))
+    }
+
+    private static func label(for kind: RabbitHoleReason.Kind) -> String {
+        switch kind {
+        case .similar: "Last.fm similar"
+        case .similarArtist: "Similar artist"
+        case .viaStep: "Two steps away"
+        case .sharedTags: "Shared tags"
+        case .playedNext: "You play it next"
+        case .tempo: "Close tempo"
+        case .loved: "Loved"
+        case .forgotten: "Forgotten favourite"
+        }
     }
 
     private static func normalized(_ value: String) -> String {

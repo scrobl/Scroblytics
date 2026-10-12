@@ -7,6 +7,21 @@ struct RabbitHoleView: View {
         var groups: [[QueryCondition]] = []
         var perArtist = 1
         var perAlbum = 0
+        var knobs = RabbitHoleKnobs()
+        var memory = RabbitHoleMemory()
+
+        init() {}
+
+        /// Every field is optional on disk so a path saved by an earlier version still opens.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            tree = try c.decodeIfPresent(RabbitHoleTree.self, forKey: .tree) ?? .empty
+            groups = try c.decodeIfPresent([[QueryCondition]].self, forKey: .groups) ?? []
+            perArtist = try c.decodeIfPresent(Int.self, forKey: .perArtist) ?? 1
+            perAlbum = try c.decodeIfPresent(Int.self, forKey: .perAlbum) ?? 0
+            knobs = try c.decodeIfPresent(RabbitHoleKnobs.self, forKey: .knobs) ?? RabbitHoleKnobs()
+            memory = try c.decodeIfPresent(RabbitHoleMemory.self, forKey: .memory) ?? RabbitHoleMemory()
+        }
     }
 
     private static let toolID = "rabbitHole"
@@ -19,6 +34,8 @@ struct RabbitHoleView: View {
     @Environment(PopularityStore.self) private var popularityStore
     @State private var options = Options()
     @State private var scrobbles: [ScrobbleSnapshot]?
+    @State private var library: RabbitHoleLibrary?
+    @State private var poolSize: Int?
     @State private var snapshots = QuerySnapshots()
     @State private var tagVocabulary: [QueryTagSuggestion] = []
     @State private var isSearching = false
@@ -27,6 +44,10 @@ struct RabbitHoleView: View {
     @State private var errorMessage: String?
     @State private var showingStartOverConfirmation = false
     @State private var treePanelHeight: CGFloat = 360
+    /// After a choice (or a step back, or new suggestions) the page stays at its bottom, where the reasons are, instead of jumping to the top.
+    @State private var scrollToBottomRequest = 0
+    @State private var followAfterGeneration = false
+    private static let bottomID = "rabbitHoleBottom"
 
     private var currentNode: RabbitHoleNode? {
         options.tree.currentID.flatMap { options.tree.nodes[$0] }
@@ -37,6 +58,26 @@ struct RabbitHoleView: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            pageContent
+                .onChange(of: scrollToBottomRequest) {
+                    // Give the new content a moment to lay out, so "bottom" is the new bottom.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(80))
+                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                        // Nothing is being generated, so there is no later scroll to wait for.
+                        if !isGenerating { followAfterGeneration = false }
+                    }
+                }
+        }
+    }
+
+    private func requestScrollToBottom() {
+        followAfterGeneration = true
+        scrollToBottomRequest += 1
+    }
+
+    private var pageContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 PageSettingsHeader("Rabbit Hole") {
@@ -53,6 +94,8 @@ struct RabbitHoleView: View {
                     currentStep
                     treeView
                     candidatesView
+                    whyThese
+                    Color.clear.frame(height: 1).id(Self.bottomID)
                 }
             }
             .padding(16)
@@ -89,6 +132,9 @@ struct RabbitHoleView: View {
             invalidateAndRegenerate()
         }
         .onChange(of: options.perAlbum) {
+            invalidateAndRegenerate()
+        }
+        .onChange(of: options.knobs) {
             invalidateAndRegenerate()
         }
         .confirmationDialog("Start over?", isPresented: $showingStartOverConfirmation, titleVisibility: .visible) {
@@ -160,6 +206,10 @@ struct RabbitHoleView: View {
                 HStack(spacing: 12) { capPickers }
                 VStack(alignment: .leading, spacing: 8) { capPickers }
             }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { knobPickers }
+                VStack(alignment: .leading, spacing: 8) { knobPickers }
+            }
             QueryConditionsEditor(
                 groups: $options.groups,
                 registry: .similarSounds,
@@ -189,6 +239,28 @@ struct RabbitHoleView: View {
         Text("Conditions affect the next three recommendations, never tracks already on your path.")
             .font(AppTypography.compactMetadata)
             .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var knobPickers: some View {
+        Picker("Lean toward", selection: $options.knobs.familiarity) {
+            Text("Mostly forgotten").tag(-2)
+            Text("Lean forgotten").tag(-1)
+            Text("No lean").tag(0)
+            Text("Lean familiar").tag(1)
+            Text("Mostly familiar").tag(2)
+        }
+        .fixedSize()
+        .help("Forgotten favours tracks you haven't played for a long time; familiar favours loved and often-played ones.")
+        Picker("Variety", selection: $options.knobs.wander) {
+            Text("Stay close").tag(0)
+            Text("Balanced").tag(1)
+            Text("Wander").tag(2)
+        }
+        .fixedSize()
+        .help("Stay close picks the best matches; wander gives weaker matches a real chance.")
+        Toggle("Avoid recent repeats", isOn: $options.knobs.avoidRepeats)
+            .help("Makes tracks you were shown or chose in the last week less likely to come up again.")
     }
 
     private var currentStep: some View {
@@ -225,10 +297,12 @@ struct RabbitHoleView: View {
             Button("Back One Step", systemImage: "arrow.uturn.backward") {
                 options.tree.currentID = parentID
                 totalBeforeConditions = nil
+                requestScrollToBottom()
             }
         }
         Button("New Suggestions", systemImage: "arrow.clockwise") {
             invalidateAndRegenerate()
+            requestScrollToBottom()
         }
         .disabled(isGenerating)
     }
@@ -272,6 +346,7 @@ struct RabbitHoleView: View {
                         Button {
                             options.tree.currentID = placed.node.id
                             totalBeforeConditions = nil
+                            requestScrollToBottom()
                         } label: {
                             RabbitHoleTreeCard(
                                 track: placed.node.track,
@@ -300,6 +375,7 @@ struct RabbitHoleView: View {
                     ForEach(layout.candidates) { placed in
                         Button {
                             choose(placed.track, from: placed.parentID)
+                            requestScrollToBottom()
                         } label: {
                             RabbitHoleTreeCard(
                                 track: placed.track,
@@ -375,13 +451,51 @@ struct RabbitHoleView: View {
         }
     }
 
+    /// Why the three suggestions were offered, in plain words, and how many options remain behind them.
+    @ViewBuilder
+    private var whyThese: some View {
+        if !isGenerating, let candidates = currentNode?.candidates, !candidates.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Why these three").font(AppTypography.sectionTitle)
+                    Spacer()
+                    if let poolSize {
+                        Text(poolSize > candidates.count ? "\((poolSize - candidates.count).formatted()) more options behind these" : "No more options behind these")
+                            .font(AppTypography.compactMetadata)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(candidates) { candidate in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(candidate.track) — \(candidate.artist)").font(AppTypography.contentTitle).lineLimit(1)
+                        HStack(spacing: 6) {
+                            ForEach(candidate.reasons ?? [], id: \.self) { reason in
+                                Text(reason.text)
+                                    .font(AppTypography.compactMetadata)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(.quaternary.opacity(0.6), in: Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
     private func loadLibrary() async {
         do {
             if scrobbles == nil {
                 let fetched = try await offMain {
                     try await ScrobbleSnapshotReader(modelContainer: modelContainer).fetchSortedSnapshots()
                 }
-                scrobbles = QueryIdentity.canonicalizingArtists(fetched)
+                let canonical = QueryIdentity.canonicalizingArtists(fetched)
+                scrobbles = canonical
+                library = await offMain { RabbitHoleLibrary.build(scrobbles: canonical) }
             }
             let loaded = await QuerySnapshotReader(modelContainer: modelContainer).loadAll()
             snapshots = QuerySnapshots(
@@ -447,6 +561,7 @@ struct RabbitHoleView: View {
             return
         }
 
+        options.memory.noteChosen(track.id)
         let id = UUID()
         options.tree.nodes[id] = RabbitHoleNode(
             id: id,
@@ -484,9 +599,17 @@ struct RabbitHoleView: View {
 
         isGenerating = true
         errorMessage = nil
-        defer { isGenerating = false }
+        defer {
+            isGenerating = false
+            if followAfterGeneration {
+                followAfterGeneration = false
+                scrollToBottomRequest += 1
+            }
+        }
         await loadLibrary()
         let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
+        guard let library else { return }
+        let provider = LastfmSimilarityProvider(client: client, store: SimilarityCacheStore(modelContainer: modelContainer))
 
         do {
             let generated = try await RabbitHoleEngine.generate(
@@ -495,13 +618,18 @@ struct RabbitHoleView: View {
                 groups: options.groups,
                 perArtist: options.perArtist,
                 perAlbum: options.perAlbum,
+                knobs: options.knobs,
+                memory: options.memory,
+                library: library,
                 scrobbles: scrobbles,
                 snapshots: snapshots,
-                client: client
+                provider: provider
             )
             guard options.tree.currentID == id else { return }
             options.tree.nodes[id]?.candidates = generated.candidates
             totalBeforeConditions = generated.totalBeforeConditions
+            poolSize = generated.poolSize
+            options.memory.noteShown(generated.candidates.map(\.id))
         } catch {
             guard options.tree.currentID == id else { return }
             errorMessage = error.localizedDescription
@@ -549,9 +677,11 @@ private struct RabbitHoleTreeCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if track.matchScore > 0 {
-                    Text("\(track.matchScore)% match · \(track.playCount.formatted()) plays")
-                        .font(AppTypography.compactMetadata.monospacedDigit())
+                    Text(track.reasons?.first.map { "\(track.matchScore)% · \($0.text)" } ?? "\(track.matchScore)% match · \(track.playCount.formatted()) plays")
+                        .font(AppTypography.compactMetadata)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(([ "\(track.matchScore)% match · \(track.playCount.formatted()) plays" ] + (track.reasons ?? []).map(\.text)).joined(separator: "\n"))
                 } else {
                     Text(track.source)
                         .font(AppTypography.compactMetadata)

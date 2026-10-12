@@ -167,16 +167,36 @@ private actor BackgroundImageResolutionWorker {
         return imagesChanged
     }
 
+    /// The newest real Last.fm picture of each album, by artist and album as the scrobbles spell them. Built on first use from one
+    /// pass over the scrobbles (newest first) and kept for this run. The lookup used to be a query per album, and with a
+    /// 370,000-scrobble history those queries kept the app busy for hours after an import.
+    private var lastfmArtworkIndex: [String: URL]?
+    /// What the scrobbles looked like when the index was built, and when it was last checked against them. A sync can land while
+    /// this run is still going (it can last an hour); the index is rebuilt then, so a new album's picture isn't missed.
+    private var indexedScrobbleCount = 0
+    private var indexedSyncAt: Date?
+    private var indexCheckedAt = Date.distantPast
+    private static let indexRecheckInterval: TimeInterval = 30
+
+    private func artworkIndex() throws -> [String: URL] {
+        let now = Date()
+        if let index = lastfmArtworkIndex {
+            if now.timeIntervalSince(indexCheckedAt) < Self.indexRecheckInterval { return index }
+            indexCheckedAt = now
+            let count = try modelContext.fetchCount(FetchDescriptor<Scrobble>())
+            let syncAt = try modelContext.fetch(FetchDescriptor<SyncState>()).first?.lastSyncedAt
+            if count == indexedScrobbleCount, syncAt == indexedSyncAt { return index }
+        }
+        let built = try LastfmArtworkIndex.build(context: modelContext)
+        lastfmArtworkIndex = built.index
+        indexedScrobbleCount = built.scrobbles
+        indexedSyncAt = try modelContext.fetch(FetchDescriptor<SyncState>()).first?.lastSyncedAt
+        indexCheckedAt = now
+        return built.index
+    }
+
     private func lastfmFallbackURL(artist: String, album: String) throws -> URL? {
-        var descriptor = FetchDescriptor<Scrobble>(
-            predicate: #Predicate { $0.artistName == artist && $0.albumName == album },
-            sortBy: [SortDescriptor(\.playedAt, order: .reverse)]
-        )
-        descriptor.fetchLimit = 50
-        return try modelContext.fetch(descriptor)
-            .compactMap(\.imageURL)
-            .first { !TextNormalization.isLastfmPlaceholderImage($0) }
-            .flatMap(URL.init(string:))
+        try artworkIndex()[LastfmArtworkIndex.key(artist: artist, album: album)]
     }
 
     private func storeResolvedImage(
@@ -232,6 +252,28 @@ private actor BackgroundImageResolutionWorker {
             throw ImageResolutionError.httpStatus(http.statusCode)
         }
         return data
+    }
+}
+
+/// The newest real Last.fm picture of every album, from one pass over the scrobbles (newest first). Looking an album's picture up
+/// by querying the scrobbles once per album walks the table each time; with a 370,000-scrobble history that was the app's biggest
+/// background cost.
+enum LastfmArtworkIndex {
+    static func key(artist: String, album: String) -> String { artist + "\u{1F}" + album }
+
+    static func build(context: ModelContext) throws -> (index: [String: URL], scrobbles: Int) {
+        var index: [String: URL] = [:]
+        var descriptor = FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
+        descriptor.propertiesToFetch = [\.artistName, \.albumName, \.imageURL]
+        var seen = 0
+        try context.enumerate(descriptor, batchSize: 5_000) { scrobble in
+            try Task.checkCancellation()
+            seen += 1
+            guard let raw = scrobble.imageURL, !TextNormalization.isLastfmPlaceholderImage(raw), let url = URL(string: raw) else { return }
+            let key = key(artist: scrobble.artistName, album: scrobble.albumName)
+            if index[key] == nil { index[key] = url }
+        }
+        return (index, seen)
     }
 }
 

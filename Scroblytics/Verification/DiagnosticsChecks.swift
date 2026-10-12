@@ -116,12 +116,16 @@ enum DiagnosticsChecks {
             inputs.model = "Mac99,1"; inputs.memoryGB = 16; inputs.scrobbles = 1234; inputs.artists = 56; inputs.accountConnected = true
             inputs.offline = true; inputs.askEngine = "Apple on-device"; inputs.resumePage = 12; inputs.resumeTotalPages = 340
             inputs.crashReports = found
+            inputs.appMemoryMB = 412; inputs.appMemoryPeakMB = 916
             inputs.activity = ["2026-01-01T00:00:00Z [sync] user listener42 failed with key \(key32) at \(NSHomeDirectory())/x", "2026-01-01T00:00:01Z [sync] Sync started"]
             let text = DiagnosticSummary.render(inputs, secrets: secrets)
             check("the summary has the version, Mac, counts, resume point and Offline state",
                   text.contains("9.9.9 (build 42)") && text.contains("Mac99,1") && text.contains("1234 scrobbles, 56 artists") && text.contains("page 12 of 340") && text.contains("Offline mode: on"))
             check("the summary lists crash report names, not contents", text.contains("Scroblytics-2026-10-11-120000.ips") && !text.contains("\"x\""))
             check("the summary carries none of the seeded secrets", !text.contains("listener42") && !text.contains(key32) && !text.contains(NSHomeDirectory()), text)
+            check("the summary shows the app's memory now and at its highest", text.contains("Memory in use by the app: 412 MB (highest 916 MB)"))
+            let live = DiagnosticSummary.appMemory()
+            check("the app can read its own memory footprint", (live.current ?? 0) > 10 && (live.peak ?? 0) >= (live.current ?? 0), "\(live)")
             check("the summary says the account is connected without naming it", text.contains("Last.fm account: connected"))
             var huge = inputs
             huge.activity = (0..<4000).map { "2026-01-01T00:00:00Z [sync] filler \($0) " + String(repeating: "y", count: 250) }

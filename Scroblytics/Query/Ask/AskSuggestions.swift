@@ -312,13 +312,25 @@ final class AskSuggestionStore {
     private var rowCache: [String: Int] = [:]
     private var lastCategory: AskSuggestion.Category?
     private var refreshing = false
+    /// The suggestions are worked out from the whole library (every scrobble, once per sync), which is a lot of work for a long
+    /// history and is only needed when the Ask box opens. So the window only marks them out of date, and the first opening that
+    /// needs them does the work. Until then, and for that first opening, the box shows the plain default sentence.
+    private var isStale = true
+    private var container: ModelContainer?
 
     private static let recentKey = "ask.suggestions.recent"
+
+    /// Says the library has changed (or the app has just opened): the next opening of Ask recomputes the suggestions.
+    func markStale(container: ModelContainer) {
+        self.container = container
+        isStale = true
+    }
 
     func refresh(container: ModelContainer) async {
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
+        isStale = false
         guard let canonical = try? await offMain({
             QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
         }) else { return }
@@ -339,6 +351,10 @@ final class AskSuggestionStore {
     /// Picks what to show for this opening: a different kind of suggestion than last time, not one shown recently, checked on the
     /// library's data, and vouched for on the engine in use. Falls back to the plain default.
     func chooseForOpening(engine: AskEngineID) async {
+        if isStale, let container {
+            // Not awaited: the box shows the default sentence now, and the personal suggestion from the next opening.
+            Task { await refresh(container: container) }
+        }
         let recent = Set(UserDefaults.standard.stringArray(forKey: Self.recentKey) ?? [])
         var rng = SystemRandomNumberGenerator()
         var candidates = (AskSuggestionTemplates.generic() + AskSuggestionTemplates.personal(facts, using: &rng))

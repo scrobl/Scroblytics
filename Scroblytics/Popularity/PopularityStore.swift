@@ -36,7 +36,13 @@ final class PopularityStore {
     nonisolated private static let batchDelay: Duration = .milliseconds(1100)
     nonisolated private static let maxRetries = 4
     nonisolated private static let persistEvery = 20
-    private static let snapshotRefreshInterval: TimeInterval = 15
+    /// How long the warm loop waits before rebuilding the tiers from every saved record. Rebuilding reads and ranks every record, which
+    /// is cheap for a few thousand and costly for tens of thousands (a long history has records for every artist, album and track), so
+    /// the wait grows with the record count: 15 s for small libraries, up to 5 minutes for very large ones.
+    static func snapshotRefreshInterval(recordCount: Int) -> TimeInterval {
+        min(300, max(15, Double(recordCount) / 400))
+    }
+    private var lastSnapshotRecordCount = 0
 
     private static let log = Logger(subsystem: AppIdentity.bundleID, category: "Popularity")
 
@@ -177,7 +183,7 @@ final class PopularityStore {
                     let batch = unsaved
                     try await offMain { try await dataStore.save(batch) }
                     unsaved.removeAll()
-                    if queue.isEmpty || Date().timeIntervalSince(lastSnapshotAt) >= Self.snapshotRefreshInterval {
+                    if queue.isEmpty || Date().timeIntervalSince(lastSnapshotAt) >= Self.snapshotRefreshInterval(recordCount: lastSnapshotRecordCount) {
                         await reloadSnapshot()
                     }
                 } catch {
@@ -200,6 +206,7 @@ final class PopularityStore {
             let records = try await offMain { try await dataStore.loadRecords() }
             snapshot = await Task.detached(priority: .utility) { PopularitySnapshot(records: records) }.value
             lastSnapshotAt = Date()
+            lastSnapshotRecordCount = records.count
         } catch {
             fail("Couldn't load popularity data: \(error)")
         }

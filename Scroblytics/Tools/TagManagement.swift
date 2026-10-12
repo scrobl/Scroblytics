@@ -340,9 +340,9 @@ extension View {
             .environment(tagWriter)
             .environment(askRouter)
             .environment(askSuggestions)
-            .task { await askSuggestions.refresh(container: container) }
+            .task { askSuggestions.markStale(container: container) }
             .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
-                Task { await askSuggestions.refresh(container: container) }
+                askSuggestions.markStale(container: container)
             }
             .onChange(of: askRouter.pending?.id) { if askRouter.pending != nil { onAskSimilar() } }
             .onReceive(NotificationCenter.default.publisher(for: .lastfmAccountConnected)) { _ in onAccountConnected() }

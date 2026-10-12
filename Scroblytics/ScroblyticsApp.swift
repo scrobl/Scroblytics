@@ -168,6 +168,7 @@ struct ScroblyticsApp: App {
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
+        PerfChecks.runHeadlessIfRequested(container: modelContainer)
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()
         Task { @MainActor in

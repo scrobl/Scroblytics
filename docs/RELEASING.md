@@ -106,6 +106,28 @@ machine on this Mac is enough:
 
 Crash reports from users are read with `scripts/symbolicate-crash.py` (see above).
 
+## Test with a large library
+
+A history of 300,000+ scrobbles is where cost that grows with the library shows up (an unindexed per-item query once kept the app at
+30% CPU for hours after an import). Before a release that touches background work or loads, try a big one without waiting for a big
+import:
+
+1. Copy your store (`default.store`, `-shm`, `-wal` from `~/Library/Application Support`) into a scratch folder and run
+   `sqlite3 default.store "PRAGMA wal_checkpoint(TRUNCATE);"`.
+2. Clone rows with shifted timestamps (`Scrobble` is one flat table, so this keeps everything consistent), for example three copies:
+   `INSERT INTO ZSCROBBLE (Z_ENT,Z_OPT,ZLASTCONFIRMEDAT,ZPLAYEDAT,ZALBUMNAME,ZARTISTNAME,ZIMAGEURL,ZTRACKNAME) SELECT Z_ENT,Z_OPT,ZLASTCONFIRMEDAT,ZPLAYEDAT+7,ZALBUMNAME,ZARTISTNAME,ZIMAGEURL,ZTRACKNAME FROM ZSCROBBLE;`
+   (repeat with +13, +19), then
+   `UPDATE Z_PRIMARYKEY SET Z_MAX=(SELECT max(Z_PK) FROM ZSCROBBLE) WHERE Z_NAME='Scrobble';`.
+3. Build "Release + test hooks" (`OTHER_SWIFT_FLAGS='$(inherited) -DDEBUG'`) and open the copy offline, never against the real account (a
+   sync would "reconcile" the invented rows away):
+   `open -n --env SCROBLYTICS_STORE_PATH=<copy> --env SCROBLYTICS_OFFLINE=1 Scroblytics.app`.
+   Watch `ps -o %cpu,rss` and `vmmap -summary <pid> | grep footprint`: with 366k scrobbles the launch takes about 25 s of CPU and peaks
+   near 1 GB of footprint, then it should sit at 0% CPU.
+4. For work after an import, do a real first import in an isolated test profile (`scripts/first-run-profile.sh <name> --env
+   SCROBLYTICS_PROFILE_SEED_LASTFM=<user>:<key>`, with `SCROBLYTICS_APP_PATH` set to the hooks build) and log CPU every 15 s for the
+   half hour after it finishes: it should settle to a few percent. `sample <pid> 30` then names what is busy (use a Debug build for
+   readable names). `SCROBLYTICS_PERF_CHECK=1` on a scratch copy times the artwork lookup against the old per-album query.
+
 ## What the update notice needs
 
 The app's daily "newer version available" notice reads GitHub's release list. For a release to be announced its tag must be named

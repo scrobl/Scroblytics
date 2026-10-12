@@ -12,6 +12,9 @@ struct DiagnosticSummary: Sendable {
         var architecture = ""
         var model = ""
         var memoryGB = 0
+        /// What the app itself holds now and at its highest (MB), so a report of "it uses too much memory" comes with the number.
+        var appMemoryMB: Int?
+        var appMemoryPeakMB: Int?
         var scrobbles = 0
         var artists = 0
         var accountConnected = false
@@ -41,6 +44,9 @@ struct DiagnosticSummary: Sendable {
         lines.append("  Processor: \(i.architecture)    Model: \(clean(i.model))    Memory: \(i.memoryGB) GB")
         lines.append("")
         lines.append("The app")
+        if let now = i.appMemoryMB {
+            lines.append("  Memory in use by the app: \(now) MB" + (i.appMemoryPeakMB.map { " (highest \($0) MB)" } ?? ""))
+        }
         lines.append("  Last.fm account: \(i.accountConnected ? "connected" : "not connected")")
         lines.append("  Imported: \(i.scrobbles) scrobbles, \(i.artists) artists")
         if let last = i.lastSyncedAt {
@@ -96,6 +102,7 @@ struct DiagnosticSummary: Sendable {
         i.architecture = Self.architecture
         i.model = Self.hardwareModel
         i.memoryGB = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
+        (i.appMemoryMB, i.appMemoryPeakMB) = Self.appMemory()
         let context = container.mainContext
         i.scrobbles = (try? context.fetchCount(FetchDescriptor<Scrobble>())) ?? 0
         i.artists = (try? context.fetchCount(FetchDescriptor<Artist>())) ?? 0
@@ -119,6 +126,16 @@ struct DiagnosticSummary: Sendable {
             if let value = credentials.sessionKey { secrets.append(.init(value: value, label: "key")) }
         }
         return (render(i, secrets: secrets, now: now), i)
+    }
+
+    /// The app's own memory footprint now and at its peak, in MB (what Activity Monitor's Memory column is based on).
+    static func appMemory() -> (current: Int?, peak: Int?) {
+        var info = rusage_info_current()
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_CURRENT, $0) }
+        }
+        guard result == 0 else { return (nil, nil) }
+        return (Int(info.ri_phys_footprint / 1_048_576), Int(info.ri_lifetime_max_phys_footprint / 1_048_576))
     }
 
     static var architecture: String {

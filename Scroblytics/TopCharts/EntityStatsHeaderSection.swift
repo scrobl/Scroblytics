@@ -344,7 +344,7 @@ struct EntityStatsHeaderSection: View {
     }
 
     private var canShowLargerArtwork: Bool {
-        entity != .track && (effectiveImageURL ?? imageURL) != nil
+        (effectiveImageURL ?? imageURL) != nil
     }
 
     private func reloadImage() {

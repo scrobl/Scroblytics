@@ -62,6 +62,7 @@ struct TimelineView: View {
     @State private var hasLoaded = false
     @State private var needsReload = false
     @State private var lastDurationReloadAt = Date.distantPast
+    @State private var durationReloadTask: Task<Void, Never>?
     @State private var latestRequestID = UUID()
     @State private var reloadDebounceTask: Task<Void, Never>?
 
@@ -121,8 +122,18 @@ struct TimelineView: View {
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             guard settings.metric == .timeListened else { return }
             // Track lengths are announced every few seconds during a long backlog, and each reload reads and ranks the whole history.
-            guard Date().timeIntervalSince(lastDurationReloadAt) >= 180 else { return }
-            requestReload()
+            let wait = 180 - Date().timeIntervalSince(lastDurationReloadAt)
+            if wait <= 0 {
+                requestReload()
+            } else if durationReloadTask == nil {
+                // Catch up once the interval has passed, so lengths that resolved meanwhile still show.
+                durationReloadTask = Task {
+                    try? await Task.sleep(for: .seconds(wait))
+                    durationReloadTask = nil
+                    guard !Task.isCancelled, settings.metric == .timeListened else { return }
+                    requestReload()
+                }
+            }
         }
     }
 

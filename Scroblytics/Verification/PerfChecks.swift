@@ -149,10 +149,12 @@ enum PerfChecks {
 
             // MARK: One shared copy of the history
             final class LoadCounter: @unchecked Sendable {
-                let state = OSAllocatedUnfairLock(initialState: (loads: 0, stampValue: 1))
+                let state = OSAllocatedUnfairLock(initialState: (loads: 0, stampValue: 1, syncedAt: 0))
                 var loads: Int { state.withLock { $0.loads } }
                 func countLoad() { state.withLock { $0.loads += 1 } }
                 func changeHistory() { state.withLock { $0.stampValue += 1 } }
+                func finishSync() { state.withLock { $0.syncedAt += 1 } }
+                var syncedAt: Date { Date(timeIntervalSince1970: 1_650_000_000 + Double(state.withLock { $0.syncedAt })) }
                 var stampValue: Int { state.withLock { $0.stampValue } }
             }
             let counter = LoadCounter()
@@ -166,9 +168,9 @@ enum PerfChecks {
                 loader: { _ in
                     counter.countLoad()
                     try await Task.sleep(for: .milliseconds(150))
-                    return (stubPlays, ScrobbleHistoryCache.Stamp(count: counter.stampValue, newest: stubDate))
+                    return (stubPlays, ScrobbleHistoryCache.Stamp(count: counter.stampValue, newest: stubDate, syncedAt: counter.syncedAt))
                 },
-                stampReader: { _ in ScrobbleHistoryCache.Stamp(count: counter.stampValue, newest: stubDate) }
+                stampReader: { _ in ScrobbleHistoryCache.Stamp(count: counter.stampValue, newest: stubDate, syncedAt: counter.syncedAt) }
             )
             _ = await withTaskGroup(of: Int.self) { group in
                 for _ in 0..<10 { group.addTask { (try? await cache.snapshots(container: stubContainer))?.count ?? -1 } }
@@ -185,12 +187,15 @@ enum PerfChecks {
             await cache.invalidate()
             _ = try? await cache.snapshots(container: stubContainer)
             check("invalidating forces a fresh read", counter.loads == 3, "\(counter.loads)")
+            counter.finishSync()
+            _ = try? await cache.snapshots(container: stubContainer)
+            check("a finished sync makes the next request read again even when the count and newest play are unchanged", counter.loads == 4, "\(counter.loads)")
             let canonicalFromCache = (try? await cache.canonicalSnapshots(container: stubContainer)) ?? []
             check("the canonical copy equals merging the artist spellings directly", canonicalFromCache.count == stubPlays.count
                   && Set(canonicalFromCache.map(\.artistName)).count == 1
                   && zip(canonicalFromCache, QueryIdentity.canonicalizingArtists(stubPlays)).allSatisfy { $0.artistName == $1.artistName && $0.trackName == $1.trackName && $0.playedAt == $1.playedAt })
             _ = try? await cache.canonicalSnapshots(container: stubContainer)
-            check("asking for the canonical copy again does not read the history again", counter.loads == 3, "\(counter.loads)")
+            check("asking for the canonical copy again does not read the history again", counter.loads == 4, "\(counter.loads)")
 
             // The real reader against the scratch store: new plays are seen without anyone invalidating.
             let realCache = ScrobbleHistoryCache()
@@ -203,6 +208,22 @@ enum PerfChecks {
             try? context.save()
             let afterDelete = (try? await realCache.snapshots(container: container))?.count ?? -1
             check("the real reader notices an added play and a removed one by itself", beforeCount >= 0 && withExtra == beforeCount + 1 && afterDelete == beforeCount, "\(beforeCount) \(withExtra) \(afterDelete)")
+            // A sync that corrects a play without changing the count or the newest play: only the sync time tells the cache.
+            let syncState = SyncState(username: "cache-check")
+            syncState.lastSyncedAt = Date(timeIntervalSince1970: 1_700_000_000)
+            context.insert(syncState)
+            let corrected = Scrobble(artistName: "Cache Check Artist", albumName: "Album", trackName: "Original Title", imageURL: nil, playedAt: Date().addingTimeInterval(172_800), lastConfirmedAt: Date())
+            context.insert(corrected)
+            try? context.save()
+            let beforeFix = (try? await realCache.snapshots(container: container))?.contains { $0.trackName == "Original Title" } ?? false
+            corrected.trackName = "Corrected Title"
+            syncState.lastSyncedAt = Date(timeIntervalSince1970: 1_700_000_600)
+            try? context.save()
+            let afterFix = (try? await realCache.snapshots(container: container)) ?? []
+            context.delete(corrected)
+            context.delete(syncState)
+            try? context.save()
+            check("a play corrected by a sync (same count, same newest play) is seen once that sync has finished", beforeFix && afterFix.contains { $0.trackName == "Corrected Title" } && !afterFix.contains { $0.trackName == "Original Title" })
 
             // MARK: Overview's launch work: the same answers, without re-reading the whole history per card or row
             var rich: [ScrobbleSnapshot] = []

@@ -5,8 +5,9 @@ import SwiftData
 @ModelActor
 actor ScrobbleHistoryLoader {
     func load() throws -> (snapshots: [ScrobbleSnapshot], stamp: ScrobbleHistoryCache.Stamp) {
+        let syncedAt = try modelContext.fetch(FetchDescriptor<SyncState>()).first?.lastSyncedAt
         let snapshots = try modelContext.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
-        return (snapshots, ScrobbleHistoryCache.Stamp(count: snapshots.count, newest: snapshots.last?.playedAt))
+        return (snapshots, ScrobbleHistoryCache.Stamp(count: snapshots.count, newest: snapshots.last?.playedAt, syncedAt: syncedAt))
     }
 
     func stamp() throws -> ScrobbleHistoryCache.Stamp {
@@ -14,7 +15,8 @@ actor ScrobbleHistoryLoader {
         newest.fetchLimit = 1
         return ScrobbleHistoryCache.Stamp(
             count: try modelContext.fetchCount(FetchDescriptor<Scrobble>()),
-            newest: try modelContext.fetch(newest).first?.playedAt
+            newest: try modelContext.fetch(newest).first?.playedAt,
+            syncedAt: try modelContext.fetch(FetchDescriptor<SyncState>()).first?.lastSyncedAt
         )
     }
 }
@@ -30,9 +32,12 @@ actor ScrobbleHistoryLoader {
 actor ScrobbleHistoryCache {
     static let shared = ScrobbleHistoryCache()
 
+    /// What the history looked like when it was read: how many plays, the newest one, and when the last sync finished. The sync time
+    /// is what catches a sync that replaced plays (a track Last.fm corrected) without changing the count or the newest play.
     struct Stamp: Equatable, Sendable {
         var count: Int
         var newest: Date?
+        var syncedAt: Date? = nil
     }
 
     typealias Loader = @Sendable (ModelContainer) async throws -> (snapshots: [ScrobbleSnapshot], stamp: Stamp)
@@ -79,7 +84,8 @@ actor ScrobbleHistoryCache {
     /// The same plays with each artist in one spelling (`QueryIdentity.canonicalizingArtists`), worked out once and kept.
     func canonicalSnapshots(container: ModelContainer) async throws -> [ScrobbleSnapshot] {
         let sorted = try await snapshots(container: container)
-        if let canonicalCache, stamp == Stamp(count: sorted.count, newest: sorted.last?.playedAt) { return canonicalCache }
+        // `snapshots` has just checked the stamp, and a re-read clears this copy, so what is kept here belongs to `sorted`.
+        if let canonicalCache { return canonicalCache }
         if let canonicalizing { return await canonicalizing.value }
         let startedAt = generation
         let task = Task.detached(priority: .userInitiated) { QueryIdentity.canonicalizingArtists(sorted) }

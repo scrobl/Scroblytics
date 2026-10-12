@@ -142,10 +142,24 @@ final class QueryBuilderModel {
     static let backgroundRefreshInterval: TimeInterval = 120
     private var lastBackgroundRefreshAt = Date.distantPast
 
+    private var trailingBackgroundRefresh: Task<Void, Never>?
+
     func refreshSnapshotsForBackgroundProgress() {
-        guard Date().timeIntervalSince(lastBackgroundRefreshAt) >= Self.backgroundRefreshInterval else { return }
-        lastBackgroundRefreshAt = Date()
-        refreshSnapshots()
+        let wait = Self.backgroundRefreshInterval - Date().timeIntervalSince(lastBackgroundRefreshAt)
+        if wait <= 0 {
+            lastBackgroundRefreshAt = Date()
+            refreshSnapshots()
+        } else if trailingBackgroundRefresh == nil {
+            // Catch up once the interval has passed, so what resolved meanwhile still shows.
+            trailingBackgroundRefresh = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(wait))
+                guard let self else { return }
+                self.trailingBackgroundRefresh = nil
+                guard !Task.isCancelled else { return }
+                self.lastBackgroundRefreshAt = Date()
+                self.refreshSnapshots()
+            }
+        }
     }
 
     func refreshSnapshots() {

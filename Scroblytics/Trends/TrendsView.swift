@@ -43,6 +43,7 @@ struct TrendsView: View {
     @State private var reloadDebounceTask: Task<Void, Never>?
     @State private var lastFullReloadAt = Date.distantPast
     @State private var backgroundDataIsNewer = false
+    @State private var trailingRefreshTask: Task<Void, Never>?
 
     private var rangeOptions: [DateRangeOption] { DateRangePresets.build(oldestScrobbleDate: oldestScrobbleDate) }
     private var currentRange: DateRange { (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).range() }
@@ -215,9 +216,21 @@ struct TrendsView: View {
 
     private func backgroundDataMoved() {
         backgroundDataIsNewer = true
-        guard isActive, hasLoaded, Date().timeIntervalSince(lastFullReloadAt) >= Self.backgroundRefreshInterval else { return }
-        querySnapshots = nil
-        requestReload()
+        guard isActive, hasLoaded else { return }
+        let wait = Self.backgroundRefreshInterval - Date().timeIntervalSince(lastFullReloadAt)
+        if wait <= 0 {
+            querySnapshots = nil
+            requestReload()
+        } else if trailingRefreshTask == nil {
+            // Not yet: catch up once the interval has passed, so what resolved meanwhile still shows without opening the page again.
+            trailingRefreshTask = Task {
+                try? await Task.sleep(for: .seconds(wait))
+                trailingRefreshTask = nil
+                guard !Task.isCancelled, isActive, backgroundDataIsNewer else { return }
+                querySnapshots = nil
+                requestReload()
+            }
+        }
     }
 
     private func requestReload() {

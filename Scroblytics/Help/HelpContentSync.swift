@@ -168,6 +168,7 @@ extension HelpContent {
                     ["“N lookups couldn’t be resolved — they’ll be retried next launch”", "Background lookups hit temporary errors; nothing to do."],
                     ["“Image Resolution Stopped”", "Artwork lookup stopped with a reason in the message; for example custom artwork must be reset before a refresh."],
                 ]),
+                .paragraph("Still stuck, or the app quit on you? **Help › Report a Problem…** gathers a summary, including the latest sync messages, and the crash report for you to send. See [Reporting a problem](help://report-a-problem)."),
             ]
         ),
     ])

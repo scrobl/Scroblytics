@@ -10,6 +10,12 @@ enum AppIdentity {
     static let privacyPolicyURLString = "https://github.com/scrobl/Scroblytics/blob/main/PRIVACY.md"
     static let privacyPolicyURL = URL(string: privacyPolicyURLString)!
 
+    /// Where a person sends a problem report: the project's contact address (the same one MusicBrainz is given and the README
+    /// lists), and the issue tracker. Used only by Help › Report a Problem, and only when the person presses a button.
+    static let supportEmail = "Scroblytics@proton.me"
+    static let issuesURLString = "https://github.com/scrobl/Scroblytics/issues/new"
+    static let issuesURL = URL(string: issuesURLString)!
+
     /// A Keychain "service" name for one kind of stored secret (e.g. `keychainService("lastfm")`).
     /// A DEBUG run under a test profile (`TestProfile`) files its items under a profile-specific name, so a first-run
     /// test never reads or writes the real ones.

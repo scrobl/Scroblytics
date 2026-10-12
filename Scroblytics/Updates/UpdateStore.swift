@@ -89,8 +89,10 @@ final class UpdateStore {
         case .available(let release):
             record(checkedAt: now)
             remember(release)
-        case .offline, .failed:
+        case .offline:
             break
+        case .failed(let reason):
+            ActivityLog.record(.update, "Update check failed: \(reason)")
         }
         #if DEBUG
         switch result {

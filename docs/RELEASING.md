@@ -124,6 +124,13 @@ python3 -I scripts/symbolicate-crash.py ~/Downloads/Scroblytics-2026-….ips
 
 It matches the report's build ID to the saved symbols, and prints the exception, the crashed thread and the first frames of the others.
 
+Users can gather the report themselves: **Help › Report a Problem…** in the app lists their crash reports (Show in Finder), builds a
+**diagnostic summary** (versions, Mac model, counts, sync state, no account name, keys or music, plus the last 60 lines of a small local
+activity log) and starts a Mail draft to the project address with the report attached, or copies the summary for a GitHub issue. After
+a crash the app also shows a one-line notice offering it. A summary's "Recent activity" shows the sync's last events (rate-limit
+waits, failures and their reasons), which is what a crash report cannot tell you about a problem that did not crash. Nothing is
+sent by the app itself (see PRIVACY.md).
+
 ## Trying the script without a certificate
 
 `scripts/release.sh --test-package` does every step except Developer ID signing and notarization, signs with your development

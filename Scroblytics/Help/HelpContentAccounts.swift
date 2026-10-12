@@ -137,10 +137,30 @@ extension HelpContent {
                 .bullets([
                     "Your **Apple Music / Music app** library. The app reads it through Music’s own scripting for Fix Album Match, Loved Status Audit, Library Gaps, importing durations, and playlist export. None of it is sent anywhere. Scroblytics changes Music only when you ask it to: **Create Apple Music Playlist** makes a playlist (or adds to one you pick) from tracks already in your library, and the Loved Status Audit’s **Remove from Favorites…** un-favorites entries that aren’t in your library, after you confirm.",
                     "Your **database, images and preferences**. See [Where your data lives](help://data-storage).",
+                    "A small **activity log** of what the app did (no music, no account name, no keys), used only by [Report a Problem](help://report-a-problem). It is sent nowhere unless you choose to share it.",
                 ]),
                 .heading("The Music permission prompt"),
                 .paragraph("The first time a feature reads or writes Music, macOS asks whether Scroblytics may control Music. Allow it, or enable it later in **System Settings › Privacy & Security › Automation**. Without it you’ll see “Scroblytics isn’t authorized to control Music.app”. Some features also need Music to be open (“Music isn’t open. Open Music, then try again.”)."),
                 .paragraph("Links such as **View in Last.fm**, **View Lyrics on Genius**, and the Last.fm approval page open in your browser only when you choose them. **View in Apple Music** looks the item up in Apple’s public catalogue (see the table above) and opens its page in the Music app; if no page matches, or you are offline, it opens Music’s search instead."),
+            ]
+        ),
+        HelpArticle(
+            id: "report-a-problem",
+            title: "Reporting a problem",
+            summary: "Gather a summary and the latest crash report to send, without anything leaving your Mac by itself.",
+            blocks: [
+                .paragraph("If Scroblytics misbehaves, **Help › Report a Problem…** (or **Settings › General › Support**) opens a window that gathers what is useful to send. It shows everything first, and **nothing is sent until you press a button**: Scroblytics has no crash reporter and no analytics."),
+                .heading("What the window offers"),
+                .bullets([
+                    "**Crash reports.** If macOS wrote a crash report for Scroblytics, it is listed with its date. **Show in Finder** opens the folder with it selected, ready to attach. A crash report names your Mac account in its file paths, so send it by email rather than posting it publicly. After a crash, a one-line notice under the toolbar offers the same window the next time you open the app.",
+                    "**Diagnostic summary.** A short text you can read in the window: the Scroblytics and macOS versions, the kind of Mac, how many scrobbles and artists are imported, whether an account is connected (not its name), where the last sync got to, whether Offline mode is on, and the last 60 lines of the activity log. It contains **no Last.fm name, no keys and no music** (no artist, album or track names), and file paths are removed. **Copy** it, **Save…** it as a text file, or **Refresh** it.",
+                    "**Email…** opens a Mail draft to the project address with the summary and, if you leave the box ticked, the newest crash report attached. You decide whether to press Send. If your Mac has no Mail compose window, the summary is copied and your mail app opens with just the address.",
+                    "**Open GitHub Issue…** copies the summary and opens the issue page in your browser; paste it in. Issues are public, so leave crash reports for email.",
+                ]),
+                .heading("The activity log"),
+                .paragraph("To make sync problems easy to explain, Scroblytics keeps a small log of what it did and what went wrong, in plain words: that the app launched, that a sync started, finished, stopped or failed and why, that Last.fm asked it to slow down and for how long, that Offline mode changed, and that a database could not be opened. It never records artist, album, track, tag or question text, your Last.fm name or your keys. It keeps only the newest few hundred lines in `~/Library/Application Support/Scroblytics/activity.log`, it is not part of backups, and nothing reads it except you, through this window. **Clear Activity Log** deletes it."),
+                .callout(.tip, "When you write to ask for help, say what you were doing and what you expected. The summary shows what the app saw; you know what you were trying to do."),
+                .paragraph("See also [What leaves your Mac](help://what-leaves-your-mac) and [Sync messages and what to do](help://sync-messages)."),
             ]
         ),
     ])

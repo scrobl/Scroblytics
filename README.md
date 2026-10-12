@@ -51,7 +51,7 @@ the Ask provider you choose), and **Offline mode** stops all of it. There is no 
 
 ## Feedback
 
-Found a bug or have an idea? [Open an issue](../../issues), or write to Scroblytics@proton.me. Please don't paste your API keys.
+Found a bug or have an idea? [Open an issue](../../issues), or write to Scroblytics@proton.me. Please don't paste your API keys. If something goes wrong, **Help › Report a Problem…** gathers a summary (no account name, keys or music) and the latest crash report for you to send; nothing is sent unless you choose to.
 
 ## License and acknowledgements
 

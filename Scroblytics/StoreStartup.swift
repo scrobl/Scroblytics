@@ -83,6 +83,7 @@ enum StoreStartup {
         } catch {
             let path = storePath ?? URL.applicationSupportDirectory.appending(path: "default.store").path
             let failure = StoreStartupFailure.describe(error, storePath: path)
+            ActivityLog.record(.startup, "Couldn't open the database (\(failure.cause)): \(failure.details)")
             log.error("Couldn't open the database at \(path, privacy: .public): \(String(describing: error), privacy: .public)")
             #if DEBUG
             FileHandle.standardError.write(Data("STARTUP database failure cause=\(failure.cause) path=\(path)\nSTARTUP details: \(failure.details.replacingOccurrences(of: "\n", with: " | "))\nSTARTUP codes: \(StoreStartupFailure.codes(in: error))\n".utf8))

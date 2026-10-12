@@ -293,13 +293,20 @@ actor LastfmAPIClient {
         while true {
             do {
                 let result = try await body()
-                if rateLimits > 0 { onWait?(nil) }
+                if rateLimits > 0 {
+                    ActivityLog.record(.network, "Last.fm accepted requests again after waiting \(Int(waited)) s")
+                    onWait?(nil)
+                }
                 return result
             } catch let error as LastfmAPIError where error.isRateLimit {
                 let wait = rateLimitPolicy.wait(afterRateLimits: rateLimits)
-                guard waited + wait <= rateLimitPolicy.patience else { throw error }
+                guard waited + wait <= rateLimitPolicy.patience else {
+                    ActivityLog.record(.network, "Last.fm is still rate-limiting (error 29) after \(Int(waited)) s; giving up for now")
+                    throw error
+                }
                 rateLimits += 1
                 waited += wait
+                ActivityLog.record(.network, "Last.fm rate limit (error 29): waiting \(Int(wait.rounded(.up))) s (wait \(rateLimits))")
                 onWait?(Int(wait.rounded(.up)))
                 try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }

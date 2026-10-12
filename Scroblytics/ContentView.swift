@@ -201,6 +201,7 @@ struct ContentView: View {
                 ImportStatusStrips(container: modelContainer, isSyncing: isSyncing, onResume: { startSync(full: false) })
                 OfflineStrip()
                 UpdateStrip()
+                CrashNoticeStrip()
                 BackgroundWorkStrip(store: backgroundWork)
             }
         }

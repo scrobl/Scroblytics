@@ -167,6 +167,7 @@ struct ScroblyticsApp: App {
         QueryCapChecks.runHeadlessIfRequested()
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()
+        DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()
         Task { @MainActor in
@@ -196,6 +197,8 @@ struct ScroblyticsApp: App {
         LibraryGapsDebugEval.runHeadlessIfRequested(container: modelContainer)
         TagPlanDebugEval.runHeadlessIfRequested(container: modelContainer)
         #endif
+        // The small activity log behind Help › Report a Problem. It stays on this Mac.
+        Task { @MainActor in ActivityEvents.start() }
     }
 
     var body: some Scene {
@@ -233,6 +236,12 @@ struct ScroblyticsApp: App {
                 .preferredColorScheme(appearance.colorScheme)
         }
         .defaultSize(width: 980, height: 700)
+
+        Window("Report a Problem", id: "report-problem") {
+            ReportProblemView(modelContainer: modelContainer)
+                .preferredColorScheme(appearance.colorScheme)
+        }
+        .defaultSize(width: 580, height: 660)
 
         Window("Data Management", id: "data-management") {
             VStack(spacing: 0) {
@@ -361,6 +370,8 @@ private struct HelpCommands: Commands {
             Button("Scroblytics Help") { openWindow(id: "help") }
                 .keyboardShortcut("?", modifiers: .command)
             Button("Privacy Policy") { openURL(AppIdentity.privacyPolicyURL) }
+            Divider()
+            Button("Report a Problem…") { openWindow(id: "report-problem") }
         }
     }
 }
@@ -462,6 +473,7 @@ private struct AppearanceSettingsView: View {
             }
 
             PrivacySettingsSection()
+            SupportSettingsSection()
 
             UpdateSettingsSection()
 

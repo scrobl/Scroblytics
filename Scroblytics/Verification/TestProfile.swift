@@ -43,6 +43,16 @@ enum TestProfile {
         return url
     }()
 
+    /// Where the crash-report finder looks (`SCROBLYTICS_DIAGNOSTIC_REPORTS_DIR`), so the "quit unexpectedly" notice can be tested with
+    /// made-up report files. Only under a test profile and only a folder inside /tmp, never the real reports folder.
+    static let crashReportsFolderOverride: URL? = {
+        guard let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_DIAGNOSTIC_REPORTS_DIR"], !raw.isEmpty else { return nil }
+        guard name != nil else { stop("SCROBLYTICS_DIAGNOSTIC_REPORTS_DIR only works under a test profile (SCROBLYTICS_PROFILE).") }
+        let url = URL(fileURLWithPath: raw).standardizedFileURL
+        guard url.path.hasPrefix("/tmp/") || url.path.hasPrefix("/private/tmp/") else { stop("SCROBLYTICS_DIAGNOSTIC_REPORTS_DIR must be a folder inside /tmp.") }
+        return url
+    }()
+
     /// With `SCROBLYTICS_PROFILE_SEED_ACCOUNT=1`, a stand-in Last.fm server and a profile that has no account yet, saves
     /// made-up credentials (the app writes its own Keychain item, so macOS doesn't ask about access) so the app starts
     /// syncing at launch. Real credentials are never touched: a profile has its own item, and the stand-in server is

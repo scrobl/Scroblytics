@@ -58,9 +58,16 @@ Ask turns a sentence into filters using a language model that **you choose** in 
 
 ## What the developer receives
 
-Nothing. The app has no telemetry, no usage statistics and no crash reporter. If you choose to share diagnostic information with
-Apple through macOS settings, that is between you and Apple. If you contact the developer (below), the developer receives
-what you choose to send.
+Nothing, unless you send it. The app has no telemetry, no usage statistics and no crash reporter. If you choose to share
+diagnostic information with Apple through macOS settings, that is between you and Apple.
+
+To help with problems, the app keeps a small **activity log** on your Mac (the newest few hundred lines, in
+`~/Library/Application Support/Scroblytics/activity.log`): when a sync started, finished or failed and why, rate-limit waits, Offline
+mode changes and similar events. It records no artist, album, track, tag or question text, no Last.fm username and no keys. Nothing
+reads it except you: **Help › Report a Problem…** shows it, with a summary of the app's state, and you can copy it, save it, or start an
+email or a GitHub issue with it. The app never sends it by itself, and **Clear Activity Log** deletes it. A crash report macOS
+writes is yours to attach or not; it names your Mac account in its file paths. If you contact the developer (below), the developer
+receives what you choose to send.
 
 ## Your choices and control
 

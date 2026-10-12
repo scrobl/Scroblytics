@@ -104,6 +104,8 @@ machine on this Mac is enough:
    report. Last time the crash appeared within about 2 minutes. A task group (`withTaskGroup`) started from the Overview's refresh was
    the trigger; don't reintroduce one there without this test.
 
+4. When the test is finished, clear the test data from the VM (the imported database and the Keychain item) and shut it down: `ssh … 'sudo shutdown -h now'`, then check `tart list` shows it as `stopped`. Leave it stopped until the next release needs it.
+
 Crash reports from users are read with `scripts/symbolicate-crash.py` (see above).
 
 ## Test with a large library

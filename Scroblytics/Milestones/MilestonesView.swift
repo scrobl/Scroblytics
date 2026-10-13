@@ -279,7 +279,7 @@ struct MilestonesView: View {
         latestRequestID = requestID
         do {
             let container = modelContainer
-            let scrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchCanonicalSnapshots() }
+            let scrobbles = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
             guard latestRequestID == requestID else { return }
             let computed = await Task.detached(priority: .utility) {
                 MilestonesEngine.fetch(scrobbles: scrobbles)

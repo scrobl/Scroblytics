@@ -65,7 +65,7 @@ enum SimilarSoundsEngine {
         seeds: [RecommendationSeed], context: ModelContext, client: LastfmAPIClient
     ) async throws -> (candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult]) {
         let container = context.container
-        let allScrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+        let allScrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
         return try await run(seeds: seeds, scrobbles: allScrobbles, client: client)
     }
 

@@ -150,7 +150,7 @@ final class StaleRecordReviewModel {
         defer { isRefreshing = false; hasLoaded = true }
         errorMessage = nil
         do {
-            let snapshots = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+            let snapshots = try await ScrobbleHistoryCache.shared.snapshots(container: container)
             let context = container.mainContext
             var artistNames: [String: String] = [:]
             for artist in try context.fetch(FetchDescriptor<Artist>()) { artistNames[artist.normalizedName] = artist.name }

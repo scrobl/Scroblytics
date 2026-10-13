@@ -41,6 +41,9 @@ struct TrendsView: View {
     @State private var needsReload = false
     @State private var latestRequestID = UUID()
     @State private var reloadDebounceTask: Task<Void, Never>?
+    @State private var lastFullReloadAt = Date.distantPast
+    @State private var backgroundDataIsNewer = false
+    @State private var trailingRefreshTask: Task<Void, Never>?
 
     private var rangeOptions: [DateRangeOption] { DateRangePresets.build(oldestScrobbleDate: oldestScrobbleDate) }
     private var currentRange: DateRange { (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).range() }
@@ -178,18 +181,9 @@ struct TrendsView: View {
             querySnapshots = nil
             requestReload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in
-            querySnapshots = nil
-            requestReload()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in
-            querySnapshots = nil
-            requestReload()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
-            querySnapshots = nil
-            requestReload()
-        }
+        .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in backgroundDataMoved() }
+        .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in backgroundDataMoved() }
+        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in backgroundDataMoved() }
     }
 
     private func applyOverviewFocus() {
@@ -204,10 +198,39 @@ struct TrendsView: View {
     // MARK: - Loading
 
     private func loadIfNeeded() async {
+        if isActive, backgroundDataIsNewer, hasLoaded {
+            // The background lookups moved on while this page wasn't showing.
+            querySnapshots = nil
+            needsReload = true
+        }
         guard isActive, !hasLoaded || needsReload else { return }
         needsReload = false
         await reload()
         hasLoaded = true
+    }
+
+    /// While a long backlog of lookups (tags, track lengths, release dates) is worked through, they announce progress every few seconds.
+    /// Recalculating every chart each time kept the page loading and the Mac busy, so the page refreshes for them at most once in
+    /// `backgroundRefreshInterval`, and otherwise when it is next opened.
+    static let backgroundRefreshInterval: TimeInterval = 180
+
+    private func backgroundDataMoved() {
+        backgroundDataIsNewer = true
+        guard isActive, hasLoaded else { return }
+        let wait = Self.backgroundRefreshInterval - Date().timeIntervalSince(lastFullReloadAt)
+        if wait <= 0 {
+            querySnapshots = nil
+            requestReload()
+        } else if trailingRefreshTask == nil {
+            // Not yet: catch up once the interval has passed, so what resolved meanwhile still shows without opening the page again.
+            trailingRefreshTask = Task {
+                try? await Task.sleep(for: .seconds(wait))
+                trailingRefreshTask = nil
+                guard !Task.isCancelled, isActive, backgroundDataIsNewer else { return }
+                querySnapshots = nil
+                requestReload()
+            }
+        }
     }
 
     private func requestReload() {
@@ -223,11 +246,13 @@ struct TrendsView: View {
     private func reload() async {
         let requestID = UUID()
         latestRequestID = requestID
+        lastFullReloadAt = Date()
+        backgroundDataIsNewer = false
         do {
             let all: [ScrobbleSnapshot]
             if let scrobbles { all = scrobbles } else {
                 let container = modelContainer
-                all = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+                all = try await ScrobbleHistoryCache.shared.snapshots(container: container)
                 guard latestRequestID == requestID else { return }
                 scrobbles = all
                 oldestScrobbleDate = all.first?.playedAt
@@ -246,12 +271,16 @@ struct TrendsView: View {
                 querySnapshots = snapshots
                 dataVersion += 1
             }
-            let cachedCanonical = canonicalScrobbles
-            let (anyPlays, canonical) = await Task.detached(priority: .utility) {
-                let anyPlays = all.contains { $0.playedAt >= range.from && $0.playedAt <= range.to }
+            // Track identity here is the same one Query uses (artist spellings merged) — every chart below reads it. It is worked
+            // out once for the whole app (`ScrobbleHistoryCache`), not again for this page.
+            let canonical: [ScrobbleSnapshot]
+            if let cachedCanonical = canonicalScrobbles { canonical = cachedCanonical } else {
+                canonical = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+                guard latestRequestID == requestID else { return }
+            }
+            let anyPlays = await Task.detached(priority: .utility) {
+                all.contains { $0.playedAt >= range.from && $0.playedAt <= range.to }
                     || (compareRange.map { c in all.contains { $0.playedAt >= c.from && $0.playedAt <= c.to } } ?? false)
-                // Track identity here is the same one Query uses (artist spellings merged) — every chart below reads it.
-                return (anyPlays, cachedCanonical ?? QueryIdentity.canonicalizingArtists(all))
             }.value
             canonicalScrobbles = canonical
             volumeInputs = TrendsVolumeChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)

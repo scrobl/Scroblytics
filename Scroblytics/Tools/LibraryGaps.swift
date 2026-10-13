@@ -343,7 +343,7 @@ enum LibraryGapsRunner {
     /// Distinct scrobbled tracks with plays, artists canonicalized the way Query and the other tools see them.
     static func scrobbledUsage(container: ModelContainer) async throws -> [LibraryTrackUsage] {
         let snapshots = try await offMain {
-            QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+            try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
         }
         return await Task.detached(priority: .userInitiated) { LibraryGapsEngine.usage(from: snapshots) }.value
     }
@@ -407,7 +407,7 @@ enum LibraryGapsDebugEval {
                 // Query fields, checked against the saved table through the real engine.
                 do {
                     let canon = try await offMain {
-                        QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+                        try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                     }
                     let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
                     let snapshots = QuerySnapshots(libraryPresence: loaded.libraryPresence)
@@ -447,7 +447,7 @@ enum LibraryGapsDebugEval {
                 func tableCount() throws -> Int { try context.fetch(FetchDescriptor<LibraryGapDismissal>()).count }
                 func queryNotInLibrary() async throws -> Set<String> {
                     let canon = try await offMain {
-                        QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+                        try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                     }
                     let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
                     var spec = QuerySpec(target: .track)

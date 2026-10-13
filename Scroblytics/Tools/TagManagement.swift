@@ -291,7 +291,7 @@ enum TagQuerySource {
         guard spec.target == .track else { throw TagQuerySourceError.notTracks(spec.target.pluralLabel.lowercased()) }
         let validated = try spec.validate(against: .standard)
         let scrobbles = try await offMain {
-            QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+            try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
         }
         let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
         let snapshots = QuerySnapshots(
@@ -579,7 +579,7 @@ enum TagPlanDebugEval {
                 }
                 out.append("READ playlist=\(playlist.name) id=\(playlist.id) smart=\(playlist.isSmart) tracks=\(tracks.count) library=\(library.count) in \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
                 let scrobbles = try await offMain {
-                    QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+                    try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                 }
                 let t1 = Date()
                 let index = ScrobbleTrackIndex(scrobbles: scrobbles)

@@ -62,16 +62,23 @@ enum MostRecentMostOftenEngine {
               let firstKey = result.columns.first(where: { $0.field.id == "firstPlayed" })?.cacheKey,
               let lastKey = result.columns.first(where: { $0.field.id == "lastPlayed" })?.cacheKey else { return nil }
 
+        // Each row's sparkline needs that track's play times. Looking them up row by row meant reading the whole history once per row,
+        // so one pass collects them for every row.
+        var rowOfTrack: [String: [String: Int]] = [:]
+        for (index, row) in result.rows.enumerated() { rowOfTrack[row.entity.id.artist, default: [:]][row.entity.id.name] = index }
+        var playTimes = [[Date]](repeating: [], count: result.rows.count)
+        for s in scrobbles {
+            if let index = rowOfTrack[s.artistName]?[s.trackName] { playTimes[index].append(s.playedAt) }
+        }
+
         var rows: [MostRecentMostOftenRow] = []
-        for row in result.rows {
+        for (index, row) in result.rows.enumerated() {
             guard case .value(.number(let p))? = row.cells[playsKey],
                   case .value(.number(let d))? = row.cells[daysKey],
                   case .value(.date(let first))? = row.cells[firstKey],
                   case .value(.date(let last))? = row.cells[lastKey] else { continue }
-            let sparkline = TrendEngine.fetch(
-                scrobbles: scrobbles, artist: row.entity.id.artist, album: nil, track: row.entity.id.name,
-                range: DateRange(from: first, to: now)
-            )
+            let range = DateRange(from: first, to: now)
+            let sparkline = TrendEngine.series(playedAt: playTimes[index], range: range, granularity: TrendEngine.autoGranularity(range))
             rows.append(MostRecentMostOftenRow(
                 id: row.entity.id, artist: row.entity.id.artist, title: row.entity.id.name,
                 plays: Int(p), daysSinceFirstPlayed: Int(d), firstPlayed: first, lastPlayed: last, sparkline: sparkline

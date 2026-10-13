@@ -57,7 +57,7 @@ final class TagReviewModel {
             }
             if index == nil || refreshIndex {
                 let scrobbles = try await offMain {
-                    QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+                    try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                 }
                 index = await Task.detached(priority: .userInitiated) { ScrobbleTrackIndex(scrobbles: scrobbles) }.value
             }

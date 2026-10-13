@@ -54,6 +54,8 @@ struct TopChartsView: View {
     @State private var cache: [TopChartsCacheKey: TopChartsCacheValue] = [:]
     @State private var hasLoaded = false
     @State private var needsReload = false
+    @State private var lastDurationRefreshAt = Date.distantPast
+    @State private var durationRefreshTask: Task<Void, Never>?
     @State private var showsSlowLoadingIndicator = false
     @State private var slowLoadingTask: Task<Void, Never>?
     @State private var showsChartRace = false
@@ -143,12 +145,31 @@ struct TopChartsView: View {
             latestRequestID = UUID()
             if !isActive { needsReload = true }
         }
-        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
-            guard settings.metric == .timeListened else { return }
-            cache = cache.filter { $0.key.metric != TopChartsMetric.timeListened.rawValue }
-            ChartRaceEngine.invalidateCache()
-            requestReload()
+        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in trackLengthsAnnounced() }
+    }
+
+    private func trackLengthsAnnounced() {
+        guard settings.metric == .timeListened else { return }
+        // Track lengths arrive every few seconds during a long backlog; re-ranking everything each time kept a big library busy.
+        let wait = 180 - Date().timeIntervalSince(lastDurationRefreshAt)
+        if wait <= 0 {
+            refreshForTrackLengths()
+        } else if durationRefreshTask == nil {
+            // Catch up once the interval has passed, so lengths that resolved meanwhile still show.
+            durationRefreshTask = Task {
+                try? await Task.sleep(for: .seconds(wait))
+                durationRefreshTask = nil
+                guard !Task.isCancelled, settings.metric == .timeListened else { return }
+                refreshForTrackLengths()
+            }
         }
+    }
+
+    private func refreshForTrackLengths() {
+        lastDurationRefreshAt = Date()
+        cache = cache.filter { $0.key.metric != TopChartsMetric.timeListened.rawValue }
+        ChartRaceEngine.invalidateCache()
+        requestReload()
     }
 
     private func loadIfNeeded() async {

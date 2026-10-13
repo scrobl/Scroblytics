@@ -454,7 +454,7 @@ struct ContentView: View {
             let container = modelContainer
             let beforeCounts: SyncEventsEngine.EntityCounts?
             if previousSyncAt != nil {
-                let before = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchCanonicalSnapshots() }
+                let before = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                 beforeCounts = await Task.detached(priority: .utility) { SyncEventsEngine.countEntities(before) }.value
             } else {
                 beforeCounts = nil
@@ -578,7 +578,7 @@ struct ContentView: View {
     ) async {
         do {
             let container = modelContainer
-            let after = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchCanonicalSnapshots() }
+            let after = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
             let afterCounts = await Task.detached(priority: .utility) { SyncEventsEngine.countEntities(after) }.value
             let milestones = SyncEventsEngine.findNewMilestones(before: before, after: afterCounts)
             pendingSyncEvents.append(milestones: milestones, turnovers: [])

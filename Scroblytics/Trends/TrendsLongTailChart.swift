@@ -55,7 +55,7 @@ struct TrendsLongTailChart: View {
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
-        .task(id: ComputeKey(entity: entity, metric: metric, inputs: inputs)) { await recompute() }
+        .task(id: ComputeKey(entity: entity, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
     }
 
     private var controls: some View {
@@ -161,10 +161,10 @@ struct TrendsLongTailChart: View {
     private func recompute() async {
         isLoading = true
         let (target, metric, inputs) = (entity, self.metric, self.inputs)
-        let computed = await Task.detached(priority: .utility) {
+        let computed = await TrendsComputeGate.shared.run {
             TrendsLongTailEngine.compute(scrobbles: inputs.scrobbles, snapshots: inputs.snapshots, target: target, metric: metric, range: inputs.range)
-        }.value
-        guard !Task.isCancelled else { return }
+        }
+        guard !Task.isCancelled, let computed else { return }
         data = computed
         isLoading = false
     }

@@ -29,18 +29,36 @@ struct ListeningStreakResult: Sendable {
 /// Pure computation over a `Sendable` snapshot — safe to run off the main
 /// actor, which Overview now does for its whole local phase.
 enum ListeningStreakEngine {
+    static func dayKey(_ date: Date, calendar: Calendar) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
+    }
+
+    /// Plays per local day ("YYYY-MM-DD"). Plays that follow one another on the same day are counted against the day they started,
+    /// so the calendar is asked for a day's bounds once per day instead of once per play.
+    static func countsByDay(_ plays: [ScrobbleSnapshot], calendar: Calendar) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        var windowStart = Date.distantFuture
+        var windowEnd = Date.distantPast
+        var windowCount = 0
+        for s in plays {
+            let time = s.playedAt
+            if time >= windowStart && time < windowEnd { windowCount += 1; continue }
+            if windowCount > 0 { counts[dayKey(windowStart, calendar: calendar), default: 0] += windowCount }
+            windowStart = calendar.startOfDay(for: time)
+            windowEnd = calendar.date(byAdding: .day, value: 1, to: windowStart) ?? time.addingTimeInterval(86_400)
+            windowCount = 1
+        }
+        if windowCount > 0 { counts[dayKey(windowStart, calendar: calendar), default: 0] += windowCount }
+        return counts
+    }
+
     static func fetch(scrobbles allScrobbles: [ScrobbleSnapshot], days: Int = 30) -> ListeningStreakResult {
         let calendar = AppCalendars.listening
 
-        func dayKey(_ date: Date) -> String {
-            let c = calendar.dateComponents([.year, .month, .day], from: date)
-            return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
-        }
+        func dayKey(_ date: Date) -> String { Self.dayKey(date, calendar: calendar) }
 
-        var countsByDay: [String: Int] = [:]
-        for s in allScrobbles {
-            countsByDay[dayKey(s.playedAt), default: 0] += 1
-        }
+        let countsByDay = Self.countsByDay(allScrobbles, calendar: calendar)
 
         let today = calendar.startOfDay(for: Date())
 

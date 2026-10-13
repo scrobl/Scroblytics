@@ -171,6 +171,7 @@ struct ScroblyticsApp: App {
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
         PerfChecks.runHeadlessIfRequested(container: modelContainer)
         RabbitHoleChecks.runHeadlessIfRequested(container: modelContainer)
+        Task { @MainActor in ProgressSimulator.startIfRequested() }
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()
         Task { @MainActor in
@@ -202,6 +203,7 @@ struct ScroblyticsApp: App {
         #endif
         // The small activity log behind Help › Report a Problem. It stays on this Mac.
         Task { @MainActor in ActivityEvents.start() }
+        Task { @MainActor in ScrobbleHistoryCache.observeHistoryChanges() }
     }
 
     var body: some Scene {

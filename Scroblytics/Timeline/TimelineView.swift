@@ -61,6 +61,8 @@ struct TimelineView: View {
     @State private var isLoading = false
     @State private var hasLoaded = false
     @State private var needsReload = false
+    @State private var lastDurationReloadAt = Date.distantPast
+    @State private var durationReloadTask: Task<Void, Never>?
     @State private var latestRequestID = UUID()
     @State private var reloadDebounceTask: Task<Void, Never>?
 
@@ -119,7 +121,19 @@ struct TimelineView: View {
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             guard settings.metric == .timeListened else { return }
-            requestReload()
+            // Track lengths are announced every few seconds during a long backlog, and each reload reads and ranks the whole history.
+            let wait = 180 - Date().timeIntervalSince(lastDurationReloadAt)
+            if wait <= 0 {
+                requestReload()
+            } else if durationReloadTask == nil {
+                // Catch up once the interval has passed, so lengths that resolved meanwhile still show.
+                durationReloadTask = Task {
+                    try? await Task.sleep(for: .seconds(wait))
+                    durationReloadTask = nil
+                    guard !Task.isCancelled, settings.metric == .timeListened else { return }
+                    requestReload()
+                }
+            }
         }
     }
 
@@ -214,12 +228,13 @@ struct TimelineView: View {
     private func reload() async {
         let requestID = UUID()
         latestRequestID = requestID
+        lastDurationReloadAt = Date()
         isLoading = true
         defer { if latestRequestID == requestID { isLoading = false } }
         let metric = settings.metric
         do {
             let container = modelContainer
-            let scrobbles = try await offMain { try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots() }
+            let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
             // Both helpers are main-actor isolated, so they run here rather than
             // inside the background reader.
             let snapshot = TimelineDataSnapshot(

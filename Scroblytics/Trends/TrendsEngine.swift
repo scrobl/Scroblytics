@@ -45,9 +45,10 @@ enum TrendsEngine {
     ) -> (buckets: [(start: Date, value: Int)], pending: Int) {
         var sums: [Date: Int] = [:]
         var pending = 0
+        let calendar = AppCalendars.listening
         for s in scrobbles where s.playedAt >= range.from && s.playedAt <= range.to {
             guard let weight = TrendsWeight.of(s, metric: metric, durations: durations) else { pending += 1; continue }
-            sums[TrendEngine.bucketStart(s.playedAt, granularity: granularity), default: 0] += weight
+            sums[TrendEngine.bucketStart(s.playedAt, granularity: granularity, calendar: calendar), default: 0] += weight
         }
         var buckets: [(Date, Int)] = []
         var cursor = TrendEngine.bucketStart(range.from, granularity: granularity)
@@ -287,9 +288,10 @@ enum TrendsDiscoveryEngine {
         func series(_ r: DateRange) -> (buckets: [(start: Date, new: Int, repeats: Int)], pending: Int) {
             var counts: [Date: (Int, Int)] = [:]
             var pending = 0
+            let calendar = AppCalendars.listening
             for (i, s) in scrobbles.enumerated() where s.playedAt >= r.from && s.playedAt <= r.to && !s.trackName.isEmpty {
                 guard let weight = TrendsWeight.of(s, metric: metric, durations: durations) else { pending += 1; continue }
-                let bucket = TrendEngine.bucketStart(s.playedAt, granularity: granularity)
+                let bucket = TrendEngine.bucketStart(s.playedAt, granularity: granularity, calendar: calendar)
                 var c = counts[bucket] ?? (0, 0)
                 if isFirst[i] { c.0 += weight } else { c.1 += weight }
                 counts[bucket] = c

@@ -36,7 +36,7 @@ final class AskSimilarRouter {
 enum AskSimilarResolver {
     static func resolve(_ intent: AskSimilarIntent, container: ModelContainer) async -> SimilarSeed? {
         guard let scrobbles = try? await offMain({
-            QueryIdentity.canonicalizingArtists(try await ScrobbleSnapshotReader(modelContainer: container).fetchSortedSnapshots())
+            try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
         }) else { return nil }
         return await Task.detached(priority: .userInitiated) { resolve(intent, scrobbles: scrobbles) }.value
     }

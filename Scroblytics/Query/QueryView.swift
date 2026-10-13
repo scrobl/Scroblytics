@@ -163,16 +163,16 @@ struct QueryView: View {
         // Warmer progress arrives every few seconds for an hour after a first sync; while this tab
         // isn't showing, none of it needs acting on — it's picked up on the way back in.
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
-            if isActive { model.refreshSnapshots() }
+            if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
         .onReceive(NotificationCenter.default.publisher(for: BPMEngine.progressNotification)) { _ in
-            if isActive { model.refreshSnapshots() }
+            if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
         .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in
-            if isActive { model.refreshSnapshots() }
+            if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
         .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in
-            if isActive { model.refreshSnapshots() }
+            if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             guard hasLoaded else { return }

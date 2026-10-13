@@ -702,7 +702,7 @@ struct RabbitHoleView: View {
         do {
             if scrobbles == nil {
                 let fetched = try await offMain {
-                    try await ScrobbleSnapshotReader(modelContainer: modelContainer).fetchSortedSnapshots()
+                    try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
                 }
                 let canonical = QueryIdentity.canonicalizingArtists(fetched)
                 scrobbles = canonical

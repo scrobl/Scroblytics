@@ -108,8 +108,8 @@ struct RabbitHoleView: View {
                     emptyState
                 } else {
                     filters
-                    currentStep
                     treeView
+                    currentStep
                     candidatesView
                     whyThese
                     Color.clear.frame(height: 1).id(Self.bottomID)

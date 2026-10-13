@@ -254,7 +254,7 @@ enum RabbitHoleChecks {
                 return offered(["W\(n)a", "W\(n)b", "W\(n)c"], scores: [90, 70, 50])
             }
             var rngW = SeededGenerator(state: 21)
-            let sixty = try? await RabbitHoleWalk.run(length: .minutes60, rule: .mostSimilar, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 200 }, using: &rngW)
+            let sixty = try? await RabbitHoleWalk.run(length: .minutes60, variety: 0, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 200 }, using: &rngW)
             check("a 60-minute walk of 200-second tracks adds 18 tracks, stopping at the first that reaches the hour",
                   sixty?.progress.tracksAdded == 18 && sixty?.ending == .reachedLength && (sixty?.progress.seconds ?? 0) == 3600, "\(sixty?.progress.tracksAdded ?? -1)")
             let pathOfSixty = sixty?.tree.path() ?? []
@@ -263,13 +263,13 @@ enum RabbitHoleChecks {
             check("each step keeps the offeredThree options it chose from", (pathOfSixty.dropLast().allSatisfy { ($0.candidates ?? []).count == 3 }))
             check("the walk reports the nodes it added, in order", sixty?.addedNodeIDs == pathOfSixty.dropFirst().map(\.id))
             counter.calls = 0
-            let twenty = try? await RabbitHoleWalk.run(length: .tracks20, rule: .balanced, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 200 }, using: &rngW)
+            let twenty = try? await RabbitHoleWalk.run(length: .tracks20, variety: 1, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 200 }, using: &rngW)
             check("a 20-track walk adds exactly 20", twenty?.progress.tracksAdded == 20 && twenty?.ending == .reachedLength)
             counter.calls = 0
-            let quick = try? await RabbitHoleWalk.run(length: .minutes90, rule: .balanced, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 1 }, using: &rngW)
+            let quick = try? await RabbitHoleWalk.run(length: .minutes90, variety: 1, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 1 }, using: &rngW)
             check("a walk never goes past \(RabbitHoleWalk.maxSteps) steps", quick?.progress.tracksAdded == RabbitHoleWalk.maxSteps && quick?.ending == .stepLimit)
             counter.calls = 0
-            let unknown = try? await RabbitHoleWalk.run(length: .minutes60, rule: .balanced, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in nil }, using: &rngW)
+            let unknown = try? await RabbitHoleWalk.run(length: .minutes60, variety: 1, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in nil }, using: &rngW)
             check("tracks of unknown length count as about 3.5 minutes and the result is marked approximate",
                   unknown?.progress.approximate == true && unknown?.progress.tracksAdded == 18 && unknown?.progress.seconds == 18 * RabbitHoleWalk.assumedTrackSeconds)
 
@@ -284,7 +284,7 @@ enum RabbitHoleChecks {
                 }
                 return offered(["X\(deadCounter.calls)a", "X\(deadCounter.calls)b", "X\(deadCounter.calls)c"], scores: [90, 70, 50])
             }
-            let recovered = try? await RabbitHoleWalk.run(length: .tracks10, rule: .mostSimilar, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: withDeadEnd, seconds: { _ in 200 }, using: &rngW)
+            let recovered = try? await RabbitHoleWalk.run(length: .tracks10, variety: 0, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: withDeadEnd, seconds: { _ in 200 }, using: &rngW)
             let recoveredPath = recovered?.tree.path() ?? []
             check("a dead end is backed out of and the walk carries on to its length", recovered?.progress.tracksAdded == 10 && recovered?.ending == .reachedLength, "\(recovered?.progress.tracksAdded ?? -1) \(String(describing: recovered?.ending))")
             check("the dead end is not on the path, and its time is not counted", !recoveredPath.contains { $0.track.track == "DEAD1" } && recoveredPath.count == 11 && recovered?.progress.seconds == 2000)
@@ -293,7 +293,7 @@ enum RabbitHoleChecks {
                 stuckCounter.calls += 1
                 return node.parentID == nil ? offered(["S\(stuckCounter.calls)a", "S\(stuckCounter.calls)b", "S\(stuckCounter.calls)c"], scores: [90, 70, 50]) : []
             }
-            let stuck = try? await RabbitHoleWalk.run(length: .tracks10, rule: .mostSimilar, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: alwaysDead, seconds: { _ in 200 }, using: &rngW)
+            let stuck = try? await RabbitHoleWalk.run(length: .tracks10, variety: 0, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: alwaysDead, seconds: { _ in 200 }, using: &rngW)
             check("repeated dead ends end the walk, back at where it began", stuck?.ending == .deadEnd && stuck?.progress.tracksAdded == 0 && stuck?.tree.currentID == stuck?.tree.rootID)
 
             // Stopping keeps a valid tree; an error keeps what was done.
@@ -301,7 +301,7 @@ enum RabbitHoleChecks {
             let box = Box(); let stopCounter = Counter()
             box.task = Task { @MainActor in
                 var rng = SeededGenerator(state: 8)
-                return try? await RabbitHoleWalk.run(length: .minutes90, rule: .balanced, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: { _, _, _ in
+                return try? await RabbitHoleWalk.run(length: .minutes90, variety: 1, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: { _, _, _ in
                     stopCounter.calls += 1
                     if stopCounter.calls == 5 { box.task?.cancel() }
                     return offered(["P\(stopCounter.calls)a", "P\(stopCounter.calls)b", "P\(stopCounter.calls)c"], scores: [90, 70, 50])
@@ -315,30 +315,41 @@ enum RabbitHoleChecks {
                 if errCounter.calls == 4 { throw StubSimilarity.Failure() }
                 return offered(["E\(errCounter.calls)a", "E\(errCounter.calls)b", "E\(errCounter.calls)c"], scores: [90, 70, 50])
             }
-            let failed = try? await RabbitHoleWalk.run(length: .minutes60, rule: .balanced, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: walkFailing, seconds: { _ in 200 }, using: &rngW)
+            let failed = try? await RabbitHoleWalk.run(length: .minutes60, variety: 1, tree: startTree(), memory: RabbitHoleMemory(), candidatesFor: walkFailing, seconds: { _ in 200 }, using: &rngW)
             var failedAfterThree = false
             if case .failed? = failed?.ending { failedAfterThree = failed?.progress.tracksAdded == 3 }
             check("an error mid-walk keeps the steps already taken", failedAfterThree)
 
-            // Rules and removal.
-            let offeredThree = offered(["Hi", "Mid", "Lo"], scores: [90, 70, 50]) // lastPlayed gets older down the list
+            // The walk follows the page's Variety; removal.
+            let offeredThree = offered(["Hi", "Mid", "Lo"], scores: [90, 70, 50])
             var rngR = SeededGenerator(state: 2)
-            check("'most similar' takes the best match; 'least recently played' takes the oldest",
-                  RabbitHoleWalk.choose(from: offeredThree, rule: .mostSimilar, using: &rngR)?.track == "Hi" && RabbitHoleWalk.choose(from: offeredThree, rule: .leastRecent, using: &rngR)?.track == "Lo")
-            check("'balanced' and 'wander' take one of the offeredThree, and nothing from none",
-                  offeredThree.map(\.track).contains(RabbitHoleWalk.choose(from: offeredThree, rule: .balanced, using: &rngR)?.track ?? "") && RabbitHoleWalk.choose(from: [], rule: .wander, using: &rngR) == nil)
-            var basis = RabbitHoleKnobs(); basis.familiarity = 1; basis.wander = 1
-            check("each rule steers the picks: close, as set, wandering, forgotten",
-                  RabbitHoleWalkRule.mostSimilar.knobs(base: basis).wander == 0 && RabbitHoleWalkRule.balanced.knobs(base: basis) == basis
-                    && RabbitHoleWalkRule.wander.knobs(base: basis).wander == 2 && RabbitHoleWalkRule.leastRecent.knobs(base: basis).familiarity == -2)
+            func shares(_ variety: Int) -> [String: Int] {
+                var counts: [String: Int] = [:]
+                for _ in 0..<3000 { counts[RabbitHoleWalk.choose(from: offeredThree, variety: variety, using: &rngR)?.track ?? "", default: 0] += 1 }
+                return counts
+            }
+            let stayClose = shares(0), balanced = shares(1), wandering = shares(2)
+            check("every variety takes one of the offered three, and nothing from none",
+                  [stayClose, balanced, wandering].allSatisfy { Set($0.keys).isSubset(of: ["Hi", "Mid", "Lo"]) && $0.values.reduce(0, +) == 3000 }
+                    && RabbitHoleWalk.choose(from: [], variety: 2, using: &rngR) == nil)
+            check("'stay stayClose' favours the best match most, 'wander' least, and 'wander' still lets the weakest through",
+                  stayClose["Hi", default: 0] > balanced["Hi", default: 0] && balanced["Hi", default: 0] > wandering["Hi", default: 0]
+                    && wandering["Lo", default: 0] > balanced["Lo", default: 0] && balanced["Lo", default: 0] > stayClose["Lo", default: 0] && stayClose["Lo", default: 0] > 0,
+                  "stayClose \(stayClose) balanced \(balanced) wander \(wandering)")
+            check("a pick is the same given the same random start", {
+                var one = SeededGenerator(state: 9), two = SeededGenerator(state: 9)
+                return RabbitHoleWalk.choose(from: offeredThree, variety: 1, using: &one)?.track == RabbitHoleWalk.choose(from: offeredThree, variety: 1, using: &two)?.track
+            }())
             let before = startTree()
             counter.calls = 0
-            let walked = try? await RabbitHoleWalk.run(length: .tracks10, rule: .balanced, tree: before, memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 200 }, using: &rngW)
+            let walked = try? await RabbitHoleWalk.run(length: .tracks10, variety: 1, tree: before, memory: RabbitHoleMemory(), candidatesFor: freshOffers, seconds: { _ in 200 }, using: &rngW)
             let restored = RabbitHoleWalk.remove(walk: walked?.addedNodeIDs ?? [], from: walked?.tree ?? before)
             check("removing a walk takes its steps off and returns to where it began", restored.nodes.count == 1 && restored.currentID == before.rootID && restored.nodes[before.rootID!]?.childIDs.isEmpty == true)
             let oldWalkOptions = Data(#"{"tree":{"nodes":[]},"groups":[],"perArtist":1,"perAlbum":0}"#.utf8)
             let walkDefaults = try? JSONDecoder().decode(RabbitHoleView.Options.self, from: oldWalkOptions)
-            check("settings from before walks default to a balanced 60-minute walk", walkDefaults?.walkRule == .balanced && walkDefaults?.walkLength == .minutes60 && walkDefaults?.lastWalk.isEmpty == true)
+            check("settings from before walks default to a 60-minute walk", walkDefaults?.walkLength == .minutes60 && walkDefaults?.lastWalk.isEmpty == true)
+            let withOldRule = Data(#"{"tree":{"nodes":[]},"groups":[],"walkRule":"wander","walkLength":"minutes30"}"#.utf8)
+            check("settings saved with the old walk rule still open, and keep their length", (try? JSONDecoder().decode(RabbitHoleView.Options.self, from: withOldRule))?.walkLength == .minutes30)
 
             // MARK: The similarity cache
             let store = SimilarityCacheStore(modelContainer: container)
@@ -409,9 +420,9 @@ enum RabbitHoleChecks {
                     let walkStart = Date()
                     let walkStartTree = RabbitHoleTree(rootID: root.id, nodes: [root.id: root], currentID: root.id)
                     var walkRNG = SystemRandomNumberGenerator()
-                    let walkKnobs = RabbitHoleWalkRule.balanced.knobs(base: RabbitHoleKnobs())
+                    let walkKnobs = RabbitHoleKnobs()
                     let walk = try await RabbitHoleWalk.run(
-                        length: .minutes60, rule: .balanced, tree: walkStartTree, memory: RabbitHoleMemory(),
+                        length: .minutes60, variety: 1, tree: walkStartTree, memory: RabbitHoleMemory(),
                         candidatesFor: { tree, node, mem in
                             try await RabbitHoleEngine.generate(
                                 from: node.track, path: tree.path(to: node.id), groups: [], perArtist: 1, perAlbum: 0, knobs: walkKnobs, memory: mem,

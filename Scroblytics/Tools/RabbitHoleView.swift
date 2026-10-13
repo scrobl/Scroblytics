@@ -9,10 +9,12 @@ struct RabbitHoleView: View {
         var perAlbum = 0
         var knobs = RabbitHoleKnobs()
         var memory = RabbitHoleMemory()
-        var walkRule = RabbitHoleWalkRule.balanced
         var walkLength = RabbitHoleWalkLength.minutes60
         /// The steps the last walk added, so it can be taken off again.
         var lastWalk: [UUID] = []
+        /// Whether the Filters and Style sections above the path are open.
+        var showFilters = false
+        var showStyle = false
 
         init() {}
 
@@ -25,9 +27,10 @@ struct RabbitHoleView: View {
             perAlbum = try c.decodeIfPresent(Int.self, forKey: .perAlbum) ?? 0
             knobs = try c.decodeIfPresent(RabbitHoleKnobs.self, forKey: .knobs) ?? RabbitHoleKnobs()
             memory = try c.decodeIfPresent(RabbitHoleMemory.self, forKey: .memory) ?? RabbitHoleMemory()
-            walkRule = try c.decodeIfPresent(RabbitHoleWalkRule.self, forKey: .walkRule) ?? .balanced
             walkLength = try c.decodeIfPresent(RabbitHoleWalkLength.self, forKey: .walkLength) ?? .minutes60
             lastWalk = try c.decodeIfPresent([UUID].self, forKey: .lastWalk) ?? []
+            showFilters = try c.decodeIfPresent(Bool.self, forKey: .showFilters) ?? false
+            showStyle = try c.decodeIfPresent(Bool.self, forKey: .showStyle) ?? false
         }
     }
 
@@ -45,6 +48,7 @@ struct RabbitHoleView: View {
     @State private var poolSize: Int?
     @Environment(NowPlayingStore.self) private var nowPlayingStore: NowPlayingStore?
     @State private var isWalking = false
+    @State private var showingWalkOptions = false
     @State private var isStarting = false
     @State private var walkProgress: RabbitHoleWalk.Progress?
     @State private var walkNote: String?
@@ -104,7 +108,6 @@ struct RabbitHoleView: View {
                     emptyState
                 } else {
                     filters
-                    walkPanel
                     currentStep
                     treeView
                     candidatesView
@@ -223,25 +226,79 @@ struct RabbitHoleView: View {
     }
 
     private var filters: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { capPickers }
-                VStack(alignment: .leading, spacing: 8) { capPickers }
+        VStack(alignment: .leading, spacing: 10) {
+            disclosureRow("Filters", summary: filtersSummary, isOpen: $options.showFilters)
+            if options.showFilters {
+                VStack(alignment: .leading, spacing: 12) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { capPickers }
+                        VStack(alignment: .leading, spacing: 8) { capPickers }
+                    }
+                    QueryConditionsEditor(
+                        groups: $options.groups,
+                        registry: .similarSounds,
+                        target: .track,
+                        tagVocabulary: tagVocabulary,
+                        emptyText: "No conditions — every recommendation in your library can be offered."
+                    )
+                }
+                .padding(.bottom, 4)
             }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { knobPickers }
-                VStack(alignment: .leading, spacing: 8) { knobPickers }
+            Divider()
+            disclosureRow("Style", summary: styleSummary, isOpen: $options.showStyle)
+            if options.showStyle {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) { knobControls }
+                    VStack(alignment: .leading, spacing: 8) { knobControls }
+                }
+                .padding(.bottom, 4)
             }
-            QueryConditionsEditor(
-                groups: $options.groups,
-                registry: .similarSounds,
-                target: .track,
-                tagVocabulary: tagVocabulary,
-                emptyText: "No conditions — every recommendation in your library can be offered."
-            )
         }
         .padding(14)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func disclosureRow(_ title: String, summary: String, isOpen: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { isOpen.wrappedValue.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(AppTypography.compactMetadata)
+                    .rotationEffect(.degrees(isOpen.wrappedValue ? 90 : 0))
+                    .frame(width: 10)
+                Text(title).font(AppTypography.sectionTitle)
+                Text(summary).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(summary)")
+        .accessibilityHint(isOpen.wrappedValue ? "Hides the settings" : "Shows the settings")
+    }
+
+    private var filtersSummary: String {
+        var parts: [String] = []
+        if options.perArtist > 0 { parts.append("\(options.perArtist) per artist") }
+        if options.perAlbum > 0 { parts.append("\(options.perAlbum) per album") }
+        let conditions = options.groups.reduce(0) { $0 + $1.count }
+        if conditions > 0 { parts.append("\(conditions) \(conditions == 1 ? "condition" : "conditions")") }
+        return parts.isEmpty ? "No limits" : parts.joined(separator: " · ")
+    }
+
+    private var styleSummary: String {
+        let variety = ["Stay close", "Balanced", "Wander"][min(2, max(0, options.knobs.wander))]
+        var parts = [variety]
+        switch options.knobs.familiarity {
+        case ...(-2): parts.append("mostly forgotten")
+        case -1: parts.append("leaning forgotten")
+        case 1: parts.append("leaning familiar")
+        case 2...: parts.append("mostly familiar")
+        default: break
+        }
+        if !options.knobs.avoidRepeats { parts.append("repeats allowed") }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -258,29 +315,29 @@ struct RabbitHoleView: View {
             }
         }
         .fixedSize()
-        Text("Conditions affect the next three recommendations, never tracks already on your path.")
-            .font(AppTypography.compactMetadata)
-            .foregroundStyle(.secondary)
+        .help("Filters and limits apply to the next three recommendations, never to tracks already on your path.")
     }
 
     @ViewBuilder
-    private var knobPickers: some View {
-        Picker("Lean toward", selection: $options.knobs.familiarity) {
-            Text("Mostly forgotten").tag(-2)
-            Text("Lean forgotten").tag(-1)
-            Text("No lean").tag(0)
-            Text("Lean familiar").tag(1)
-            Text("Mostly familiar").tag(2)
+    private var knobControls: some View {
+        HStack(spacing: 6) {
+            Text("Lean toward")
+            Text("Forgotten").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            Slider(
+                value: Binding(get: { Double(options.knobs.familiarity) }, set: { options.knobs.familiarity = Int($0.rounded()) }),
+                in: -2...2, step: 1
+            )
+            .frame(width: 120)
+            Text("Familiar").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
         }
-        .fixedSize()
-        .help("Forgotten favours tracks you haven't played for a long time; familiar favours loved and often-played ones.")
+        .help("Forgotten favours tracks you haven't played for a long time; familiar favours loved and often-played ones. The middle has no lean.")
         Picker("Variety", selection: $options.knobs.wander) {
             Text("Stay close").tag(0)
             Text("Balanced").tag(1)
             Text("Wander").tag(2)
         }
         .fixedSize()
-        .help("Stay close picks the best matches; wander gives weaker matches a real chance.")
+        .help("Stay close favours the best matches; wander gives weaker matches a real chance. Steps taken for you follow it too.")
         Toggle("Avoid recent repeats", isOn: $options.knobs.avoidRepeats)
             .help("Makes tracks you were shown or chose in the last week less likely to come up again.")
     }
@@ -310,6 +367,21 @@ struct RabbitHoleView: View {
                 Text("\(currentNode.track.track) — \(currentNode.track.artist)")
                     .font(AppTypography.contentTitle)
             }
+            if let walkProgress, isWalking {
+                Text("Taking steps · step \(walkProgress.tracksAdded) · \(Self.minutesText(walkProgress.seconds)) so far\(walkProgress.approximate ? " (about)" : "")")
+                    .font(AppTypography.compactMetadata)
+                    .foregroundStyle(.secondary)
+            } else if let walkNote {
+                HStack(spacing: 6) {
+                    Text(walkNote).font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    if !options.lastWalk.isEmpty {
+                        Button("Remove Last Walk") { removeLastWalk() }
+                            .buttonStyle(.link)
+                            .font(AppTypography.compactMetadata)
+                            .help("Takes the steps the last walk added off the path again.")
+                    }
+                }
+            }
         }
     }
 
@@ -321,12 +393,48 @@ struct RabbitHoleView: View {
                 totalBeforeConditions = nil
                 requestScrollToBottom()
             }
+            .disabled(isWalking)
         }
         Button("New Suggestions", systemImage: "arrow.clockwise") {
             invalidateAndRegenerate()
             requestScrollToBottom()
         }
-        .disabled(isGenerating)
+        .disabled(isGenerating || isWalking)
+        if isWalking {
+            Button("Stop", systemImage: "stop.circle") { walkTask?.cancel() }
+        } else {
+            Button("Take Steps for Me…", systemImage: "figure.walk") { showingWalkOptions = true }
+                .disabled(isGenerating || currentNode == nil)
+                .popover(isPresented: $showingWalkOptions, arrowEdge: .bottom) { walkOptions }
+                .help("Adds tracks to the path for you, one step at a time.")
+        }
+    }
+
+    private var walkOptions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Take steps for me").font(AppTypography.sectionTitle)
+            Picker("Length", selection: $options.walkLength) {
+                ForEach(RabbitHoleWalkLength.allCases) { Text($0.title).tag($0) }
+            }
+            .fixedSize()
+            Text("Adds tracks to the path one suggestion at a time until the length is reached, following your Filters and Style. Every step stays in the tree, so you can step back, and the whole path can be exported as a playlist.")
+                .font(AppTypography.compactMetadata)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { showingWalkOptions = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Take Steps") {
+                    showingWalkOptions = false
+                    startWalk()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 330)
     }
 
     private var treeView: some View {
@@ -531,56 +639,6 @@ struct RabbitHoleView: View {
 
     // MARK: - Take steps for me
 
-    private var walkPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Take steps for me").font(AppTypography.sectionTitle)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { walkControls }
-                VStack(alignment: .leading, spacing: 8) { walkControls }
-            }
-            if let walkProgress, isWalking {
-                Text("Step \(walkProgress.tracksAdded) · \(Self.minutesText(walkProgress.seconds)) so far\(walkProgress.approximate ? " (about)" : "")")
-                    .font(AppTypography.compactMetadata)
-                    .foregroundStyle(.secondary)
-            } else if let walkNote {
-                Text(walkNote).font(AppTypography.compactMetadata).foregroundStyle(.secondary)
-            } else {
-                Text("Adds tracks to the path for you, one suggestion at a time, until the length is reached. Every step stays in the tree, so you can step back, and the whole path can be exported as a playlist.")
-                    .font(AppTypography.compactMetadata)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    @ViewBuilder
-    private var walkControls: some View {
-        Picker("Length", selection: $options.walkLength) {
-            ForEach(RabbitHoleWalkLength.allCases) { Text($0.title).tag($0) }
-        }
-        .fixedSize()
-        .disabled(isWalking)
-        Picker("Choose", selection: $options.walkRule) {
-            ForEach(RabbitHoleWalkRule.allCases) { Text($0.title).tag($0) }
-        }
-        .fixedSize()
-        .disabled(isWalking)
-        .help("How each step picks one of the three: the closest match, a balanced choice, a wandering one, or the one you've played least recently.")
-        if isWalking {
-            Button("Stop", systemImage: "stop.circle") { walkTask?.cancel() }
-        } else {
-            Button("Take Steps", systemImage: "figure.walk") { startWalk() }
-                .buttonStyle(.borderedProminent)
-                .disabled(isGenerating || currentNode == nil)
-            if !options.lastWalk.isEmpty {
-                Button("Remove Last Walk", systemImage: "arrow.uturn.backward.circle") { removeLastWalk() }
-                    .help("Takes the steps the last walk added off the path again.")
-            }
-        }
-    }
-
     private static func minutesText(_ seconds: Double) -> String {
         let minutes = Int((seconds / 60).rounded())
         return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
@@ -616,12 +674,12 @@ struct RabbitHoleView: View {
         let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
         let provider = LastfmSimilarityProvider(client: client, store: SimilarityCacheStore(modelContainer: modelContainer))
         let snapshots = snapshots
-        let knobs = options.walkRule.knobs(base: options.knobs)
+        let knobs = options.knobs
         let groups = options.groups, perArtist = options.perArtist, perAlbum = options.perAlbum
         var rng = SystemRandomNumberGenerator()
         do {
             let result = try await RabbitHoleWalk.run(
-                length: options.walkLength, rule: options.walkRule, tree: options.tree, memory: options.memory,
+                length: options.walkLength, variety: options.knobs.wander, tree: options.tree, memory: options.memory,
                 candidatesFor: { tree, node, memory in
                     try await RabbitHoleEngine.generate(
                         from: node.track, path: tree.path(to: node.id), groups: groups, perArtist: perArtist, perAlbum: perAlbum,

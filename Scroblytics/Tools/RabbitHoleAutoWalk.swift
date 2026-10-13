@@ -1,33 +1,5 @@
 import Foundation
 
-/// How a walk picks one of the three suggestions at each step.
-enum RabbitHoleWalkRule: String, CaseIterable, Codable, Identifiable, Sendable {
-    case mostSimilar, balanced, wander, leastRecent
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .mostSimilar: "Most similar"
-        case .balanced: "Balanced"
-        case .wander: "Wander"
-        case .leastRecent: "Least recently played"
-        }
-    }
-
-    /// The steering used to draw each step's three, in place of the page's own settings.
-    func knobs(base: RabbitHoleKnobs) -> RabbitHoleKnobs {
-        var knobs = base
-        switch self {
-        case .mostSimilar: knobs.wander = 0; knobs.familiarity = 0
-        case .balanced: break
-        case .wander: knobs.wander = 2
-        case .leastRecent: knobs.familiarity = -2
-        }
-        return knobs
-    }
-}
-
 /// How long a walk goes on for.
 enum RabbitHoleWalkLength: String, CaseIterable, Codable, Identifiable, Sendable {
     case minutes30, minutes60, minutes90, tracks10, tracks20, tracks30
@@ -64,7 +36,8 @@ enum RabbitHoleWalkLength: String, CaseIterable, Codable, Identifiable, Sendable
     }
 }
 
-/// "Take steps for me": extends the current path one suggestion at a time, by a rule, until the length is reached. Every step is an
+/// "Take steps for me": extends the current path one suggestion at a time, following the page's own Lean and Variety settings (they
+/// shape each step's three, and Variety also decides how strongly the best match is favoured), until the length is reached. Every step is an
 /// ordinary node (with the three options it chose from), so the tree, Back One Step and the playlist export all work on a walk.
 enum RabbitHoleWalk {
     /// A walk never goes further than this many steps, whatever the length.
@@ -93,18 +66,20 @@ enum RabbitHoleWalk {
         var ending: Ending
     }
 
-    /// Which of the offered tracks the rule takes.
-    static func choose(from candidates: [RabbitHoleTrack], rule: RabbitHoleWalkRule, using rng: inout some RandomNumberGenerator) -> RabbitHoleTrack? {
+    /// Which of the offered tracks a step takes: at random, in proportion to its match, sharpened or flattened by the page's Variety
+    /// (0 stay close, 1 balanced, 2 wander) exactly as the page's own draw of the three is.
+    static func choose(from candidates: [RabbitHoleTrack], variety: Int, using rng: inout some RandomNumberGenerator) -> RabbitHoleTrack? {
         guard !candidates.isEmpty else { return nil }
-        switch rule {
-        case .mostSimilar:
-            let best = candidates.map(\.matchScore).max() ?? 0
-            return candidates.filter { $0.matchScore == best }.randomElement(using: &rng)
-        case .leastRecent:
-            return candidates.min { ($0.lastPlayed ?? .distantPast) < ($1.lastPlayed ?? .distantPast) }
-        case .balanced, .wander:
-            return candidates.randomElement(using: &rng)
+        let alpha = [2.0, 1.0, 0.35][min(2, max(0, variety))]
+        let weights = candidates.map { pow(Double(max($0.matchScore, 1)) / 100, alpha) }
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return candidates.randomElement(using: &rng) }
+        var target = Double.random(in: 0..<total, using: &rng)
+        for (candidate, weight) in zip(candidates, weights) {
+            if target < weight { return candidate }
+            target -= weight
         }
+        return candidates.last
     }
 
     static func isDone(_ progress: Progress, length: RabbitHoleWalkLength) -> Bool {
@@ -118,7 +93,7 @@ enum RabbitHoleWalk {
     /// Cancelling the task ends the walk where it is, with a valid tree.
     @MainActor
     static func run(
-        length: RabbitHoleWalkLength, rule: RabbitHoleWalkRule, tree startTree: RabbitHoleTree, memory startMemory: RabbitHoleMemory,
+        length: RabbitHoleWalkLength, variety: Int = 1, tree startTree: RabbitHoleTree, memory startMemory: RabbitHoleMemory,
         candidatesFor: (RabbitHoleTree, RabbitHoleNode, RabbitHoleMemory) async throws -> [RabbitHoleTrack],
         seconds: (RabbitHoleTrack) -> Double?,
         onProgress: (RabbitHoleTree, Progress) -> Void = { _, _ in },
@@ -151,7 +126,7 @@ enum RabbitHoleWalk {
                 memory.noteShown(offered.map(\.id))
             }
             let usable = offered.filter { !deadTracks.contains($0.id) }
-            guard let choice = choose(from: usable, rule: rule, using: &rng) else {
+            guard let choice = choose(from: usable, variety: variety, using: &rng) else {
                 // Nothing to offer from here: back up one step (the node is left in the tree as an explored dead end) and look again.
                 deadEnds += 1
                 // Never back up past the track the walk began from: that is the person's own position.

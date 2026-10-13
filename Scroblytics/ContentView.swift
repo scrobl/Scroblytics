@@ -226,8 +226,6 @@ struct ContentView: View {
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                OfflineToggleButton()
-
                 Button("Search", systemImage: "magnifyingglass") {
                     showingSearch = true
                 }
@@ -249,6 +247,8 @@ struct ContentView: View {
                         onSave: { routeAsked($0, action: .save) }
                     )
                 }
+
+                OfflineToggleButton()
 
                 Menu {
                     Button("Full Resync", systemImage: "arrow.clockwise") {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Which way each of the sub-list's sorts runs to begin with, and how to say the other way: used by the new pages' sort-direction
+/// Which way each of the sub-list's sorts runs to begin with, and how to say the other way: used by the sort-direction
 /// button. (The album table has its own copy of the same rules for its own sorts.)
 extension SubListSort {
     /// A to Z and first to last read upward; the others start with the most, newest or latest first.

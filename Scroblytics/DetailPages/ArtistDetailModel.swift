@@ -2,8 +2,7 @@ import Foundation
 import Observation
 import SwiftData
 
-/// Everything the new Artist page shows, and the loading of it. It calls the same engines the classic Artist page calls, so both
-/// pages agree; it is separate only so the classic page stays as it was.
+/// Everything the Artist page shows, and the loading of it, through the same engines the rest of the app uses.
 @MainActor
 @Observable
 final class ArtistDetailModel {

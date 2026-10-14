@@ -1,9 +1,9 @@
 import SwiftData
 import SwiftUI
 
-/// The new Album page: one header card (identity, trend, headline numbers, release date, the album's listen-through, tags), then the
+/// Album detail page: one header card (identity, trend, headline numbers, release date, the album's listen-through, tags), then the
 /// album's tracks.
-struct NewAlbumDetailPage: View {
+struct AlbumDetailView: View {
     let identity: AlbumIdentity
     let settings: ChartDateSettings
     let navigation: DetailNavigationCoordinator
@@ -55,7 +55,7 @@ struct NewAlbumDetailPage: View {
                     EntitySubListView(
                         entity: .track, artist: identity.artist, album: identity.name,
                         range: range, compareRange: compareRange, metric: settings.metric,
-                        isGridView: true, origin: navigation.origin, allowsDirection: true
+                        isGridView: true, origin: navigation.origin
                     )
                 } else {
                     AlbumTrackTable(

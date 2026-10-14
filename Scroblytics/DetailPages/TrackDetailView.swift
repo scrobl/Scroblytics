@@ -1,8 +1,8 @@
 import SwiftData
 import SwiftUI
 
-/// The new Track page: one header card (identity, trend, headline numbers, release date, length, tempo, tags), then the plays.
-struct NewTrackDetailPage: View {
+/// Track detail page: one header card (identity, trend, headline numbers, release date, length, tempo, tags), then the plays.
+struct TrackDetailView: View {
     let identity: TrackIdentity
     let settings: ChartDateSettings
     let navigation: DetailNavigationCoordinator

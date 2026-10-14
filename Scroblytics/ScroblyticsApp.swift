@@ -478,8 +478,6 @@ private struct AppearanceSettingsView: View {
                 HelpLinkButton(articleID: "offline-mode", title: "What Offline mode does")
             }
 
-            DetailPageStyleSettingsSection()
-
             PrivacySettingsSection()
             SupportSettingsSection()
 

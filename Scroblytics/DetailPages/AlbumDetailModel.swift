@@ -31,8 +31,8 @@ final class AlbumDetailModel {
     private(set) var identity = AlbumIdentity(artist: "", name: "")
     private var context: ModelContext?
     private var latestRangeID = ""
-    /// Whether a Last.fm account is saved. A seam so a check can run without touching the Keychain.
-    var hasCredentials: () -> Bool = { LastfmCredentialsStore.load() != nil }
+    /// The Last.fm client for the saved account, read from the Keychain once per page (and again only while there is none).
+    private var client: LastfmAPIClient?
 
     var oldestScrobbleDate: Date?
     var stats: EntityStats?
@@ -60,13 +60,22 @@ final class AlbumDetailModel {
         releaseDate = nil
         isLoadingReleaseDate = false
         currentGroup = nil
+        client = clientProvider()
         // The tiles are there from the first frame when a lookup is on its way.
-        turnoverState = hasCredentials() ? .loading : .unavailable
+        turnoverState = client == nil ? .unavailable : .loading
     }
 
-    func makeClient() -> LastfmAPIClient? {
+    /// Builds the Last.fm client. A seam so a check can run without touching the Keychain.
+    var clientProvider: () -> LastfmAPIClient? = {
         guard let credentials = LastfmCredentialsStore.load() else { return nil }
         return LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
+    }
+
+    func makeClient() -> LastfmAPIClient? { clientProvider() }
+
+    private func resolvedClient() -> LastfmAPIClient? {
+        if client == nil { client = clientProvider() }
+        return client
     }
 
     // MARK: - Loading
@@ -116,7 +125,7 @@ final class AlbumDetailModel {
     func loadTags() async {
         guard let context else { return }
         let requested = identity
-        guard let client = makeClient() else {
+        guard let client = resolvedClient() else {
             guard identity.id == requested.id else { return }
             communityTags = .loaded(EntityTagsResult(tags: [], inherited: false))
             yourTags = .loaded(EntityTagsResult(tags: [], inherited: false))
@@ -156,7 +165,7 @@ final class AlbumDetailModel {
     func loadTurnover() async {
         guard let context else { return }
         let requested = identity
-        guard hasCredentials(), let client = makeClient() else {
+        guard let client = resolvedClient() else {
             turnoverState = .unavailable
             return
         }

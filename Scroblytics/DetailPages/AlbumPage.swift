@@ -71,15 +71,17 @@ struct NewAlbumDetailPage: View {
         .task(id: identity.id) {
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
-            await model.loadStats(range: range, rangeID: settings.selectedRangeId)
-            guard !Task.isCancelled else { return }
-            await model.loadYearlyTopRanks()
             let current = range
+            let rangeID = settings.selectedRangeId
+            // Everything starts at once. The listen-through goes first, since it fills the table's filter and Cycle column and the
+            // turnover tiles; the rank-by-year chips are by far the slowest lookup and nothing waits for them.
+            async let turnover: Void = model.loadTurnover()
+            async let stats: Void = model.loadStats(range: current, rangeID: rangeID)
             async let tags: Void = model.loadTags()
             async let time: Void = model.loadTimeListened(range: current)
             async let release: Void = model.loadReleaseDate()
-            async let turnover: Void = model.loadTurnover()
-            _ = await (tags, time, release, turnover)
+            async let ranks: Void = model.loadYearlyTopRanks()
+            _ = await (turnover, stats, tags, time, release, ranks)
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
         .onChange(of: settings.compareMode) { reloadForRange() }
@@ -125,10 +127,12 @@ struct NewAlbumDetailPage: View {
     private func refreshAfterSync() async {
         model.loadOldestScrobbleDate()
         let current = range
-        await model.loadStats(range: current, rangeID: settings.selectedRangeId)
-        await model.loadYearlyTopRanks()
-        await model.loadTurnover()
-        await model.loadTimeListened(range: current)
-        await model.loadReleaseDate()
+        let rangeID = settings.selectedRangeId
+        async let turnover: Void = model.loadTurnover()
+        async let stats: Void = model.loadStats(range: current, rangeID: rangeID)
+        async let time: Void = model.loadTimeListened(range: current)
+        async let release: Void = model.loadReleaseDate()
+        async let ranks: Void = model.loadYearlyTopRanks()
+        _ = await (turnover, stats, time, release, ranks)
     }
 }

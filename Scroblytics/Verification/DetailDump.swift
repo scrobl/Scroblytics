@@ -56,7 +56,7 @@ enum DetailDump {
             }
             for entry in albumCounts.values.sorted(by: { $0.count > $1.count }).prefix(3) {
                 let model = AlbumDetailModel()
-                model.hasCredentials = { false }
+                model.clientProvider = { nil }
                 model.bind(identity: AlbumIdentity(artist: entry.artist, name: entry.album), context: container.mainContext)
                 let all = DateRange(from: .distantPast, to: Date().addingTimeInterval(86400))
                 let started = Date()
@@ -96,6 +96,7 @@ enum DetailDump {
                 }
             }
 
+
             // MARK: Artists
             var artistCounts: [String: (artist: String, count: Int)] = [:]
             for play in history {
@@ -122,6 +123,43 @@ enum DetailDump {
             }
 
 
+            // MARK: Where the album page spends its time (cache only: Offline mode is on)
+            if let top = albumCounts.values.max(by: { $0.count < $1.count }) {
+                let model = AlbumDetailModel()
+                model.clientProvider = { LastfmAPIClient(apiKey: "offline", username: "offline") }
+                model.bind(identity: AlbumIdentity(artist: top.artist, name: top.album), context: container.mainContext)
+                let all = DateRange(from: .distantPast, to: Date().addingTimeInterval(86400))
+                @MainActor func fetchTable() async {
+                    _ = try? await TopChartsEngine.fetchScopedRankings(container: container, durationContext: container.mainContext, entity: .track, artist: top.artist, album: top.album, range: all, compareRange: nil, metric: .scrobbles)
+                }
+                @MainActor func timed(_ label: String, _ work: @MainActor () async -> Void) async {
+                    let started = Date()
+                    await work()
+                    print("      TIMING \(label): \(String(format: "%.2f", Date().timeIntervalSince(started))) s")
+                }
+                await timed("album stats") { await model.loadStats(range: all, rangeID: "all") }
+                await timed("yearly ranks") { await model.loadYearlyTopRanks() }
+                await timed("played tracks (the table's list)") { await fetchTable() }
+                await timed("turnover (tracklist from cache)") { await model.loadTurnover() }
+                await timed("joining a 70-track tracklist with 70 played tracks, 10 times") {
+                    let titles = (0..<70).map { "Some Track Title \($0) (feat. Guest Artist) - 2011 Remaster" }
+                    let listed = titles.map { AlbumTrackRows.ListedTrack(title: $0, heardThisCycle: true) }
+                    let sample = (try? await TopChartsEngine.fetchScopedRankings(container: container, durationContext: container.mainContext, entity: .track, artist: top.artist, album: top.album, range: all, compareRange: nil, metric: .scrobbles)) ?? []
+                    for _ in 0..<10 { _ = AlbumTrackRows.sorted(AlbumTrackRows.merge(tracklist: listed, entries: sample), by: .trackOrder, metric: .scrobbles) }
+                }
+                await timed("all of them at once") {
+                    model.bind(identity: AlbumIdentity(artist: top.artist, name: top.album), context: container.mainContext)
+                    let begun = Date()
+                    @MainActor func done(_ label: String) { print("      TIMING   \(label) finished at \(String(format: "%.2f", Date().timeIntervalSince(begun))) s") }
+                    let tasks = [
+                        Task { @MainActor in await model.loadTurnover(); done("turnover") },
+                        Task { @MainActor in await fetchTable(); done("table list") },
+                        Task { @MainActor in await model.loadStats(range: all, rangeID: "all"); done("stats") },
+                        Task { @MainActor in await model.loadYearlyTopRanks(); done("yearly ranks") },
+                    ]
+                    for task in tasks { await task.value }
+                }
+            }
 
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)

@@ -105,7 +105,8 @@ enum DetailSnapshots {
                 AlbumTrackTable(
                     artist: "Artist A", album: "Album Name",
                     range: DateRange(from: now.addingTimeInterval(-365 * 86400), to: now), compareRange: nil, metric: .scrobbles,
-                    turnover: .ready(sampleTurnover(total: count, tracks: listed)), seedEntries: played
+                    turnover: .ready(sampleTurnover(total: count, tracks: listed)), seedEntries: played,
+                    seedDurations: Dictionary(uniqueKeysWithValues: played.enumerated().map { (DurationEngine.cacheKey(artist: "Artist A", track: $0.element.name), 170 + ($0.offset * 17) % 140) })
                 )
             }
         }

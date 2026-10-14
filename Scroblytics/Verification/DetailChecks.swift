@@ -186,6 +186,14 @@ enum DetailChecks {
             model.resolvedBPM = nil
             check("a track's tempo tile reserves it too", DetailFactGrid.reservesDetailLine(for: trackFacts()))
 
+
+            // MARK: The length column
+            let playedRow = merged[0], unplayedRow = merged[2]
+            check("a played track's length is looked up under its own artist and title", AlbumTrackDurations.key(for: playedRow, albumArtist: "Someone Else") == DurationEngine.cacheKey(artist: "Artist A", track: "Song One"))
+            check("a track nobody played is looked up under the album's artist and the tracklist title", AlbumTrackDurations.key(for: unplayedRow, albumArtist: "Artist A") == DurationEngine.cacheKey(artist: "Artist A", track: "Song Three"))
+            check("every row has its own key", Set(AlbumTrackDurations.keys(for: merged, albumArtist: "Artist A").keys).count == merged.count)
+            check("a length reads as m:ss, h:mm:ss, or a dash when unknown", AlbumTrackDurations.text(seconds: 224) == "3:44" && AlbumTrackDurations.text(seconds: 3725) == "1:02:05" && AlbumTrackDurations.text(seconds: nil) == "—")
+
             // MARK: The tile grid's columns
             func columns(_ width: CGFloat, _ count: Int) -> Int { EvenGridLayout.columnCount(width: width, count: count, minimumWidth: 138, spacing: 10) }
             check("a wide window puts every tile in one row", columns(1200, 4) == 4 && columns(1200, 3) == 3 && columns(1200, 1) == 1)

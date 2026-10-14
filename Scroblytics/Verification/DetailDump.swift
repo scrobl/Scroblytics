@@ -91,6 +91,18 @@ enum DetailDump {
                     check("table: one row per tracklist entry, then only unmatched plays", rows.filter { $0.kind == .listed }.count == listed.count && rows.prefix(listed.count).allSatisfy { $0.kind == .listed })
                     let matched = rows.filter { $0.kind == .listed && $0.entry != nil }.count
                     print("      tracklist of \(listed.count): \(matched) played in the period, \(listed.count - matched) not; \(rows.filter { $0.kind == .extra }.count) other tracks played")
+                    // The length column against the duration engine's own full snapshot (an independent read of the same cache).
+                    let keyByRow = AlbumTrackDurations.keys(for: rows, albumArtist: entry.artist)
+                    let read = await AlbumTrackDurations.seconds(forKeys: Array(Set(keyByRow.values)), container: container)
+                    let snapshot = DurationEngine.loadSnapshot(context: container.mainContext)
+                    var agree = true
+                    for key in Set(keyByRow.values) {
+                        let expected: Int?
+                        if case .seconds(let value) = snapshot.resolution(forKey: key) { expected = value } else { expected = nil }
+                        if read[key] != expected { agree = false }
+                    }
+                    check("table: each row's length equals the duration engine's own answer", agree)
+                    print("      lengths known for \(read.count) of \(Set(keyByRow.values).count) rows")
                 } else {
                     print("      no cached tracklist for this album: the table is the \(played.count) played tracks")
                 }

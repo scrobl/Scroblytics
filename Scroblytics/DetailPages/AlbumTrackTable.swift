@@ -13,6 +13,7 @@ struct AlbumTrackTable: View {
     let turnover: AlbumTurnoverState
     /// Plays to show instead of loading them (the layout snapshots use this; the page never does).
     var seedEntries: [TopChartEntry]? = nil
+    var seedDurations: [String: Int]? = nil
 
     @Environment(\.modelContext) private var modelContext
     @State private var entries: [TopChartEntry] = []
@@ -23,6 +24,8 @@ struct AlbumTrackTable: View {
     @State private var chosenAscending: Bool?
     @State private var filter = AlbumTrackFilter.all
     @State private var width: CGFloat = 900
+    /// Saved lengths by key (see `AlbumTrackDurations`); a track with none shows a dash.
+    @State private var durations: [String: Int] = [:]
 
     /// Column widths. The plays and last-played columns grow with the window, and "Last played" is the first to go in a narrow one.
     private enum Column {
@@ -30,6 +33,8 @@ struct AlbumTrackTable: View {
     }
 
     private static let showsLastPlayedFrom: CGFloat = 640
+    private static let showsLengthFrom: CGFloat = 560
+    private static let lengthWidth: CGFloat = 52
 
     private var cycleWidth: CGFloat { width >= 900 ? 56 : 40 }
     private var playsWidth: CGFloat { min(300, max(100, width * 0.24)) }
@@ -41,6 +46,10 @@ struct AlbumTrackTable: View {
     private var hasTracklist: Bool { tracklist != nil }
     private var hasCycle: Bool { tracklist?.contains { $0.heardThisCycle != nil } == true }
     private var showsLastPlayed: Bool { width >= Self.showsLastPlayedFrom }
+    private var showsLength: Bool { width >= Self.showsLengthFrom }
+
+    /// Changes when the set of tracks does, so the lengths are read again only then.
+    private var lengthKeys: [String: String] { AlbumTrackDurations.keys(for: allRows, albumArtist: artist) }
 
     private var availableSorts: [AlbumTrackSort] {
         hasTracklist ? AlbumTrackSort.allCases : AlbumTrackSort.allCases.filter { $0 != .trackOrder }
@@ -86,6 +95,10 @@ struct AlbumTrackTable: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .task(id: filterID) { await load() }
+        .task(id: allRows.map(\.id)) { await loadLengths() }
+        .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
+            Task { await loadLengths() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             Task { await load() }
         }
@@ -183,6 +196,7 @@ struct AlbumTrackTable: View {
             if hasCycle { Text("Cycle").frame(width: cycleWidth) }
             Text(metric == .scrobbles ? "Plays in period" : "Time in period").frame(width: playsWidth, alignment: .trailing)
             if showsLastPlayed { Text("Last played").frame(width: lastPlayedWidth, alignment: .trailing) }
+            if showsLength { Text("Length").frame(width: Self.lengthWidth, alignment: .trailing) }
         }
         .font(AppTypography.compactMetadata)
         .foregroundStyle(.secondary)
@@ -228,6 +242,11 @@ struct AlbumTrackTable: View {
                 Text(row.entry.map { Self.relative($0.lastPlayedAt) } ?? "—")
                     .font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
                     .frame(width: lastPlayedWidth, alignment: .trailing)
+            }
+            if showsLength {
+                Text(AlbumTrackDurations.text(seconds: durations[AlbumTrackDurations.key(for: row, albumArtist: artist)]))
+                    .font(AppTypography.metadata).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                    .frame(width: Self.lengthWidth, alignment: .trailing)
             }
         }
         .padding(.vertical, 8)
@@ -286,6 +305,18 @@ struct AlbumTrackTable: View {
     }
 
     // MARK: - Loading
+
+    private func loadLengths() async {
+        if let seedDurations {
+            durations = seedDurations
+            return
+        }
+        let keys = Array(Set(lengthKeys.values))
+        let container = modelContext.container
+        let found = await AlbumTrackDurations.seconds(forKeys: keys, container: container)
+        guard !Task.isCancelled else { return }
+        durations = found
+    }
 
     private func load() async {
         if let seedEntries {

@@ -18,6 +18,8 @@ struct DiagnosticSummary: Sendable {
         var scrobbles = 0
         var artists = 0
         var accountConnected = false
+        /// The macOS status when the Keychain wouldn't give up the saved account (so "not connected" would be untrue).
+        var keychainProblem: OSStatus?
         var lastSyncedAt: Date?
         /// Mid-import resume point: the page the import will continue from, of how many.
         var resumePage: Int?
@@ -47,7 +49,11 @@ struct DiagnosticSummary: Sendable {
         if let now = i.appMemoryMB {
             lines.append("  Memory in use by the app: \(now) MB" + (i.appMemoryPeakMB.map { " (highest \($0) MB)" } ?? ""))
         }
-        lines.append("  Last.fm account: \(i.accountConnected ? "connected" : "not connected")")
+        if let status = i.keychainProblem, !i.accountConnected {
+            lines.append("  Last.fm account: saved, but the Keychain can't be read (status \(status))")
+        } else {
+            lines.append("  Last.fm account: \(i.accountConnected ? "connected" : "not connected")")
+        }
         lines.append("  Imported: \(i.scrobbles) scrobbles, \(i.artists) artists")
         if let last = i.lastSyncedAt {
             lines.append("  Last completed sync: \(ISO8601DateFormatter().string(from: last))")
@@ -113,6 +119,7 @@ struct DiagnosticSummary: Sendable {
         }
         let credentials = await Task.detached(priority: .userInitiated) { loadCredentials() }.value
         i.accountConnected = credentials != nil
+        i.keychainProblem = credentials == nil ? LastfmCredentialsStore.lastProblem : nil
         i.offline = ConnectivityGate.isOffline
         i.askEngine = AskSettingsStore.load().selected.label
         i.updateChecks = UpdateStore.shared.automaticChecks

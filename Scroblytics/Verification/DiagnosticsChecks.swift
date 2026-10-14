@@ -127,6 +127,13 @@ enum DiagnosticsChecks {
             let live = DiagnosticSummary.appMemory()
             check("the app can read its own memory footprint", (live.current ?? 0) > 10 && (live.peak ?? 0) >= (live.current ?? 0), "\(live)")
             check("the summary says the account is connected without naming it", text.contains("Last.fm account: connected"))
+            var locked = inputs
+            locked.accountConnected = false; locked.keychainProblem = errSecInteractionNotAllowed
+            let lockedText = DiagnosticSummary.render(locked, secrets: secrets)
+            check("a Keychain that can't be read is reported with its status, not as 'not connected'", lockedText.contains("Last.fm account: saved, but the Keychain can't be read (status \(errSecInteractionNotAllowed))") && !lockedText.contains("not connected"))
+            var absent = inputs
+            absent.accountConnected = false; absent.keychainProblem = nil
+            check("no account and no problem still says not connected", DiagnosticSummary.render(absent, secrets: secrets).contains("Last.fm account: not connected"))
             var huge = inputs
             huge.activity = (0..<4000).map { "2026-01-01T00:00:00Z [sync] filler \($0) " + String(repeating: "y", count: 250) }
             let hugeText = DiagnosticSummary.render(huge, secrets: secrets)

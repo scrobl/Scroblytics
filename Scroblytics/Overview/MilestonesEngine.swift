@@ -273,6 +273,24 @@ enum MilestonesEngine {
         result.artists.upcoming + result.albums.upcoming + result.tracks.upcoming
     }
 
+    /// Overview's "Almost there": what is one play (or none) from its next milestone, closest first, at most `limit`. Equally close
+    /// items go in the order they are expected to get there (sooner first, none known last), then in the order given.
+    static func almostThere(from candidates: [MilestoneUpcoming], limit: Int = 6) -> [MilestoneUpcoming] {
+        candidates.enumerated()
+            .filter { $0.element.remaining <= 1 }
+            .sorted { a, b in
+                if a.element.remaining != b.element.remaining { return a.element.remaining < b.element.remaining }
+                switch (a.element.etaDays, b.element.etaDays) {
+                case (let x?, let y?) where x != y: return x < y
+                case (_?, nil): return true
+                case (nil, _?): return false
+                default: return a.offset < b.offset
+                }
+            }
+            .prefix(limit)
+            .map(\.element)
+    }
+
     /// Achieved thresholds plus the next upcoming one, for a single entity's
     /// own history — the detail page's Milestones section. Deliberately not
     /// `fetch(scrobbles:)`: that walks the whole library building per-artist/

@@ -73,6 +73,8 @@ struct DetailFactGrid: View {
 struct EvenGridLayout: Layout {
     var minimumWidth: CGFloat
     var spacing: CGFloat
+    /// A set number of columns, whatever the width and the count (a short row then leaves its last cells empty).
+    var fixedColumns: Int? = nil
 
     /// The most columns that fit, stepping down to one that leaves no lonely last row (four tiles are two and two, not three and one).
     static func columnCount(width: CGFloat, count: Int, minimumWidth: CGFloat, spacing: CGFloat) -> Int {
@@ -87,7 +89,8 @@ struct EvenGridLayout: Layout {
     }
 
     private func columns(for width: CGFloat, count: Int) -> Int {
-        Self.columnCount(width: width, count: count, minimumWidth: minimumWidth, spacing: spacing)
+        if let fixedColumns { return max(1, fixedColumns) }
+        return Self.columnCount(width: width, count: count, minimumWidth: minimumWidth, spacing: spacing)
     }
 
     private struct Arrangement {

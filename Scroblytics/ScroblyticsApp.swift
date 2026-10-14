@@ -170,6 +170,7 @@ struct ScroblyticsApp: App {
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
         DetailChecks.runHeadlessIfRequested()
         KeychainChecks.runHeadlessIfRequested()
+        OverviewChecks.runHeadlessIfRequested()
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
         DetailSnapshots.runHeadlessIfRequested(container: modelContainer)
         DetailDump.runHeadlessIfRequested(container: modelContainer)

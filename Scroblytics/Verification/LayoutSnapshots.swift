@@ -21,6 +21,10 @@ enum LayoutSnapshots {
             snapshotDiagnostics(into: folder, container: container)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_ALMOST"] {
+            snapshotAlmostThere(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_KEYCHAIN"] {
             snapshotKeychain(into: folder)
             return
@@ -247,6 +251,38 @@ enum LayoutSnapshots {
                             }
                         }
                     }
+                }
+            }
+            exit(0)
+        }
+    }
+
+    /// Overview's "Almost there" cards: eight candidates, drawn at three window widths in light and dark (at most two rows each).
+    @MainActor
+    private static func snapshotAlmostThere(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let items: [MilestoneUpcoming] = [
+                MilestoneUpcoming(entity: .artist, artist: nil, name: "Artist A", album: nil, imageURL: nil, current: 249, next: 250, remaining: 1, etaDays: 2),
+                MilestoneUpcoming(entity: .album, artist: "Artist B & Artist C", name: "A Rather Long Album Title", album: nil, imageURL: nil, current: 99, next: 100, remaining: 1, etaDays: 3),
+                MilestoneUpcoming(entity: .track, artist: "Artist D", name: "Track One", album: "Album", imageURL: nil, current: 499, next: 500, remaining: 1, etaDays: 4),
+                MilestoneUpcoming(entity: .track, artist: "Artist E", name: "Track Two", album: "Album", imageURL: nil, current: 99, next: 100, remaining: 1, etaDays: 6),
+                MilestoneUpcoming(entity: .album, artist: "Artist F", name: "Album Two", album: nil, imageURL: nil, current: 999, next: 1000, remaining: 1, etaDays: 9),
+                MilestoneUpcoming(entity: .track, artist: "Artist G", name: "Track Three", album: "Album", imageURL: nil, current: 249, next: 250, remaining: 1, etaDays: 12),
+                MilestoneUpcoming(entity: .track, artist: "Artist H", name: "Track Four", album: "Album", imageURL: nil, current: 99, next: 100, remaining: 1, etaDays: 20),
+                MilestoneUpcoming(entity: .artist, artist: nil, name: "Artist I", album: nil, imageURL: nil, current: 99, next: 100, remaining: 1, etaDays: nil),
+            ]
+            let almost = MilestonesEngine.almostThere(from: items)
+            for width in [1100, 800, 500] as [CGFloat] {
+                for dark in [true, false] {
+                    let section = NavigationStack {
+                        AlmostMilestonesSection(milestones: almost, columnCount: AlmostMilestonesSection.columnCount(forWidth: width))
+                            .padding(16)
+                    }
+                    await DetailSnapshots.render(
+                        section, width: width, dark: dark, container: container,
+                        to: URL(fileURLWithPath: folder).appending(path: "almost-\(Int(width))-\(dark ? "dark" : "light").png")
+                    )
                 }
             }
             exit(0)

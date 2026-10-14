@@ -184,9 +184,8 @@ private func computeOverviewLocals(
         overviewMilestoneWithResolvedImage($0, lookup: imageLookup)
     }
     let milestoneEntries = OverviewRandomSample.pickThree(from: milestoneCandidates)
-    // "Almost there": one scrobble from the next milestone, first 6 in
-    // order (artists, then albums, then tracks; each already closest-first).
-    let almostMilestones = Array(milestoneCandidates.filter { $0.remaining <= 1 }.prefix(6))
+    // "Almost there": one scrobble from the next milestone, the closest 6 (three columns by two rows at full width).
+    let almostMilestones = MilestonesEngine.almostThere(from: milestoneCandidates, limit: AlmostMilestonesSection.maxCards)
 
     return OverviewLocalResult(
         last24HourSlots: last24HourSlots, streakResult: streakResult, totals: totals,
@@ -214,6 +213,7 @@ private struct OverviewResponsiveLayout {
     }
     var featureColumnCount: Int { width >= Self.wideBreakpoint ? 3 : 1 }
     var rhythmColumnCount: Int { width >= Self.rhythmBreakpoint ? 2 : 1 }
+    var almostColumnCount: Int { AlmostMilestonesSection.columnCount(forWidth: width) }
     var recentScrobblesMode: RecentScrobblesLayoutMode {
         if width >= Self.recentTableBreakpoint { return .full }
         if width >= Self.recentCompactBreakpoint { return .condensed }
@@ -406,7 +406,7 @@ struct OverviewView: View {
                             PendingSyncEventBanners()
                             AlmostMilestonesSection(
                                 milestones: almostMilestones,
-                                columnCount: layout.rhythmColumnCount
+                                columnCount: layout.almostColumnCount
                             )
                             ListeningTotalsSection(
                                 totals: totals,

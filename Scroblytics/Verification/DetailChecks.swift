@@ -212,6 +212,29 @@ enum DetailChecks {
             check("a track played in the period opens under its own names", AlbumTrackRows.identity(for: merged[0], albumArtist: "Someone Else", playedNames: names) == PlayedName(artist: "Artist A", name: "Song One"))
             check("its length is looked up under the same names", AlbumTrackDurations.key(for: notPlayed, albumArtist: "Artist A", playedNames: names) == DurationEngine.cacheKey(artist: "Artist A", track: "Song Three - 2011 Remaster"))
 
+
+            // MARK: A flag is drawn once
+            // TrackLovedIndicator already draws a track's flag (with its heart and library mark); a row that also draws
+            // TrackFlaggedIndicator shows the flag twice. Read the app's own sources for rows that do both.
+            let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            var doubled: [String] = []
+            var scanned = 0
+            let files = (FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?.allObjects as? [URL]) ?? []
+            do {
+                for file in files where file.pathExtension == "swift" && !file.path.contains("/Verification/") {
+                    guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                    scanned += 1
+                    let lines = text.components(separatedBy: "\n")
+                    for (index, line) in lines.enumerated() where line.contains("TrackFlaggedIndicator(") && !line.contains("struct ") {
+                        let near = lines[max(0, index - 14)...min(lines.count - 1, index + 14)]
+                        if near.contains(where: { $0.contains("TrackLovedIndicator(") && !$0.contains("struct ") }) {
+                            doubled.append("\(file.lastPathComponent):\(index + 1)")
+                        }
+                    }
+                }
+            }
+            check("no row draws a flag twice (a flag indicator beside the loved indicator); \(scanned) source files read", scanned > 50 && doubled.isEmpty, doubled.joined(separator: ", "))
+
             // MARK: The tile grid's columns
             func columns(_ width: CGFloat, _ count: Int) -> Int { EvenGridLayout.columnCount(width: width, count: count, minimumWidth: 138, spacing: 10) }
             check("a wide window puts every tile in one row", columns(1200, 4) == 4 && columns(1200, 3) == 3 && columns(1200, 1) == 1)

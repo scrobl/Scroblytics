@@ -522,15 +522,11 @@ private struct AlbumTurnoverTrackList: View {
                         .font(AppTypography.compactMetadata)
                         .foregroundStyle(track.heardThisCycle ? .primary : .secondary)
                         .lineLimit(1)
+                    // Draws the loved heart, the flag and the "not in your library" mark together, so no separate flag indicator here.
                     TrackLovedIndicator(
                         artist: turnover.artist,
                         track: track.title,
                         initialValue: false,
-                        font: AppTypography.supportingDense
-                    )
-                    TrackFlaggedIndicator(
-                        artist: turnover.artist,
-                        track: track.title,
                         font: AppTypography.supportingDense
                     )
                     PopularityMarker(

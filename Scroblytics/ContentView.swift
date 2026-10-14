@@ -141,7 +141,11 @@ struct ContentView: View {
                     overviewTrendsFocus = focus
                     beginOverviewRoute(to: .trends)
                 },
-                openMilestones: { beginOverviewRoute(to: .milestones) }
+                openMilestones: { beginOverviewRoute(to: .milestones) },
+                openQuery: { spec, detail in
+                    beginOverviewRoute(to: .tools)
+                    askQueryRequest = QueryHandoff.request(spec: spec, source: "Overview", detail: detail, action: .run, onReturn: { returnToOverview() })
+                }
             )
                 .tabItem { Label("Overview", systemImage: "square.grid.2x2") }
                 .tag(Tab.overview)

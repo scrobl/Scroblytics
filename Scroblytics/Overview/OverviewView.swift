@@ -306,6 +306,8 @@ struct OverviewView: View {
     let openSimilarSounds: ([SimilarSeed]) -> Void
     let openTrends: (TrendsFocus) -> Void
     let openMilestones: () -> Void
+    /// Opens Query on a spec (a clicked hour or day of the strips below), with a name for it.
+    let openQuery: (QuerySpec, String) -> Void
 
     @State private var navigation = DetailNavigationCoordinator(origin: .overview)
     @State private var oldestScrobbleDate: Date?
@@ -425,8 +427,20 @@ struct OverviewView: View {
                                 columnCount: layout.featureColumnCount
                             )
                             LazyVGrid(columns: layout.rhythmColumns, alignment: .leading, spacing: 16) {
-                                Last24HoursCard(slots: last24HourSlots, onOpen: { openTrends(.listening) })
-                                CurrentStreakCard(result: streakResult, onOpen: { openTrends(.listening) })
+                                Last24HoursCard(
+                                    slots: last24HourSlots, onOpen: { openTrends(.listening) },
+                                    onSelectHour: { date, hour in
+                                        let drill = OverviewDrill.hour(slotDate: date, hour: hour)
+                                        openQuery(drill.spec, drill.detail)
+                                    }
+                                )
+                                CurrentStreakCard(
+                                    result: streakResult, onOpen: { openTrends(.listening) },
+                                    onSelectDay: { key in
+                                        guard let drill = OverviewDrill.day(key: key) else { return }
+                                        openQuery(drill.spec, drill.detail)
+                                    }
+                                )
                             }
                             LazyVGrid(columns: layout.featureColumns, alignment: .leading, spacing: 16) {
                                 OnThisDayCard(entries: onThisDayEntries, onOpen: { openTool(.timeMachine) })
@@ -1690,6 +1704,8 @@ private struct TrendSparklineTooltip: View {
 private struct Last24HoursCard: View {
     let slots: [(date: Date, hour: Int, count: Int)]
     let onOpen: () -> Void
+    /// A click on an hour that has plays: the hour's day and its hour of the day.
+    let onSelectHour: (Date, Int) -> Void
 
     private static let tooltipFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1707,7 +1723,8 @@ private struct Last24HoursCard: View {
                     HeatStripItem(
                         axisLabel: index % 3 == 0 ? "\(slot.hour)" : nil,
                         tooltip: "\(Self.tooltipFormatter.string(from: slot.date)) · \(slot.count.formatted()) \(slot.count == 1 ? "scrobble" : "scrobbles")",
-                        color: HeatColorScale.cellColor(count: slot.count, thresholds: thresholds, hour: slot.hour)
+                        color: HeatColorScale.cellColor(count: slot.count, thresholds: thresholds, hour: slot.hour),
+                        onSelect: slot.count > 0 ? { onSelectHour(slot.date, slot.hour) } : nil
                     )
                 })
             }
@@ -1720,6 +1737,8 @@ private struct Last24HoursCard: View {
 private struct CurrentStreakCard: View {
     let result: ListeningStreakResult?
     let onOpen: () -> Void
+    /// A click on a day that has plays: the day's local date, "YYYY-MM-DD".
+    let onSelectDay: (String) -> Void
 
     private static var utcCalendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
@@ -1747,7 +1766,8 @@ private struct CurrentStreakCard: View {
                     HeatStripItem(
                         axisLabel: index % 5 == 0 ? "\(Self.utcCalendar.component(.day, from: day.utcDate))" : nil,
                         tooltip: "\(Self.tooltipFormatter.string(from: day.utcDate)) · \(day.count.formatted()) \(day.count == 1 ? "play" : "plays")",
-                        color: HeatColorScale.cellColor(count: day.count, thresholds: thresholds, hour: 12, override: .purple)
+                        color: HeatColorScale.cellColor(count: day.count, thresholds: thresholds, hour: 12, override: .purple),
+                        onSelect: day.count > 0 ? { onSelectDay(day.date) } : nil
                     )
                 })
             } else {
@@ -1761,6 +1781,8 @@ private struct HeatStripItem {
     let axisLabel: String?
     let tooltip: String
     let color: Color
+    /// Makes the cell a button (a cell with nothing behind it has none).
+    var onSelect: (() -> Void)? = nil
 }
 
 private struct HoverHeatStrip: View {
@@ -1794,6 +1816,11 @@ private struct HoverHeatStrip: View {
                         .onHover { isHovering in
                             hoveredIndex = isHovering ? index : nil
                         }
+                        .onTapGesture { item.onSelect?() }
+                        .pointerStyle(item.onSelect != nil ? .link : .default)
+                        .accessibilityLabel(item.tooltip)
+                        .accessibilityAddTraits(item.onSelect != nil ? .isButton : [])
+                        .accessibilityHint(item.onSelect != nil ? "Opens this period in Query" : "")
                         .zIndex(hoveredIndex == index ? 1 : 0)
                 }
             }

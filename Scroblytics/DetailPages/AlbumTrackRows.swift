@@ -65,6 +65,12 @@ enum AlbumTrackFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// How a track on an album's tracklist is actually spelled in the listening history: the name to open its page under.
+struct PlayedName: Sendable, Hashable {
+    let artist: String
+    let name: String
+}
+
 /// Joins an album's tracklist with the plays in the chosen period. A pure function of its inputs, checked on made-up data.
 enum AlbumTrackRows {
     struct ListedTrack: Equatable {
@@ -97,6 +103,34 @@ enum AlbumTrackRows {
             rows.append(AlbumTrackRow(id: "e\(entry.id)", kind: .extra, position: nil, title: entry.name, entry: entry, heardThisCycle: nil))
         }
         return rows
+    }
+
+    /// Every track this album has ever been played as, keyed by normalized title, so a tracklist title that was scrobbled under another
+    /// spelling ("Song - 2011 Remaster") still finds its own page. A title played under two spellings goes to the one played most (ties
+    /// to the alphabetically first, so the answer never changes between runs). Plays are matched to the album the way the table's own
+    /// ranking does: the same artist, and the same album once edition suffixes are set aside.
+    static func playedNames(from plays: [ScrobbleSnapshot], artist: String, album: String) -> [String: PlayedName] {
+        let artistKey = TextNormalization.artistIdentityKey(artist)
+        let albumKey = TextNormalization.normalizeAlbumName(album)
+        var counts: [String: [PlayedName: Int]] = [:]
+        for play in plays where !play.trackName.isEmpty {
+            guard TextNormalization.artistIdentityKey(play.artistName) == artistKey,
+                  TextNormalization.normalizeAlbumName(play.albumName) == albumKey else { continue }
+            counts[TextNormalization.normalizeTrackTitle(play.trackName), default: [:]][PlayedName(artist: play.artistName, name: play.trackName), default: 0] += 1
+        }
+        return counts.mapValues { spellings in
+            spellings.max { a, b in
+                a.value != b.value ? a.value < b.value : (a.key.name, a.key.artist) > (b.key.name, b.key.artist)
+            }!.key
+        }
+    }
+
+    /// The artist and title a row's track page opens under: the played track's own names, else how the history spells it, else the
+    /// tracklist's title under the album's artist (a track nobody has played).
+    static func identity(for row: AlbumTrackRow, albumArtist: String, playedNames: [String: PlayedName]) -> PlayedName {
+        if let entry = row.entry { return PlayedName(artist: entry.artist ?? albumArtist, name: entry.name) }
+        if let seen = playedNames[TextNormalization.normalizeTrackTitle(row.title)] { return seen }
+        return PlayedName(artist: albumArtist, name: row.title)
     }
 
     static func filtered(_ rows: [AlbumTrackRow], by filter: AlbumTrackFilter) -> [AlbumTrackRow] {

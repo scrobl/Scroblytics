@@ -102,6 +102,26 @@ enum DetailDump {
                         if read[key] != expected { agree = false }
                     }
                     check("table: each row's length equals the duration engine's own answer", agree)
+                    // Opening a track that has no plays in the period: its page should show the plays it does have.
+                    let names = AlbumTrackRows.playedNames(from: history, artist: entry.artist, album: entry.album)
+                    // A 90-day window, so plenty of tracks have no plays in it but did have some earlier.
+                    let recent = DateRange(from: Date().addingTimeInterval(-90 * 86400), to: Date().addingTimeInterval(86400))
+                    let recentPlayed = (try? await TopChartsEngine.fetchScopedRankings(
+                        container: container, durationContext: container.mainContext, entity: .track, artist: entry.artist, album: entry.album,
+                        range: recent, compareRange: nil, metric: .scrobbles
+                    )) ?? []
+                    let recentRows = AlbumTrackRows.merge(tracklist: listed, entries: recentPlayed)
+                    let others = recentRows.filter { $0.kind == .listed && $0.entry == nil && names[TextNormalization.normalizeTrackTitle($0.title)] != nil }
+                    print("      \(others.count) of \(recentRows.filter { $0.entry == nil }.count) tracks with no plays in the last 90 days do have plays at other times")
+                    for row in others.prefix(3) {
+                        let who = AlbumTrackRows.identity(for: row, albumArtist: entry.artist, playedNames: names)
+                        let model = TrackDetailModel()
+                        model.bind(identity: TrackIdentity(artist: who.artist, name: who.name, album: entry.album), context: container.mainContext)
+                        model.loadStats(range: all)
+                        let artistKey = TextNormalization.artistIdentityKey(who.artist)
+                        let expected = history.filter { TextNormalization.artistIdentityKey($0.artistName) == artistKey && $0.trackName == who.name }.count
+                        check("table: opening \"\(who.name)\" shows its \(expected) plays", expected > 0 && model.stats?.plays == expected, "\(model.stats?.plays ?? -1) vs \(expected)")
+                    }
                     print("      lengths known for \(read.count) of \(Set(keyByRow.values).count) rows")
                 } else {
                     print("      no cached tracklist for this album: the table is the \(played.count) played tracks")

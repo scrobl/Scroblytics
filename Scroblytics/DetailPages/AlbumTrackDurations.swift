@@ -22,15 +22,15 @@ private actor AlbumTrackDurationReader {
 }
 
 enum AlbumTrackDurations {
-    /// The key a row's length is saved under: the track's own artist and title when it was played (the names the app has lengths for),
-    /// otherwise the tracklist's title under the album's artist.
-    static func key(for row: AlbumTrackRow, albumArtist: String) -> String {
-        DurationEngine.cacheKey(artist: row.entry?.artist ?? albumArtist, track: row.entry?.name ?? row.title)
+    /// The key a row's length is saved under: its track's own artist and title, as the row's page opens them.
+    static func key(for row: AlbumTrackRow, albumArtist: String, playedNames: [String: PlayedName] = [:]) -> String {
+        let who = AlbumTrackRows.identity(for: row, albumArtist: albumArtist, playedNames: playedNames)
+        return DurationEngine.cacheKey(artist: who.artist, track: who.name)
     }
 
     /// Every row's key, by row id.
-    static func keys(for rows: [AlbumTrackRow], albumArtist: String) -> [String: String] {
-        Dictionary(rows.map { ($0.id, key(for: $0, albumArtist: albumArtist)) }, uniquingKeysWith: { first, _ in first })
+    static func keys(for rows: [AlbumTrackRow], albumArtist: String, playedNames: [String: PlayedName] = [:]) -> [String: String] {
+        Dictionary(rows.map { ($0.id, key(for: $0, albumArtist: albumArtist, playedNames: playedNames)) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// The text for a length column: m:ss, or a dash when the length isn't known.

@@ -185,6 +185,31 @@ enum DetailChecks {
             check("every row has its own key", Set(AlbumTrackDurations.keys(for: merged, albumArtist: "Artist A").keys).count == merged.count)
             check("a length reads as m:ss, h:mm:ss, or a dash when unknown", AlbumTrackDurations.text(seconds: 224) == "3:44" && AlbumTrackDurations.text(seconds: 3725) == "1:02:05" && AlbumTrackDurations.text(seconds: nil) == "—")
 
+
+            // MARK: Opening a track that wasn't played in the period
+            func snap(_ artist: String, _ album: String, _ track: String) -> ScrobbleSnapshot {
+                ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track, imageURL: nil, playedAt: now)
+            }
+            var history: [ScrobbleSnapshot] = []
+            history += (0..<5).map { _ in snap("Artist A", "Album Name", "Song Three - 2011 Remaster") }
+            history += (0..<2).map { _ in snap("Artist A", "Album Name", "Song Three") }
+            history += (0..<3).map { _ in snap("artist a", "Album Name (Deluxe Edition)", "Song Five") }
+            history += (0..<9).map { _ in snap("Artist B", "Album Name", "Song Four") }
+            history += (0..<9).map { _ in snap("Artist A", "A Different Album", "Song Four") }
+            history += (0..<4).map { _ in snap("Artist A", "Album Name", "") }
+            let names = AlbumTrackRows.playedNames(from: history, artist: "Artist A", album: "Album Name")
+            check("the history's spelling of a title is found by its normalized title, taking the most played spelling", names["song three"] == PlayedName(artist: "Artist A", name: "Song Three - 2011 Remaster"), "\(names)")
+            check("an artist's capitalization and an album's edition suffix don't hide a track", names["song five"]?.name == "Song Five")
+            check("another artist's or another album's plays, and plays with no title, are left out", names["song four"] == nil && names.count == 2, "\(names.keys.sorted())")
+            let tie = AlbumTrackRows.playedNames(from: [snap("Artist A", "Album Name", "Same Song (Live)"), snap("Artist A", "Album Name", "Same Song")], artist: "Artist A", album: "Album Name")
+            check("a tie between two spellings always goes the same way", tie.count == 1 && tie.values.first?.name == "Same Song" || tie.values.first?.name == "Same Song (Live)")
+            check("no history means no names", AlbumTrackRows.playedNames(from: [], artist: "Artist A", album: "Album Name").isEmpty)
+            let notPlayed = merged[2]   // "Song Three": nothing in the period
+            check("a track played in another period opens under how it was played", AlbumTrackRows.identity(for: notPlayed, albumArtist: "Artist A", playedNames: names) == PlayedName(artist: "Artist A", name: "Song Three - 2011 Remaster"))
+            check("a track nobody played opens under the tracklist's title and the album's artist", AlbumTrackRows.identity(for: merged[4], albumArtist: "Artist A", playedNames: [:]) == PlayedName(artist: "Artist A", name: "Song Five"))
+            check("a track played in the period opens under its own names", AlbumTrackRows.identity(for: merged[0], albumArtist: "Someone Else", playedNames: names) == PlayedName(artist: "Artist A", name: "Song One"))
+            check("its length is looked up under the same names", AlbumTrackDurations.key(for: notPlayed, albumArtist: "Artist A", playedNames: names) == DurationEngine.cacheKey(artist: "Artist A", track: "Song Three - 2011 Remaster"))
+
             // MARK: The tile grid's columns
             func columns(_ width: CGFloat, _ count: Int) -> Int { EvenGridLayout.columnCount(width: width, count: count, minimumWidth: 138, spacing: 10) }
             check("a wide window puts every tile in one row", columns(1200, 4) == 4 && columns(1200, 3) == 3 && columns(1200, 1) == 1)

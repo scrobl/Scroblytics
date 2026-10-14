@@ -26,6 +26,8 @@ struct AlbumTrackTable: View {
     @State private var width: CGFloat = 900
     /// Saved lengths by key (see `AlbumTrackDurations`); a track with none shows a dash.
     @State private var durations: [String: Int] = [:]
+    /// How the listening history spells this album's tracks, so a track not played in the period still opens its own page.
+    @State private var playedNames: [String: PlayedName] = [:]
 
     /// Column widths. The plays and last-played columns grow with the window, and "Last played" is the first to go in a narrow one.
     private enum Column {
@@ -49,7 +51,7 @@ struct AlbumTrackTable: View {
     private var showsLength: Bool { width >= Self.showsLengthFrom }
 
     /// Changes when the set of tracks does, so the lengths are read again only then.
-    private var lengthKeys: [String: String] { AlbumTrackDurations.keys(for: allRows, albumArtist: artist) }
+    private var lengthKeys: [String: String] { AlbumTrackDurations.keys(for: allRows, albumArtist: artist, playedNames: playedNames) }
 
     private var availableSorts: [AlbumTrackSort] {
         hasTracklist ? AlbumTrackSort.allCases : AlbumTrackSort.allCases.filter { $0 != .trackOrder }
@@ -95,7 +97,8 @@ struct AlbumTrackTable: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .task(id: filterID) { await load() }
-        .task(id: allRows.map(\.id)) { await loadLengths() }
+        .task(id: "\(artist)|\(album)") { await loadPlayedNames() }
+        .task(id: "\(allRows.map(\.id))|\(playedNames.count)") { await loadLengths() }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await loadLengths() }
         }
@@ -204,20 +207,17 @@ struct AlbumTrackTable: View {
         .padding(.vertical, 4)
     }
 
-    @ViewBuilder
+    /// Every row opens its track's page, played in the period or not: the page shows that track's plays for whatever period is chosen.
     private func rowView(_ row: AlbumTrackRow, maxValue: Int) -> some View {
-        if let entry = row.entry {
-            NavigationLink(value: TrackIdentity(from: entry)) { rowContent(row, maxValue: maxValue) }
-                .drillDownHighlight()
-                .entityContextMenu(
-                    target: ImageTarget(kind: .track, artist: entry.artist ?? artist, album: entry.album ?? album, track: entry.name),
-                    currentImageURL: entry.imageURL
-                )
-        } else {
-            // Not played in the period: there is no track page to open, so the row only reports.
-            rowContent(row, maxValue: maxValue)
-                .help("Not played in this period")
-        }
+        let who = AlbumTrackRows.identity(for: row, albumArtist: artist, playedNames: playedNames)
+        let destination = row.entry.map { TrackIdentity(from: $0) } ?? TrackIdentity(artist: who.artist, name: who.name, album: album)
+        return NavigationLink(value: destination) { rowContent(row, maxValue: maxValue) }
+            .drillDownHighlight()
+            .entityContextMenu(
+                target: ImageTarget(kind: .track, artist: who.artist, album: row.entry?.album ?? album, track: who.name),
+                currentImageURL: row.entry?.imageURL
+            )
+            .help(row.entry == nil ? "Not played in this period. Click to open the track." : "")
     }
 
     private func rowContent(_ row: AlbumTrackRow, maxValue: Int) -> some View {
@@ -244,7 +244,7 @@ struct AlbumTrackTable: View {
                     .frame(width: lastPlayedWidth, alignment: .trailing)
             }
             if showsLength {
-                Text(AlbumTrackDurations.text(seconds: durations[AlbumTrackDurations.key(for: row, albumArtist: artist)]))
+                Text(AlbumTrackDurations.text(seconds: durations[AlbumTrackDurations.key(for: row, albumArtist: artist, playedNames: playedNames)]))
                     .font(AppTypography.metadata).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
                     .frame(width: Self.lengthWidth, alignment: .trailing)
             }
@@ -305,6 +305,18 @@ struct AlbumTrackTable: View {
     }
 
     // MARK: - Loading
+
+    /// Every spelling this album's tracks have in the whole history (not just the period), from the shared history copy.
+    private func loadPlayedNames() async {
+        let container = modelContext.container
+        let artist = artist, album = album
+        let names: [String: PlayedName] = (try? await offMain {
+            let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+            return AlbumTrackRows.playedNames(from: plays, artist: artist, album: album)
+        }) ?? [:]
+        guard !Task.isCancelled else { return }
+        playedNames = names
+    }
 
     private func loadLengths() async {
         if let seedDurations {

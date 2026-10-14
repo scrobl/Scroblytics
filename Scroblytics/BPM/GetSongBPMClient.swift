@@ -1,5 +1,6 @@
+import AppKit
 import Foundation
-
+import os
 import Security
 
 /// GetSongBPM's search API (api.getsong.co) — the first source for a track's tempo, with Deezer as the fallback.
@@ -26,15 +27,84 @@ enum GetSongBPMKeychain {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
 
-    static func key() -> String? {
-        var q = query
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        let key = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return key?.isEmpty == false ? key : nil
+    typealias RawRead = @Sendable () -> (status: OSStatus, data: Data?)
+
+    /// What is known about the saved key. Every tempo lookup asks for it, so the answer is kept for the session once the Keychain has
+    /// given a definite one, including "no key saved" (the usual case, where the built-in key is used). A read that failed (a locked
+    /// keychain, a refused prompt) is remembered for a minute, not for good: lookups run in a loop, and without that each would ask
+    /// the Keychain, and so prompt, again.
+    private enum Known {
+        case unknown
+        case answer(String?)
+        case failed(Date)
     }
+
+    static let failureMemory: TimeInterval = 60
+
+    private static let known = OSAllocatedUnfairLock(initialState: Known.unknown)
+    private static let readGate = NSLock()
+    private static let rawReader = OSAllocatedUnfairLock<RawRead>(initialState: defaultRawRead())
+    /// Registers the activation observer the first time it is touched, so a key saved or removed by another copy of the app is noticed.
+    private static let observesActivation: Bool = {
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in
+            known.withLock { $0 = .unknown }
+        }
+        return true
+    }()
+
+    static func key() -> String? {
+        _ = observesActivation
+        if let remembered = remembered() { return remembered.key }
+        readGate.lock()
+        defer { readGate.unlock() }
+        if let remembered = remembered() { return remembered.key }
+        let raw = rawReader.withLock { $0 }()
+        switch raw.status {
+        case errSecSuccess:
+            let text = raw.data.flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = text?.isEmpty == false ? text : nil
+            known.withLock { $0 = .answer(key) }
+            return key
+        case errSecItemNotFound:
+            known.withLock { $0 = .answer(nil) }
+            return nil
+        default:
+            known.withLock { $0 = .failed(Date()) }
+            return nil
+        }
+    }
+
+    /// A kept answer (possibly "no key"), or nil when the Keychain has to be asked.
+    private struct Remembered { let key: String? }
+
+    private static func remembered() -> Remembered? {
+        switch known.withLock({ $0 }) {
+        case .answer(let key): return Remembered(key: key)
+        case .failed(let when) where Date().timeIntervalSince(when) < failureMemory: return Remembered(key: nil)
+        default: return nil
+        }
+    }
+
+    private static func defaultRawRead() -> RawRead {
+        let service = service, account = account
+        return {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account,
+                kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
+            ]
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            return (status, item as? Data)
+        }
+    }
+
+    #if DEBUG
+    /// Replaces the Keychain call (checks only), and forgets everything read so far.
+    static func useRawReaderForTesting(_ reader: @escaping RawRead) {
+        rawReader.withLock { $0 = reader }
+        known.withLock { $0 = .unknown }
+    }
+    #endif
 
     static var hasKey: Bool { key() != nil }
 
@@ -50,9 +120,14 @@ enum GetSongBPMKeychain {
         } else if status != errSecSuccess {
             throw GetSongBPMError.keychain(status)
         }
+        let trimmed = String(decoding: data, as: UTF8.self)
+        known.withLock { $0 = .answer(trimmed.isEmpty ? nil : trimmed) }
     }
 
-    static func removeKey() { SecItemDelete(query as CFDictionary) }
+    static func removeKey() {
+        SecItemDelete(query as CFDictionary)
+        known.withLock { $0 = .answer(nil) }
+    }
 }
 
 enum GetSongBPMError: Error {

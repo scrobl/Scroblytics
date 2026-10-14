@@ -48,10 +48,7 @@ struct TrackDetailView: View {
 
     var body: some View {
         if DetailPageStyle.resolve(storedValue: pageStyle) == .new {
-            DetailPagePlaceholder(
-                navigation: navigation, artist: ArtistIdentity(name: identity.artist),
-                album: identity.album.map { AlbumIdentity(artist: identity.artist, name: $0) }, title: identity.name
-            )
+            NewTrackDetailPage(identity: identity, settings: settings, navigation: navigation)
         } else {
             legacyBody
         }

@@ -114,14 +114,14 @@ enum DetailSnapshots {
     }
 
     @MainActor
-    static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, to url: URL) async {
+    static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, to url: URL) async {
         let view = content
             .padding(16)
             .frame(width: width)
             .modelContainer(container)
             .environment(PopularityStore())
             .environment(LovedTracksStore())
-            .environment(FlaggedTracksStore())
+            .environment(flagged ?? FlaggedTracksStore())
             .environment(LibraryGapBadgeStore())
             .environment(\.colorScheme, dark ? .dark : .light)
             .background(Color(nsColor: .windowBackgroundColor))
@@ -174,10 +174,13 @@ enum DetailSnapshots {
             for width in [1600, 1000, 700] as [CGFloat] {
                 await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover()), title: longTitle), width: width, dark: true, container: container, to: base.appending(path: "album-longtitle-\(width)-dark.png".replacingOccurrences(of: ".0", with: "")))
             }
+            // A flag on a track nobody played in the period (Song 5, Song 10) and on one that was (Song 2): all three show their mark.
+            let flagged = FlaggedTracksStore()
+            for song in ["Song 2", "Song 5", "Song 10"] { try? flagged.toggle(context: container.mainContext, artist: "Artist A", track: song, album: "Album Name") }
             for width in [1600, 1000, 700, 520] as [CGFloat] {
                 for dark in [true, false] {
                     let mode = dark ? "dark" : "light"
-                    await render(table(), width: width, dark: dark, container: container, to: base.appending(path: "table-\(Int(width))-\(mode).png"))
+                    await render(table(), width: width, dark: dark, container: container, flagged: flagged, to: base.appending(path: "table-\(Int(width))-\(mode).png"))
                 }
             }
             await render(table(longAlbum: true), width: 900, dark: true, container: container, to: base.appending(path: "table-long-900-dark.png"))

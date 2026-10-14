@@ -222,14 +222,17 @@ struct AlbumTrackTable: View {
 
     private func rowContent(_ row: AlbumTrackRow, maxValue: Int) -> some View {
         let played = row.entry != nil
+        let who = AlbumTrackRows.identity(for: row, albumArtist: artist, playedNames: playedNames)
         return HStack(spacing: 10) {
             Text(row.position.map(String.init) ?? "·")
                 .font(AppTypography.tableRank).foregroundStyle(.secondary)
                 .frame(width: Column.position, alignment: .trailing)
+            // The loved, flagged and "not in your library" marks belong to the track, not to its plays, so a dimmed row shows them too
+            // (under the names its page opens with, which are the names a flag or love is saved under).
             HStack(spacing: 4) {
                 Text(row.title).font(AppTypography.contentTitle).lineLimit(1)
+                TrackLovedIndicator(artist: who.artist, track: who.name, initialValue: row.entry?.loved ?? false, font: AppTypography.metadata, enabled: true)
                 if let entry = row.entry {
-                    TrackLovedIndicator(artist: entry.artist ?? artist, track: entry.name, initialValue: entry.loved, font: AppTypography.metadata, enabled: true)
                     PopularityMarker(entity: .track, entry: entry)
                 }
             }

@@ -57,6 +57,38 @@ enum DetailChecks {
             trackFacts().forEach { $0.onEdit?() }
             check("every track fact has an editor", edits == 3)
 
+
+            // MARK: The album page's listen-through facts
+            @MainActor func labels(_ state: AlbumTurnoverState) -> [String] { AlbumDetailModel.turnoverFacts(state, onFixAlbumMatch: {}).map(\.label) }
+            check("no account or no match means no turnover tiles", labels(.unavailable).isEmpty)
+            check("while turnover loads the four tiles are there, loading", AlbumDetailModel.turnoverFacts(.loading, onFixAlbumMatch: {}).count == 4 && AlbumDetailModel.turnoverFacts(.loading, onFixAlbumMatch: {}).allSatisfy { $0.value == .loading })
+            let clean = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover()), onFixAlbumMatch: {})
+            check("a matched album shows tracks, turnover, full cycles and this cycle", clean.map(\.label) == ["Tracks", "Turnover", "Full cycles", "This cycle"], "\(clean.map(\.label))")
+            check("their values read plainly", clean[0].displayText == "11" && clean[1].displayText == AlbumTurnoverEngine.formatTurnoverRate(38) && clean[2].displayText == "7" && clean[3].displayText == "8 of 11", "\(clean.map(\.displayText))")
+            check("a clean match asks for no attention and has no fix button", clean.allSatisfy { !$0.attention && $0.onEdit == nil })
+            let uncertain = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover(ambiguous: true)), onFixAlbumMatch: { edits += 100 })
+            check("an uncertain match says so, asks for a look, and its button is the fix", uncertain[1].detail == "Uncertain match" && uncertain[1].attention && uncertain[1].editHelp == "Fix album match…")
+            uncertain[1].onEdit?()
+            check("pressing it runs the fix", edits >= 100)
+            let fresh = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover(cycles: 3, heard: 0)), onFixAlbumMatch: {})
+            check("a cycle that just started says so", fresh[3].displayText == "0 of 11" && fresh[3].detail == "New cycle just starting")
+            let firstCycle = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover(cycles: 0, heard: 0)), onFixAlbumMatch: {})
+            check("the very first cycle is not 'just starting'", firstCycle[3].detail == nil && firstCycle[2].displayText == "0")
+            let notApplicable = AlbumTurnoverEngine.AlbumTurnover(
+                artist: "A", album: "B", applicable: false, basis: .observed, ambiguous: false, noCanonicalMatch: true, resolved: false, rateDays: nil,
+                cyclesCompleted: 0, lastTurnoverDate: nil, trackCount: 0, observedDistinct: 4, inProgressHeard: 0, inProgressTotal: 0,
+                inProgressMissing: [], tracks: [], isCompilation: true, groupKey: "k", imageURL: nil
+            )
+            check("an album with no listen-through (a compilation) shows no tiles", AlbumDetailModel.turnoverFacts(.ready(notApplicable), onFixAlbumMatch: {}).isEmpty)
+            let observed = AlbumTurnoverEngine.AlbumTurnover(
+                artist: "A", album: "B", applicable: true, basis: .observed, ambiguous: false, noCanonicalMatch: true, resolved: false, rateDays: nil,
+                cyclesCompleted: 0, lastTurnoverDate: nil, trackCount: 6, observedDistinct: 6, inProgressHeard: 2, inProgressTotal: 6,
+                inProgressMissing: [], tracks: [], isCompilation: false, groupKey: "k", imageURL: nil
+            )
+            let observedFacts = AlbumDetailModel.turnoverFacts(.ready(observed), onFixAlbumMatch: {})
+            check("with no real tracklist there is no 'Tracks' tile, and the no-match note shows", !observedFacts.map(\.label).contains("Tracks") && observedFacts.first?.detail == "No match found" && observedFacts.first?.attention == true, "\(observedFacts.map(\.label))")
+            check("rate text with no full cycle yet", observedFacts.first?.displayText == "No full cycle yet")
+
             // MARK: The tile grid's columns
             func columns(_ width: CGFloat, _ count: Int) -> Int { EvenGridLayout.columnCount(width: width, count: count, minimumWidth: 138, spacing: 10) }
             check("a wide window puts every tile in one row", columns(1200, 4) == 4 && columns(1200, 3) == 3 && columns(1200, 1) == 1)

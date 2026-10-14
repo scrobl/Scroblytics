@@ -33,6 +33,57 @@ enum DetailSnapshots {
         }
     }
 
+    static func sampleTurnover(ambiguous: Bool = false, cycles: Int = 7, heard: Int = 8, total: Int = 11) -> AlbumTurnoverEngine.AlbumTurnover {
+        AlbumTurnoverEngine.AlbumTurnover(
+            artist: "Artist A", album: "Album Name", applicable: true, basis: .canonical, ambiguous: ambiguous, noCanonicalMatch: false,
+            resolved: false, rateDays: 38, cyclesCompleted: cycles, lastTurnoverDate: nil, trackCount: total, observedDistinct: total,
+            inProgressHeard: heard, inProgressTotal: total, inProgressMissing: [], tracks: [], isCompilation: false, groupKey: "k", imageURL: nil
+        )
+    }
+
+    @MainActor
+    static func albumCard(stats: EntityStats?, turnover: AlbumTurnoverState) -> some View {
+        let released = DetailFact(id: "released", label: "Released", value: .text("Sep 12, 2018"), systemImage: "calendar", onEdit: {})
+        return DetailHeaderCard(
+            entity: .album, name: "Album Name", subtitle: "Artist A", tertiary: nil, imageURL: nil, stats: stats,
+            errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 78 * 3600,
+            yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 2)],
+            onFixAlbumMatch: {}, facts: [released] + AlbumDetailModel.turnoverFacts(turnover, onFixAlbumMatch: {})
+        ) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)
+                Text("dream pop · shoegaze · 2010s").font(AppTypography.metadata)
+            }
+        }
+    }
+
+    @MainActor
+    static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, to url: URL) async {
+        let view = content
+            .padding(16)
+            .frame(width: width)
+            .modelContainer(container)
+            .environment(PopularityStore())
+            .environment(LovedTracksStore())
+            .environment(FlaggedTracksStore())
+            .environment(LibraryGapBadgeStore())
+            .environment(\.colorScheme, dark ? .dark : .light)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let host = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        window.contentView = host
+        window.setContentSize(NSSize(width: width, height: 600))
+        for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+        let fitting = host.fittingSize
+        window.setContentSize(NSSize(width: width, height: max(200, fitting.height)))
+        for _ in 0..<3 { try? await Task.sleep(for: .milliseconds(100)); host.layoutSubtreeIfNeeded() }
+        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+            host.cacheDisplay(in: host.bounds, to: rep)
+            if let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: url) }
+        }
+    }
+
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_DETAIL"] else { return }
@@ -48,36 +99,15 @@ enum DetailSnapshots {
                 DetailFact(id: "length", label: "Length", value: .unknown, systemImage: "clock", onEdit: {}),
                 DetailFact(id: "tempo", label: "Tempo", value: .loading, systemImage: "metronome", onEdit: {}),
             ]
-            for (name, stats, facts) in [("loaded", Optional(sampleStats()), loaded), ("waiting", nil, waiting)] {
-                for width in [1200, 900, 700, 560, 440] as [CGFloat] {
-                    for dark in [true, false] {
-                        let scheme: ColorScheme = dark ? .dark : .light
-                        let view = trackCard(stats: stats, facts: facts)
-                            .padding(16)
-                            .frame(width: width)
-                            .modelContainer(container)
-                            .environment(PopularityStore())
-                            .environment(LovedTracksStore())
-                            .environment(FlaggedTracksStore())
-                            .environment(LibraryGapBadgeStore())
-                            .environment(\.colorScheme, scheme)
-                            .background(Color(nsColor: .windowBackgroundColor))
-                        let host = NSHostingView(rootView: view)
-                        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
-                        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-                        window.contentView = host
-                        window.setContentSize(NSSize(width: width, height: 600))
-                        for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
-                        let fitting = host.fittingSize
-                        window.setContentSize(NSSize(width: width, height: max(200, fitting.height)))
-                        for _ in 0..<3 { try? await Task.sleep(for: .milliseconds(100)); host.layoutSubtreeIfNeeded() }
-                        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-                            host.cacheDisplay(in: host.bounds, to: rep)
-                            if let png = rep.representation(using: .png, properties: [:]) {
-                                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "track-\(name)-\(Int(width))-\(dark ? "dark" : "light").png"))
-                            }
-                        }
-                    }
+            let base = URL(fileURLWithPath: folder)
+            for width in [1200, 900, 700, 560, 440] as [CGFloat] {
+                for dark in [true, false] {
+                    let mode = dark ? "dark" : "light"
+                    await render(trackCard(stats: sampleStats(), facts: loaded), width: width, dark: dark, container: container, to: base.appending(path: "track-loaded-\(Int(width))-\(mode).png"))
+                    await render(trackCard(stats: nil, facts: waiting), width: width, dark: dark, container: container, to: base.appending(path: "track-waiting-\(Int(width))-\(mode).png"))
+                    await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover())), width: width, dark: dark, container: container, to: base.appending(path: "album-ready-\(Int(width))-\(mode).png"))
+                    await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover(ambiguous: true))), width: width, dark: dark, container: container, to: base.appending(path: "album-uncertain-\(Int(width))-\(mode).png"))
+                    await render(albumCard(stats: nil, turnover: .loading), width: width, dark: dark, container: container, to: base.appending(path: "album-loading-\(Int(width))-\(mode).png"))
                 }
             }
             exit(0)

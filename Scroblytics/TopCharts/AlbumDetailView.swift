@@ -51,7 +51,7 @@ struct AlbumDetailView: View {
 
     var body: some View {
         if DetailPageStyle.resolve(storedValue: pageStyle) == .new {
-            DetailPagePlaceholder(navigation: navigation, artist: ArtistIdentity(name: identity.artist), album: nil, title: identity.name)
+            NewAlbumDetailPage(identity: identity, settings: settings, navigation: navigation)
         } else {
             legacyBody
         }

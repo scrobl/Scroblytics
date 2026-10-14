@@ -22,8 +22,12 @@ struct DetailFact: Identifiable {
     /// What a tile says while its value is on the way: a lookup says "Checking…", a number that is simply loading a dash.
     var loadingText = "Checking…"
     var help: String? = nil
-    /// Adds a pencil that opens the editor for this value.
+    /// Adds a button that opens the editor for this value: a pencil, or another symbol where the action is something else (a fix).
     var onEdit: (() -> Void)? = nil
+    var editImage = "pencil"
+    var editHelp: String? = nil
+    /// Draws attention to a value that needs a look (an uncertain album match).
+    var attention = false
 
     var hasValue: Bool {
         if case .text = value { return true }
@@ -132,12 +136,12 @@ struct DetailFactTile: View {
                 Spacer(minLength: 0)
                 if let onEdit = fact.onEdit {
                     Button(action: onEdit) {
-                        Image(systemName: "pencil").font(AppTypography.supportingDense)
+                        Image(systemName: fact.editImage).font(AppTypography.supportingDense)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
-                    .help("Edit \(fact.label.lowercased())")
-                    .accessibilityLabel("Edit \(fact.label.lowercased())")
+                    .foregroundStyle(fact.attention ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
+                    .help(fact.editHelp ?? "Edit \(fact.label.lowercased())")
+                    .accessibilityLabel(fact.editHelp ?? "Edit \(fact.label.lowercased())")
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -159,6 +163,11 @@ struct DetailFactTile: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            if fact.attention {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.orange.opacity(0.6), lineWidth: 1)
+            }
+        }
         .help(fact.help ?? "")
         .accessibilityElement(children: .combine)
     }

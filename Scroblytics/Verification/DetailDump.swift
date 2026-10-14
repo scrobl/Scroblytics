@@ -71,6 +71,29 @@ enum DetailDump {
                 check("first and last scrobble of the album match", model.stats?.firstScrobble == plays.map(\.playedAt).min() && model.stats?.lastScrobble == plays.map(\.playedAt).max())
                 check("with no account there are no turnover tiles, only the release date", model.facts(onEditReleaseDate: {}, onFixAlbumMatch: {}).map(\.label) == ["Released"])
                 print("      loaded in \(String(format: "%.2f", seconds)) s; ranks \(model.yearlyTopRanks.map { "#\($0.rank)·\($0.year)" }.joined(separator: " "))")
+
+                // The table: the period's played tracks joined with the album's cached tracklist (no network: Offline mode is on).
+                let played = (try? await TopChartsEngine.fetchScopedRankings(
+                    container: container, durationContext: container.mainContext, entity: .track, artist: entry.artist, album: entry.album,
+                    range: all, compareRange: nil, metric: .scrobbles
+                )) ?? []
+                let client = LastfmAPIClient(apiKey: "offline", username: "offline")
+                var listed: [AlbumTrackRows.ListedTrack]?
+                if case .found(let found)? = try? await AlbumTurnoverEngine.getCachedTracklist(context: container.mainContext, client: client, artist: entry.artist, album: entry.album) {
+                    listed = found.tracks.map { AlbumTrackRows.ListedTrack(title: $0, heardThisCycle: nil) }
+                }
+                let rows = AlbumTrackRows.merge(tracklist: listed, entries: played)
+                let playedIDs = Set(played.map(\.id))
+                let rowIDs = rows.compactMap { $0.entry?.id }
+                check("table: every played track is in exactly one row", Set(rowIDs) == playedIDs && rowIDs.count == played.count, "\(rowIDs.count) rows vs \(played.count) tracks")
+                check("table: the plays in the rows equal the plays in the period", rows.compactMap { $0.entry }.map { $0.playcount }.reduce(0, +) == played.map { $0.playcount }.reduce(0, +))
+                if let listed {
+                    check("table: one row per tracklist entry, then only unmatched plays", rows.filter { $0.kind == .listed }.count == listed.count && rows.prefix(listed.count).allSatisfy { $0.kind == .listed })
+                    let matched = rows.filter { $0.kind == .listed && $0.entry != nil }.count
+                    print("      tracklist of \(listed.count): \(matched) played in the period, \(listed.count - matched) not; \(rows.filter { $0.kind == .extra }.count) other tracks played")
+                } else {
+                    print("      no cached tracklist for this album: the table is the \(played.count) played tracks")
+                }
             }
 
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")

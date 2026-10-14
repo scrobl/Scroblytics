@@ -34,7 +34,7 @@ struct DetailHeaderCard<Tags: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             headlineFacts
-            if !facts.isEmpty { DetailFactGrid(facts: facts) }
+            if !facts.isEmpty { DetailFactGrid(facts: facts, reservesDetailLine: DetailFactGrid.reservesDetailLine(for: facts)) }
             milestones
             tagsArea
         }
@@ -65,27 +65,27 @@ struct DetailHeaderCard<Tags: View>: View {
 
     private var header: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 18) {
+            // The title takes the width it needs (up to a cap, then it wraps) and the trend takes all the rest.
+            DetailHeaderRowLayout {
                 artwork
-                identity.frame(maxWidth: 460, alignment: .leading)
-                // The trend takes the rest of the row, sitting on the artwork's bottom edge.
+                identity
                 sparkline
-                    .frame(height: 72)
-                    .frame(minWidth: 160, maxWidth: .infinity)
-                    .frame(height: Self.artworkSize, alignment: .bottom)
             }
+            // Narrower: the trend goes under the title and takes the whole width left beside the artwork, however short the title is.
             HStack(alignment: .top, spacing: 14) {
                 artwork
                 VStack(alignment: .leading, spacing: 10) {
                     identity
-                    sparkline.frame(height: 40)
+                    sparkline.frame(height: 44)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 12) {
                 artwork
                 identity
-                sparkline.frame(height: 40)
+                sparkline.frame(height: 44)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -120,10 +120,10 @@ struct DetailHeaderCard<Tags: View>: View {
             if !yearlyTopRanks.isEmpty {
                 TagFlowLayout(spacing: 6) {
                     ForEach(yearlyTopRanks) { entry in
-                        HStack(spacing: 4) {
-                            Image(systemName: "medal.fill").font(AppTypography.supportingDense)
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Image(systemName: "medal.fill").font(AppTypography.badge)
                             Text("#\(entry.rank)").font(AppTypography.badge)
-                            Text("· \(String(entry.year))").font(AppTypography.supportingDense).opacity(0.7)
+                            Text("· \(String(entry.year))").font(AppTypography.supporting).opacity(0.75)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .foregroundStyle(Color.purple)
@@ -211,7 +211,11 @@ struct DetailHeaderCard<Tags: View>: View {
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.secondary)
             } else {
-                DetailFactGrid(facts: Self.headline(stats: stats, metric: metric, timeListenedSeconds: timeListenedSeconds))
+                // The same height as the facts below, so every box on the card matches.
+                DetailFactGrid(
+                    facts: Self.headline(stats: stats, metric: metric, timeListenedSeconds: timeListenedSeconds),
+                    reservesDetailLine: DetailFactGrid.reservesDetailLine(for: facts)
+                )
             }
         }
     }
@@ -261,11 +265,11 @@ struct DetailHeaderCard<Tags: View>: View {
                     }
                 }
                 if let upcoming = stats.milestones.upcoming {
-                    HStack(spacing: 6) {
-                        Text("\(upcoming.remaining) to \(MilestoneFormatting.formatMilestone(upcoming.next))")
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(Self.nextMilestoneText(remaining: upcoming.remaining, next: upcoming.next))
                             .font(AppTypography.supporting).foregroundStyle(.secondary)
                         if let eta = MilestoneFormatting.formatEtaDays(upcoming.etaDays) {
-                            Text("· \(eta)").font(AppTypography.supportingDense).foregroundStyle(.tertiary)
+                            Text("· \(eta)").font(AppTypography.supporting).foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -276,16 +280,22 @@ struct DetailHeaderCard<Tags: View>: View {
     private func milestoneBadge(_ m: (milestone: Int, achievedAt: Date, firstAt: Date)) -> some View {
         let color = MilestoneFormatting.milestoneColor(m.milestone)
         let elapsedDays = m.achievedAt.timeIntervalSince(m.firstAt) / 86400
-        return HStack(spacing: 4) {
-            Image(systemName: "trophy.fill").font(AppTypography.supportingDense)
+        // One baseline for the number and the date, whatever their sizes, so the text sits level inside the pill.
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: "trophy.fill").font(AppTypography.badge)
             Text(MilestoneFormatting.formatMilestone(m.milestone)).font(AppTypography.badge)
             Text("· \(m.achievedAt.formatted(date: .abbreviated, time: .omitted)) (\(MilestoneFormatting.formatElapsedDays(elapsedDays)))")
-                .font(AppTypography.supportingDense).opacity(0.7)
+                .font(AppTypography.supporting).opacity(0.75)
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .foregroundStyle(color)
         .background(color.opacity(0.15), in: Capsule())
         .overlay(Capsule().stroke(MilestoneFormatting.isPrestigeMilestone(m.milestone) ? Color.accentColor : .clear, lineWidth: 1))
+    }
+
+    /// "Next milestone: 186 to 500": how many more plays reach the next round number.
+    static func nextMilestoneText(remaining: Int, next: Int) -> String {
+        "Next milestone: \(remaining) to \(MilestoneFormatting.formatMilestone(next))"
     }
 
     // MARK: - Tags
@@ -339,5 +349,47 @@ struct DetailArtworkPreviewSheet: View {
             .accessibilityLabel("Artwork for \(name)")
         }
         .padding(20)
+    }
+}
+
+
+/// The wide header row: artwork, title block, trend. The title block gets its natural width, at most `identityCap`, and never so much
+/// that the trend falls under `sparklineMinimum`; the trend takes everything left and sits on the artwork's bottom edge.
+struct DetailHeaderRowLayout: Layout {
+    var spacing: CGFloat = 18
+    var identityCap: CGFloat = 460
+    var sparklineMinimum: CGFloat = 160
+    var sparklineHeight: CGFloat = 72
+    /// How wide the row would like to be with nothing else to say: enough for a decent trend.
+    private let sparklinePreferred: CGFloat = 220
+
+    private func identityWidth(rowWidth: CGFloat, artWidth: CGFloat, ideal: CGFloat) -> CGFloat {
+        max(0, min(ideal, rowWidth - artWidth - 2 * spacing - sparklineMinimum))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 3 else { return .zero }
+        let art = subviews[0].sizeThatFits(.unspecified)
+        let ideal = min(subviews[1].sizeThatFits(.unspecified).width, identityCap)
+        let width = proposal.width ?? (art.width + spacing + ideal + spacing + sparklinePreferred)
+        let identityHeight = subviews[1].sizeThatFits(ProposedViewSize(width: identityWidth(rowWidth: width, artWidth: art.width, ideal: ideal), height: nil)).height
+        return CGSize(width: width, height: max(art.height, identityHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let art = subviews[0].sizeThatFits(.unspecified)
+        let ideal = min(subviews[1].sizeThatFits(.unspecified).width, identityCap)
+        let width = identityWidth(rowWidth: bounds.width, artWidth: art.width, ideal: ideal)
+        let identityHeight = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        let rowHeight = max(art.height, identityHeight)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading, proposal: ProposedViewSize(art))
+        let identityX = bounds.minX + art.width + spacing
+        subviews[1].place(at: CGPoint(x: identityX, y: bounds.minY), anchor: .topLeading, proposal: ProposedViewSize(width: width, height: identityHeight))
+        let sparklineX = identityX + width + spacing
+        subviews[2].place(
+            at: CGPoint(x: sparklineX, y: bounds.minY + rowHeight - sparklineHeight), anchor: .topLeading,
+            proposal: ProposedViewSize(width: max(0, bounds.maxX - sparklineX), height: sparklineHeight)
+        )
     }
 }

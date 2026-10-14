@@ -205,9 +205,9 @@ final class AlbumDetailModel {
         case .loading:
             return [
                 DetailFact(id: "tracks", label: "Tracks", value: .loading, systemImage: "music.note.list"),
-                DetailFact(id: "turnover", label: "Turnover", value: .loading, systemImage: "repeat"),
+                DetailFact(id: "turnover", label: "Turnover", value: .loading, mayHaveDetail: true, systemImage: "repeat"),
                 DetailFact(id: "cycles", label: "Full cycles", value: .loading, systemImage: "checkmark.circle"),
-                DetailFact(id: "cycle", label: "This cycle", value: .loading, systemImage: "circle.dashed"),
+                DetailFact(id: "cycle", label: "This cycle", value: .loading, mayHaveDetail: true, systemImage: "circle.dashed"),
             ]
         case .ready(let turnover):
             // Not every album has a listen-through (a compilation, or one with no usable tracklist): then there is nothing to show.
@@ -220,7 +220,7 @@ final class AlbumDetailModel {
             let matchNote: String? = turnover.ambiguous ? "Uncertain match" : (turnover.noCanonicalMatch ? "No match found" : nil)
             var rate = DetailFact(
                 id: "turnover", label: "Turnover", value: .text(AlbumTurnoverEngine.formatTurnoverRate(turnover.rateDays)),
-                detail: matchNote, systemImage: "repeat"
+                detail: matchNote, mayHaveDetail: true, systemImage: "repeat"
             )
             if matchNote != nil {
                 rate.attention = true
@@ -233,7 +233,7 @@ final class AlbumDetailModel {
             let fresh = turnover.inProgressHeard == 0 && turnover.cyclesCompleted > 0
             facts.append(DetailFact(
                 id: "cycle", label: "This cycle", value: .text("\(turnover.inProgressHeard) of \(turnover.inProgressTotal)"),
-                detail: fresh ? "New cycle just starting" : nil, systemImage: "circle.dashed"
+                detail: fresh ? "New cycle just starting" : nil, mayHaveDetail: true, systemImage: "circle.dashed"
             ))
             return facts
         }

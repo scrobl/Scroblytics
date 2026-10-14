@@ -29,8 +29,9 @@ struct NewAlbumDetailPage: View {
                 DetailBreadcrumbBar(navigation: navigation, artist: ArtistIdentity(name: identity.artist), album: nil, current: identity.name)
 
                 ChartControlsPanel(settings: settings, rangeOptions: rangeOptions, currentRange: range) {
-                    EntityPresentationRow(selectorWidth: 100, isGridView: settings.binding(for: .track, context: .detail)) {
-                        Text("Tracks").font(AppTypography.contentTitle).foregroundStyle(.secondary)
+                    // The table below carries its own "Tracks" heading; this row is only the list / grid switch.
+                    EntityPresentationRow(selectorWidth: 0, isGridView: settings.binding(for: .track, context: .detail)) {
+                        EmptyView()
                     }
                 }
 
@@ -49,11 +50,19 @@ struct NewAlbumDetailPage: View {
                     )
                 }
 
-                EntitySubListView(
-                    entity: .track, artist: identity.artist, album: identity.name,
-                    range: range, compareRange: compareRange, metric: settings.metric,
-                    isGridView: settings.isGridView(for: .track, context: .detail), origin: navigation.origin
-                )
+                if settings.isGridView(for: .track, context: .detail) {
+                    // The artwork grid is the same as before: only the tracks played in the period.
+                    EntitySubListView(
+                        entity: .track, artist: identity.artist, album: identity.name,
+                        range: range, compareRange: compareRange, metric: settings.metric,
+                        isGridView: true, origin: navigation.origin
+                    )
+                } else {
+                    AlbumTrackTable(
+                        artist: identity.artist, album: identity.name, range: range, compareRange: compareRange,
+                        metric: settings.metric, turnover: model.turnoverState
+                    )
+                }
             }
             .padding()
         }

@@ -16,6 +16,8 @@ struct DetailFact: Identifiable {
     var value: Value
     /// A second, smaller line (a tempo's time signature and key, an album's turnover cycle).
     var detail: String? = nil
+    /// This kind of fact sometimes has a second line, so every tile on the card keeps room for one and they all stay the same height.
+    var mayHaveDetail = false
     /// "(corrected)": the value is the person's own correction.
     var corrected = false
     var systemImage: String? = nil
@@ -49,13 +51,20 @@ struct DetailFact: Identifiable {
 struct DetailFactGrid: View {
     let facts: [DetailFact]
     var minimumTileWidth: CGFloat = 138
+    /// Every tile keeps room for a second line, whether or not it has one.
+    var reservesDetailLine = false
 
     var body: some View {
         EvenGridLayout(minimumWidth: minimumTileWidth, spacing: 10) {
             ForEach(facts) { fact in
-                DetailFactTile(fact: fact)
+                DetailFactTile(fact: fact, reservesDetailLine: reservesDetailLine)
             }
         }
+    }
+
+    /// Whether a card's tiles need room for a second line: when any of its facts has one, or can have one.
+    static func reservesDetailLine(for facts: [DetailFact]) -> Bool {
+        facts.contains { $0.mayHaveDetail || $0.detail != nil }
     }
 }
 
@@ -84,6 +93,7 @@ struct EvenGridLayout: Layout {
     private struct Arrangement {
         var columns: Int
         var cellWidth: CGFloat
+        /// Every row is as tall as the tallest tile, so all the boxes match even when a row is short.
         var rowHeights: [CGFloat]
     }
 
@@ -95,7 +105,8 @@ struct EvenGridLayout: Layout {
             let height = subview.sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height
             if index % columns == 0 { rowHeights.append(height) } else { rowHeights[rowHeights.count - 1] = max(rowHeights[rowHeights.count - 1], height) }
         }
-        return Arrangement(columns: columns, cellWidth: cellWidth, rowHeights: rowHeights)
+        let tallest = rowHeights.max() ?? 0
+        return Arrangement(columns: columns, cellWidth: cellWidth, rowHeights: rowHeights.map { _ in tallest })
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -125,6 +136,7 @@ struct EvenGridLayout: Layout {
 
 struct DetailFactTile: View {
     let fact: DetailFact
+    var reservesDetailLine = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -157,6 +169,8 @@ struct DetailFactTile: View {
             // The second line is always laid out when there is one, so a tile does not change height when a value arrives.
             if let detail = fact.detail {
                 Text(detail).font(AppTypography.supportingDense).foregroundStyle(.secondary).lineLimit(1)
+            } else if reservesDetailLine {
+                Text(" ").font(AppTypography.supportingDense).accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 10)

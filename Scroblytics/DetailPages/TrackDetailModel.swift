@@ -214,7 +214,7 @@ final class TrackDetailModel {
                 systemImage: "clock", onEdit: onEditDuration
             ),
             DetailFact(
-                id: "tempo", label: "Tempo", value: tempo, detail: tempoDetail.isEmpty ? nil : tempoDetail,
+                id: "tempo", label: "Tempo", value: tempo, detail: tempoDetail.isEmpty ? nil : tempoDetail, mayHaveDetail: true,
                 corrected: resolvedBPM != nil && overrideBPM != nil, systemImage: "metronome",
                 help: resolvedBPM.map { "From \($0.source.label)" }, onEdit: onEditTempo
             ),

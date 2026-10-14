@@ -33,19 +33,29 @@ enum DetailSnapshots {
         }
     }
 
-    static func sampleTurnover(ambiguous: Bool = false, cycles: Int = 7, heard: Int = 8, total: Int = 11) -> AlbumTurnoverEngine.AlbumTurnover {
+    static func sampleObservedTurnover() -> AlbumTurnoverEngine.AlbumTurnover {
+        AlbumTurnoverEngine.AlbumTurnover(
+            artist: "Artist A", album: "Album Name", applicable: true, basis: .observed, ambiguous: false, noCanonicalMatch: true,
+            resolved: false, rateDays: nil, cyclesCompleted: 0, lastTurnoverDate: nil, trackCount: 3, observedDistinct: 3,
+            inProgressHeard: 1, inProgressTotal: 3, inProgressMissing: [], tracks: [.init(title: "A", heardThisCycle: true)], isCompilation: false, groupKey: "k", imageURL: nil
+        )
+    }
+
+    static func sampleTurnover(
+        ambiguous: Bool = false, cycles: Int = 7, heard: Int = 8, total: Int = 11, tracks: [AlbumTurnoverEngine.TrackCycleState] = []
+    ) -> AlbumTurnoverEngine.AlbumTurnover {
         AlbumTurnoverEngine.AlbumTurnover(
             artist: "Artist A", album: "Album Name", applicable: true, basis: .canonical, ambiguous: ambiguous, noCanonicalMatch: false,
             resolved: false, rateDays: 38, cyclesCompleted: cycles, lastTurnoverDate: nil, trackCount: total, observedDistinct: total,
-            inProgressHeard: heard, inProgressTotal: total, inProgressMissing: [], tracks: [], isCompilation: false, groupKey: "k", imageURL: nil
+            inProgressHeard: heard, inProgressTotal: total, inProgressMissing: [], tracks: tracks, isCompilation: false, groupKey: "k", imageURL: nil
         )
     }
 
     @MainActor
-    static func albumCard(stats: EntityStats?, turnover: AlbumTurnoverState) -> some View {
+    static func albumCard(stats: EntityStats?, turnover: AlbumTurnoverState, title: String = "Album Name") -> some View {
         let released = DetailFact(id: "released", label: "Released", value: .text("Sep 12, 2018"), systemImage: "calendar", onEdit: {})
         return DetailHeaderCard(
-            entity: .album, name: "Album Name", subtitle: "Artist A", tertiary: nil, imageURL: nil, stats: stats,
+            entity: .album, name: title, subtitle: "Artist A", tertiary: nil, imageURL: nil, stats: stats,
             errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 78 * 3600,
             yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 2)],
             onFixAlbumMatch: {}, facts: [released] + AlbumDetailModel.turnoverFacts(turnover, onFixAlbumMatch: {})
@@ -55,6 +65,37 @@ enum DetailSnapshots {
                 Text("dream pop · shoegaze · 2010s").font(AppTypography.metadata)
             }
         }
+    }
+
+
+    @MainActor
+    static func table(compact: Bool = false, longAlbum: Bool = false) -> some View {
+        let now = Date()
+        func entry(_ name: String, plays: Int, daysAgo: Double) -> TopChartEntry {
+            TopChartEntry(
+                rank: 1, name: name, artist: "Artist A", album: "Album Name", playcount: plays, timeListenedSeconds: nil, imageURL: nil,
+                hasCompareRange: false, previousRank: nil, peakRank: 1, lastPlayedAt: now.addingTimeInterval(-daysAgo * 86400), loved: plays > 40,
+                releaseDateResolution: .unknown
+            )
+        }
+        let count = longAlbum ? 64 : 11
+        let heard = (0..<count).map { $0 % 4 != 3 }
+        let listed: [AlbumTurnoverEngine.TrackCycleState] = (0..<count).map { .init(title: "Song \($0 + 1)", heardThisCycle: heard[$0]) }
+        var played: [TopChartEntry] = []
+        for index in 0..<count where index % 5 != 4 {
+            played.append(entry("Song \(index + 1)", plays: max(1, 60 - index * 4 + (index % 3) * 7), daysAgo: Double(1 + index * 3)))
+        }
+        played.append(entry("Bonus Track", plays: 3, daysAgo: 20))
+        return NavigationStack {
+            ScrollView {
+                AlbumTrackTable(
+                    artist: "Artist A", album: "Album Name",
+                    range: DateRange(from: now.addingTimeInterval(-365 * 86400), to: now), compareRange: nil, metric: .scrobbles,
+                    turnover: .ready(sampleTurnover(total: count, tracks: listed)), seedEntries: played
+                )
+            }
+        }
+        .frame(height: longAlbum ? 900 : 560)
     }
 
     @MainActor
@@ -110,6 +151,17 @@ enum DetailSnapshots {
                     await render(albumCard(stats: nil, turnover: .loading), width: width, dark: dark, container: container, to: base.appending(path: "album-loading-\(Int(width))-\(mode).png"))
                 }
             }
+            let longTitle = "The Idler Wheel Is Wiser Than the Driver of the Screw and Whipping Cords Will Serve You More Than Ropes Will Ever Do (Deluxe Version)"
+            for width in [1600, 1000, 700] as [CGFloat] {
+                await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover()), title: longTitle), width: width, dark: true, container: container, to: base.appending(path: "album-longtitle-\(width)-dark.png".replacingOccurrences(of: ".0", with: "")))
+            }
+            for width in [1600, 1000, 700, 520] as [CGFloat] {
+                for dark in [true, false] {
+                    let mode = dark ? "dark" : "light"
+                    await render(table(), width: width, dark: dark, container: container, to: base.appending(path: "table-\(Int(width))-\(mode).png"))
+                }
+            }
+            await render(table(longAlbum: true), width: 900, dark: true, container: container, to: base.appending(path: "table-long-900-dark.png"))
             exit(0)
         }
     }

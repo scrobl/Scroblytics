@@ -201,8 +201,10 @@ enum DetailChecks {
             check("the history's spelling of a title is found by its normalized title, taking the most played spelling", names["song three"] == PlayedName(artist: "Artist A", name: "Song Three - 2011 Remaster"), "\(names)")
             check("an artist's capitalization and an album's edition suffix don't hide a track", names["song five"]?.name == "Song Five")
             check("another artist's or another album's plays, and plays with no title, are left out", names["song four"] == nil && names.count == 2, "\(names.keys.sorted())")
-            let tie = AlbumTrackRows.playedNames(from: [snap("Artist A", "Album Name", "Same Song (Live)"), snap("Artist A", "Album Name", "Same Song")], artist: "Artist A", album: "Album Name")
-            check("a tie between two spellings always goes the same way", tie.count == 1 && tie.values.first?.name == "Same Song" || tie.values.first?.name == "Same Song (Live)")
+            // Two spellings of one title (the second is the same song with a remaster suffix), played equally often, in either order.
+            let plainFirst = AlbumTrackRows.playedNames(from: [snap("Artist A", "Album Name", "Same Song"), snap("Artist A", "Album Name", "Same Song - 2011 Remaster")], artist: "Artist A", album: "Album Name")
+            let remasterFirst = AlbumTrackRows.playedNames(from: [snap("Artist A", "Album Name", "Same Song - 2011 Remaster"), snap("Artist A", "Album Name", "Same Song")], artist: "Artist A", album: "Album Name")
+            check("a tie between two spellings always goes the same way, whichever was played first", plainFirst.count == 1 && plainFirst == remasterFirst && plainFirst.values.first?.name == "Same Song", "\(plainFirst) \(remasterFirst)")
             check("no history means no names", AlbumTrackRows.playedNames(from: [], artist: "Artist A", album: "Album Name").isEmpty)
             let notPlayed = merged[2]   // "Song Three": nothing in the period
             check("a track played in another period opens under how it was played", AlbumTrackRows.identity(for: notPlayed, albumArtist: "Artist A", playedNames: names) == PlayedName(artist: "Artist A", name: "Song Three - 2011 Remaster"))

@@ -130,6 +130,18 @@ import:
    half hour after it finishes: it should settle to a few percent. `sample <pid> 30` then names what is busy (use a Debug build for
    readable names). `SCROBLYTICS_PERF_CHECK=1` on a scratch copy times the artwork lookup against the old per-album query.
 
+## The detail pages (Artist, Album, Track)
+
+`SCROBLYTICS_DETAIL_CHECK=1` (in `scripts/release.sh`) checks the fact tiles, the album table's join, filters, sorts, directions and
+length keys, and the turnover tiles on made-up data. Before a release that changes them:
+
+- On a scratch copy of a library with Offline mode on, `SCROBLYTICS_DETAIL_DUMP=1` loads the three pages' models for the most-played
+  track, album and artist and compares them with an independent count, checks the album table's rows and lengths against the
+  duration engine, and prints how long each part of the album page takes.
+- `SCROBLYTICS_LAYOUT_SNAPSHOT_DETAIL=<folder>` renders the header card and the album table offscreen at several widths, dark and light.
+- By eye: open an artist, an album (one with a settled match, an uncertain one, a compilation) and a track from Top Charts, Library,
+  Query and Trends; edit a release date, length and tempo; fix an album match; try the filters and the sort direction; narrow the window.
+
 ## What the update notice needs
 
 The app's daily "newer version available" notice reads GitHub's release list. For a release to be announced its tag must be named

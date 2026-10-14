@@ -38,6 +38,25 @@ enum AlbumTrackSort: String, CaseIterable, Identifiable {
         case .releaseYear: "Release year"
         }
     }
+
+    /// The direction a sort starts in: first to last and A to Z read upward, the others start with the most, newest or latest first.
+    var startsAscending: Bool {
+        switch self {
+        case .trackOrder, .alphabetical: true
+        case .mostPlayed, .recentlyPlayed, .releaseYear: false
+        }
+    }
+
+    /// What the direction button says, in the sort's own words.
+    func directionLabel(ascending: Bool) -> String {
+        switch self {
+        case .trackOrder: ascending ? "First to last" : "Last to first"
+        case .alphabetical: ascending ? "A to Z" : "Z to A"
+        case .mostPlayed: ascending ? "Fewest first" : "Most first"
+        case .recentlyPlayed: ascending ? "Oldest first" : "Newest first"
+        case .releaseYear: ascending ? "Oldest first" : "Newest first"
+        }
+    }
 }
 
 enum AlbumTrackFilter: String, CaseIterable, Identifiable {
@@ -92,9 +111,11 @@ enum AlbumTrackRows {
         rows.filter { $0.heardThisCycle == false }.count
     }
 
-    /// Orders the rows. Tracks with no plays in the period go last in every order that depends on plays, in tracklist order among
-    /// themselves; "Track order" puts extras after the tracklist.
-    static func sorted(_ rows: [AlbumTrackRow], by sort: AlbumTrackSort, metric: TopChartsMetric) -> [AlbumTrackRow] {
+    /// Orders the rows, ascending or descending (nil = the sort's own starting direction). Tracks with no plays count as zero plays
+    /// in "Most played"; in the date orders a track with nothing to date is last whichever way the list runs, since "unknown" is not
+    /// oldest or newest. "Track order" puts extras after the tracklist, and a reversed list starts with them.
+    static func sorted(_ rows: [AlbumTrackRow], by sort: AlbumTrackSort, metric: TopChartsMetric, ascending: Bool? = nil) -> [AlbumTrackRow] {
+        let up = ascending ?? sort.startsAscending
         func byTitle(_ a: AlbumTrackRow, _ b: AlbumTrackRow) -> Bool {
             a.title.localizedStandardCompare(b.title) == .orderedAscending
         }
@@ -106,38 +127,30 @@ enum AlbumTrackRows {
             case (nil, nil): return byTitle(a, b)
             }
         }
-        /// Rows with a value first (by `better`), the rest after, in tracklist order.
-        func ordered(_ better: @escaping (AlbumTrackRow, AlbumTrackRow) -> Bool, has: @escaping (AlbumTrackRow) -> Bool) -> [AlbumTrackRow] {
+        /// Rows with a value in the chosen direction; rows without one last, in tracklist order.
+        func byValue<V: Comparable>(_ value: @escaping (AlbumTrackRow) -> V?) -> [AlbumTrackRow] {
             rows.sorted { a, b in
-                switch (has(a), has(b)) {
-                case (true, true): return better(a, b)
-                case (true, false): return true
-                case (false, true): return false
-                case (false, false): return inTracklistOrder(a, b)
+                switch (value(a), value(b)) {
+                case (let x?, let y?): return x != y ? (up ? x < y : x > y) : inTracklistOrder(a, b)
+                case (_?, nil): return true
+                case (nil, _?): return false
+                case (nil, nil): return inTracklistOrder(a, b)
                 }
             }
         }
         switch sort {
         case .trackOrder:
-            return rows.sorted(by: inTracklistOrder)
+            let natural = rows.sorted(by: inTracklistOrder)
+            return up ? natural : Array(natural.reversed())
         case .alphabetical:
-            return rows.sorted(by: byTitle)
+            let natural = rows.sorted(by: byTitle)
+            return up ? natural : Array(natural.reversed())
         case .mostPlayed:
-            return ordered({ a, b in
-                let x = a.entry?.metricValue(for: metric) ?? 0, y = b.entry?.metricValue(for: metric) ?? 0
-                return x != y ? x > y : inTracklistOrder(a, b)
-            }, has: { $0.entry != nil })
+            return byValue { Optional($0.entry?.metricValue(for: metric) ?? 0) }
         case .recentlyPlayed:
-            return ordered({ a, b in
-                let x = a.entry?.lastPlayedAt ?? .distantPast, y = b.entry?.lastPlayedAt ?? .distantPast
-                return x != y ? x > y : inTracklistOrder(a, b)
-            }, has: { $0.entry != nil })
+            return byValue { $0.entry?.lastPlayedAt }
         case .releaseYear:
-            func year(_ row: AlbumTrackRow) -> Int? { row.entry?.releaseDate.flatMap(ReleaseDateEngine.year(of:)) }
-            return ordered({ a, b in
-                let x = year(a) ?? 0, y = year(b) ?? 0
-                return x != y ? x > y : inTracklistOrder(a, b)
-            }, has: { year($0) != nil })
+            return byValue { $0.entry?.releaseDate.flatMap(ReleaseDateEngine.year(of:)) }
         }
     }
 

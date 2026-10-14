@@ -151,6 +151,21 @@ enum DetailChecks {
             check("release year puts tracks with a year first, the rest in tracklist order", AlbumTrackRows.sorted(merged, by: .releaseYear, metric: .scrobbles).first?.title == "Song Six")
             check("sorting never drops or repeats a row", AlbumTrackSort.allCases.allSatisfy { Set(AlbumTrackRows.sorted(merged, by: $0, metric: .scrobbles).map(\.id)) == Set(merged.map(\.id)) && AlbumTrackRows.sorted(merged, by: $0, metric: .scrobbles).count == merged.count })
 
+            // The sort directions.
+            func titles(_ sort: AlbumTrackSort, _ ascending: Bool?, _ rows: [AlbumTrackRow]? = nil) -> [String] {
+                AlbumTrackRows.sorted(rows ?? merged, by: sort, metric: .scrobbles, ascending: ascending).map(\.title)
+            }
+            check("each sort starts in its own direction: reading orders upward, plays and dates newest or most first", AlbumTrackSort.allCases.map(\.startsAscending) == [true, false, true, false, false], "\(AlbumTrackSort.allCases.map(\.startsAscending))")
+            check("asking for no direction is the starting direction", AlbumTrackSort.allCases.allSatisfy { titles($0, nil) == titles($0, $0.startsAscending) })
+            check("track order and A–Z reversed are exactly backwards", titles(.trackOrder, false) == titles(.trackOrder, true).reversed() && titles(.alphabetical, false) == titles(.alphabetical, true).reversed())
+            check("track order reversed starts with the extras, then the last track", titles(.trackOrder, false).first == "Bonus Track" && titles(.trackOrder, false).last == "Song One")
+            check("fewest played first puts the unplayed tracks first, then upward", titles(.mostPlayed, true) == ["Song Three", "Song Five", "Song Six", "Bonus Track", "Song Four", "Song Two", "Song One"], "\(titles(.mostPlayed, true))")
+            check("oldest play first, with the tracks that have no play still last", titles(.recentlyPlayed, true) == ["Song Six", "Song Four", "Song Two", "Song One", "Bonus Track", "Song Three", "Song Five"], "\(titles(.recentlyPlayed, true))")
+            check("release year in either direction keeps tracks with no year last", titles(.releaseYear, true).first == "Song Six" && titles(.releaseYear, false).first == "Song Six" && titles(.releaseYear, true).suffix(6).contains("Song Six") == false)
+            check("every sort in either direction keeps every row once", AlbumTrackSort.allCases.allSatisfy { sort in [true, false].allSatisfy { Set(titles(sort, $0)).count == merged.count && titles(sort, $0).count == merged.count } })
+            check("the direction button speaks each sort's own words", AlbumTrackSort.allCases.allSatisfy { $0.directionLabel(ascending: true) != $0.directionLabel(ascending: false) && !$0.directionLabel(ascending: true).isEmpty })
+            check("the sub-list's sorts follow the same rules", SubListSort.allCases.allSatisfy { $0.startsAscending == (($0 == .alphabetical) || ($0 == .trackOrder)) } && SubListSort.mostPlayed.directionLabel(ascending: false) == "Most first" && SubListSort.releaseYear.directionLabel(ascending: true) == "Oldest first")
+
             // Where the tracklist comes from.
             check("no tracklist while turnover loads or is unavailable", AlbumTrackRows.tracklist(from: .loading) == nil && AlbumTrackRows.tracklist(from: .unavailable) == nil)
             check("no tracklist when the album is matched only by what was played", AlbumTrackRows.tracklist(from: .ready(DetailSnapshots.sampleObservedTurnover())) == nil)

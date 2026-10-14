@@ -19,6 +19,8 @@ struct AlbumTrackTable: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var chosenSort: AlbumTrackSort?
+    /// nil means the chosen sort's own starting direction; the button flips it, and choosing another sort puts it back.
+    @State private var chosenAscending: Bool?
     @State private var filter = AlbumTrackFilter.all
     @State private var width: CGFloat = 900
 
@@ -49,11 +51,13 @@ struct AlbumTrackTable: View {
         return hasTracklist ? .trackOrder : .mostPlayed
     }
 
+    private var ascending: Bool { chosenAscending ?? sort.startsAscending }
+
     private var allRows: [AlbumTrackRow] { AlbumTrackRows.merge(tracklist: tracklist, entries: entries) }
 
     private var visibleRows: [AlbumTrackRow] {
         let activeFilter = hasTracklist ? filter : .all
-        return AlbumTrackRows.sorted(AlbumTrackRows.filtered(allRows, by: activeFilter), by: sort, metric: metric)
+        return AlbumTrackRows.sorted(AlbumTrackRows.filtered(allRows, by: activeFilter), by: sort, metric: metric, ascending: ascending)
     }
 
     private var filterID: String {
@@ -129,11 +133,19 @@ struct AlbumTrackTable: View {
             AppleMusicPlaylistExportButton(defaultPlaylistName: defaultPlaylistName, tracks: { playlistTracks })
                 .controlSize(.small)
         }
-        Picker("Sort", selection: Binding(get: { sort }, set: { chosenSort = $0 })) {
+        Picker("Sort", selection: Binding(get: { sort }, set: { chosenSort = $0; chosenAscending = nil })) {
             ForEach(availableSorts) { Text($0.label).tag($0) }
         }
         .pickerStyle(.menu)
         .fixedSize()
+        Button {
+            chosenAscending = !ascending
+        } label: {
+            Image(systemName: ascending ? "arrow.up" : "arrow.down")
+        }
+        .help("\(sort.directionLabel(ascending: ascending)). Click to reverse.")
+        .accessibilityLabel("Sort direction: \(sort.directionLabel(ascending: ascending))")
+        .accessibilityHint("Reverses the order")
     }
 
     // MARK: - Table

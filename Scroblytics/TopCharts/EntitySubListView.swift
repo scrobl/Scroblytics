@@ -40,15 +40,20 @@ struct EntitySubListView: View {
     /// origin (Top Charts, Overview) keeps defaulting to Most played. The
     /// user can still switch away from either default via the sort menu.
     let origin: DetailNavigationOrigin
+    /// Adds a button to reverse the sort. Off for the classic pages, on for the new ones.
+    var allowsDirection = false
 
     @Environment(\.modelContext) private var modelContext
     @State private var entries: [TopChartEntry] = []
     @State private var trackOrderIndex: [String: Int] = [:]
     @State private var sort: SubListSort
+    /// nil means the sort's own starting direction (see `SubListSort.startsAscending`).
+    @State private var ascendingOverride: Bool?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    init(entity: TopChartsEntity, artist: String, album: String?, range: DateRange, compareRange: DateRange?, metric: TopChartsMetric, isGridView: Bool, origin: DetailNavigationOrigin) {
+    init(entity: TopChartsEntity, artist: String, album: String?, range: DateRange, compareRange: DateRange?, metric: TopChartsMetric, isGridView: Bool, origin: DetailNavigationOrigin, allowsDirection: Bool = false) {
+        self.allowsDirection = allowsDirection
         self.entity = entity
         self.artist = artist
         self.album = album
@@ -81,7 +86,20 @@ struct EntitySubListView: View {
             : [.mostPlayed, .alphabetical, .recentlyPlayed]
     }
 
+    /// The entries in the chosen order and direction. The sorts below are written in their starting direction; a reversed one is that
+    /// list backwards, except that dates nobody knows stay last in a release-year order, since "unknown" is neither oldest nor newest.
     private var sortedEntries: [TopChartEntry] {
+        let natural = startingDirectionEntries
+        guard allowsDirection, let override = ascendingOverride, override != sort.startsAscending else { return natural }
+        if sort == .releaseYear {
+            let known = natural.filter { $0.releaseDate.flatMap(ReleaseDateEngine.year(of:)) != nil }
+            let unknown = natural.filter { $0.releaseDate.flatMap(ReleaseDateEngine.year(of:)) == nil }
+            return Array(known.reversed()) + unknown
+        }
+        return Array(natural.reversed())
+    }
+
+    private var startingDirectionEntries: [TopChartEntry] {
         switch sort {
         case .mostPlayed:
             return entries
@@ -138,6 +156,17 @@ struct EntitySubListView: View {
                 }
                 .pickerStyle(.menu)
                 .fixedSize()
+                if allowsDirection {
+                    let ascending = ascendingOverride ?? sort.startsAscending
+                    Button {
+                        ascendingOverride = !ascending
+                    } label: {
+                        Image(systemName: ascending ? "arrow.up" : "arrow.down")
+                    }
+                    .help("\(sort.directionLabel(ascending: ascending)). Click to reverse.")
+                    .accessibilityLabel("Sort direction: \(sort.directionLabel(ascending: ascending))")
+                    .accessibilityHint("Reverses the order")
+                }
             }
 
             if isLoading {
@@ -174,6 +203,7 @@ struct EntitySubListView: View {
         }
         .task(id: filterID) { await load() }
         .onChange(of: sort) {
+            ascendingOverride = nil
             if sort == .trackOrder { Task { await loadTrackOrderIfNeeded() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in

@@ -202,6 +202,7 @@ struct ContentView: View {
                         onStop: { NotificationCenter.default.post(name: .syncStopRequested, object: nil) }
                     )
                 }
+                CredentialsProblemStrip()
                 ImportStatusStrips(container: modelContainer, isSyncing: isSyncing, onResume: { startSync(full: false) })
                 OfflineStrip()
                 UpdateStrip()
@@ -432,7 +433,9 @@ struct ContentView: View {
         }
         guard let credentials = LastfmCredentialsStore.load() else {
             if reportMissingCredentials {
-                syncError = "Set up your Last.fm account in Settings before syncing."
+                syncError = LastfmCredentialsStore.lastProblem != nil
+                    ? CredentialsProblemText.syncError
+                    : "Set up your Last.fm account in Settings before syncing."
             }
             return
         }

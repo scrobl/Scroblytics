@@ -21,6 +21,10 @@ enum LayoutSnapshots {
             snapshotDiagnostics(into: folder, container: container)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_KEYCHAIN"] {
+            snapshotKeychain(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_PRIVACY"] {
             snapshotPrivacy(into: folder)
             return
@@ -206,6 +210,41 @@ enum LayoutSnapshots {
                         if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
                             host.cacheDisplay(in: host.bounds, to: rep)
                             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                        }
+                    }
+                }
+            }
+            exit(0)
+        }
+    }
+
+    /// The can't-read-your-account screen and the strip, for three kinds of problem, light and dark, at a few widths.
+    @MainActor
+    private static func snapshotKeychain(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let problems: [(String, OSStatus)] = [("locked", errSecInteractionNotAllowed), ("denied", errSecAuthFailed), ("other", -99999)]
+            for (name, status) in problems {
+                for width in [1100, 700, 440] as [CGFloat] {
+                    for dark in [true, false] {
+                        let scheme: ColorScheme = dark ? .dark : .light
+                        let screen = CredentialsUnreadableView(status: status, onTryAgain: {}, onSetUpAgain: {}, onContinue: {})
+                            .frame(width: width, height: 460)
+                        let strip = CredentialsProblemBar(status: status, onTryAgain: {}).frame(width: width)
+                        for (kind, view) in [("screen", AnyView(screen)), ("strip", AnyView(strip))] {
+                            let host = NSHostingView(rootView: view.environment(\.colorScheme, scheme))
+                            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 460), styleMask: [.titled], backing: .buffered, defer: false)
+                            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                            window.contentView = host
+                            window.setContentSize(NSSize(width: width, height: kind == "screen" ? 460 : max(40, host.fittingSize.height)))
+                            for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(120)); host.layoutSubtreeIfNeeded() }
+                            if kind == "strip" { window.setContentSize(NSSize(width: width, height: max(36, host.fittingSize.height))); host.layoutSubtreeIfNeeded() }
+                            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                                host.cacheDisplay(in: host.bounds, to: rep)
+                                if let png = rep.representation(using: .png, properties: [:]) {
+                                    try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(kind)-\(name)-\(Int(width))-\(dark ? "dark" : "light").png"))
+                                }
+                            }
                         }
                     }
                 }

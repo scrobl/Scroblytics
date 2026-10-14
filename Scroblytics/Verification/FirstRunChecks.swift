@@ -110,6 +110,19 @@ enum FirstRunChecks {
             check("history but no account and no completed sync is not 'no account'", state(false, 10, false, false) == .ready)
             check("a sync that finished with an empty Last.fm account: ready", state(true, 0, true, false) == .ready)
 
+            // A Keychain that can't be read is not "no account".
+            func unreadable(_ count: Int, _ done: Bool = false) -> FirstRunState {
+                FirstRunState.derive(hasCredentials: false, scrobbleCount: count, hasCompletedSync: done, isSyncing: false, credentialsUnreadable: true)
+            }
+            check("no history and a Keychain that can't be read: the recovery screen, not the welcome screen", unreadable(0) == .credentialsUnreadable)
+            check("a Keychain that can't be read with history already imported: the app, with a strip", unreadable(5000, true) == .ready && unreadable(10) == .ready)
+            check("an account that is readable is unaffected by the flag", FirstRunState.derive(hasCredentials: true, scrobbleCount: 0, hasCompletedSync: false, isSyncing: false, credentialsUnreadable: true) == .awaitingFirstImport)
+            check("nothing saved and nothing unreadable is still the welcome screen", state(false, 0, false, false) == .noAccount)
+            let reasons = [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled, errSecDecode, errSecNotAvailable, -99999].map(CredentialsProblemText.reason)
+            check("every Keychain problem has its own plain reason, and the unknown one shows its number", Set(reasons).count >= 4 && reasons.last?.contains("-99999") == true && reasons.allSatisfy { $0.hasSuffix(".") }, "\(reasons)")
+            check("a locked keychain says to unlock it, a refused one says to allow it", CredentialsProblemText.guidance(errSecInteractionNotAllowed).contains("Unlock") && CredentialsProblemText.guidance(errSecAuthFailed).contains("Allow"))
+            check("none of the wording promises something that isn't so (nothing is said to be lost)", ([CredentialsProblemText.headline, CredentialsProblemText.syncError, CredentialsProblemText.stripText(errSecAuthFailed)] + [errSecInteractionNotAllowed, errSecDecode, -1].map(CredentialsProblemText.guidance)).allSatisfy { !$0.lowercased().contains("lost") && !$0.lowercased().contains("deleted") })
+
             // Time left: nothing until the pace has settled, then plain words. 1,000 scrobbles in 10 s = 100 a second.
             func left(_ remaining: Int, processed: Int = 1000, baseline: Int = 0, elapsed: Double = 10) -> String? {
                 ImportEstimate.remainingText(processed: processed, total: processed + remaining, baselineProcessed: baseline, elapsed: elapsed)

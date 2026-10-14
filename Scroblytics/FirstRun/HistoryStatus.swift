@@ -65,6 +65,9 @@ final class HistoryStatus {
 
     private(set) var scrobbleCount = 0
     private(set) var hasAccount = false
+    /// Set when the Keychain wouldn't give up the saved account (locked, access refused): the macOS status. Not the same as having
+    /// no account.
+    private(set) var credentialsProblem: OSStatus?
     private(set) var hasCompletedSync = false
     private(set) var phase = Phase.idle
 
@@ -104,11 +107,31 @@ final class HistoryStatus {
         }
     }
 
+    /// "Try Again" after the Keychain couldn't be read: asks it afresh, and when the account now reads, tells the rest of the app
+    /// (so Now Playing and the sync pick it up).
+    func retryCredentials() {
+        LastfmCredentialsStore.dropCache()
+        refresh()
+        if hasAccount {
+            NotificationCenter.default.post(name: .lastfmCredentialsDidChange, object: nil)
+            NotificationCenter.default.post(name: .syncRequested, object: nil)
+        }
+    }
+
     /// Reads the facts from the store and the Keychain. A count and one row.
     func refresh() {
         let context = container.mainContext
         scrobbleCount = (try? context.fetchCount(FetchDescriptor<Scrobble>())) ?? 0
-        hasAccount = LastfmCredentialsStore.load() != nil
+        let before = credentialsProblem
+        switch LastfmCredentialsStore.read() {
+        case .connected: hasAccount = true; credentialsProblem = nil
+        case .notSaved: hasAccount = false; credentialsProblem = nil
+        case .unreadable(let status): hasAccount = false; credentialsProblem = status
+        }
+        // One line in the activity log when it starts or stops, for Report a Problem (a status number, nothing else).
+        if credentialsProblem != before {
+            ActivityLog.record(.account, credentialsProblem.map { "Couldn't read the saved Last.fm account from the Keychain (status \($0))" } ?? "The saved Last.fm account can be read from the Keychain again")
+        }
         var descriptor = FetchDescriptor<SyncState>()
         descriptor.fetchLimit = 1
         let state = try? context.fetch(descriptor).first
@@ -121,7 +144,7 @@ final class HistoryStatus {
 
     /// Where the person is in getting started (see `FirstRunState`).
     var firstRunState: FirstRunState {
-        FirstRunState.derive(hasCredentials: hasAccount, scrobbleCount: scrobbleCount, hasCompletedSync: hasCompletedSync, isSyncing: false)
+        FirstRunState.derive(hasCredentials: hasAccount, scrobbleCount: scrobbleCount, hasCompletedSync: hasCompletedSync, isSyncing: false, credentialsUnreadable: credentialsProblem != nil)
     }
 
     var emptyReason: EmptyReason? {
@@ -150,7 +173,7 @@ final class HistoryStatus {
 
     private func logIfChanged() {
         #if DEBUG
-        let line = "HISTORY count=\(scrobbleCount) account=\(hasAccount) completed=\(hasCompletedSync) phase=\(phase) reason=\(String(describing: emptyReason)) partialNote=\(isPartial)"
+        let line = "HISTORY count=\(scrobbleCount) account=\(hasAccount) keychainProblem=\(credentialsProblem.map(String.init) ?? "none") completed=\(hasCompletedSync) phase=\(phase) reason=\(String(describing: emptyReason)) partialNote=\(isPartial)"
         if line != lastLogged {
             lastLogged = line
             TestProfile.log(line)

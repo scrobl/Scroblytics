@@ -17,6 +17,8 @@ extension Notification.Name {
 struct SyncSetupView: View {
     @State private var form = LastfmAccountForm()
     @State private var hasSavedCredentials = false
+    /// Set when an account is probably saved but the Keychain wouldn't give it up (see `CredentialsProblemText`).
+    @State private var readProblem: OSStatus?
 
     // MARK: - Track Actions (write access)
 
@@ -43,6 +45,15 @@ struct SyncSetupView: View {
                     .font(AppTypography.supporting)
                     .foregroundStyle(.secondary)
                 HelpLinkButton(articleID: "lastfm-account", title: "What these are and where they’re stored")
+                if let readProblem, !hasSavedCredentials {
+                    Label("\(CredentialsProblemText.headline) \(CredentialsProblemText.reason(readProblem)) \(CredentialsProblemText.guidance(readProblem))", systemImage: "lock.trianglebadge.exclamationmark")
+                        .foregroundStyle(.orange)
+                        .font(AppTypography.supporting)
+                    Button("Try Again") {
+                        LastfmCredentialsStore.dropCache()
+                        loadCredentials()
+                    }
+                }
                 HStack {
                     Button("Test & Save") { Task { await testAndSave() } }
                         .disabled(!form.canSubmit)
@@ -103,7 +114,9 @@ struct SyncSetupView: View {
     }
 
     private func loadCredentials() {
-        if let saved = LastfmCredentialsStore.load() {
+        let saved = LastfmCredentialsStore.load()
+        readProblem = saved == nil ? LastfmCredentialsStore.lastProblem : nil
+        if let saved {
             form.loadSaved()
             hasSavedCredentials = true
             hasSecret = saved.apiSecret != nil

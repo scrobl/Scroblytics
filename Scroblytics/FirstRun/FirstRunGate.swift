@@ -11,8 +11,15 @@ struct FirstRunGate<Content: View>: View {
 
     @State private var history: HistoryStatus?
     @State private var skipped = false
+    /// "Set Up Again…" on the can't-read-your-account screen: show the welcome form to enter the account afresh.
+    @State private var settingUpAgain = false
 
-    private var showsWelcome: Bool { history?.firstRunState == .noAccount && !skipped }
+    private var showsWelcome: Bool {
+        guard let state = history?.firstRunState else { return false }
+        return (state == .noAccount && !skipped) || (state == .credentialsUnreadable && settingUpAgain && !skipped)
+    }
+
+    private var showsRecovery: Bool { history?.firstRunState == .credentialsUnreadable && !settingUpAgain && !skipped }
 
     var body: some View {
         Group {
@@ -20,6 +27,13 @@ struct FirstRunGate<Content: View>: View {
                 Group {
                     if showsWelcome {
                         WelcomeView(onSkip: { skipped = true })
+                    } else if showsRecovery, let status = history.credentialsProblem {
+                        CredentialsUnreadableView(
+                            status: status,
+                            onTryAgain: { history.retryCredentials() },
+                            onSetUpAgain: { settingUpAgain = true },
+                            onContinue: { skipped = true }
+                        )
                     } else {
                         content()
                     }
@@ -29,7 +43,7 @@ struct FirstRunGate<Content: View>: View {
                 #if DEBUG
                 // A test profile reports what the window shows, so a scripted run can confirm it without a screenshot.
                 .onChange(of: showsWelcome, initial: true) { _, shows in
-                    if TestProfile.name != nil { FileHandle.standardError.write(Data("FIRSTRUN window=\(shows ? "welcome" : "app") state=\(history.firstRunState)\n".utf8)) }
+                    if TestProfile.name != nil { FileHandle.standardError.write(Data("FIRSTRUN window=\(shows ? "welcome" : (showsRecovery ? "recovery" : "app")) state=\(history.firstRunState)\n".utf8)) }
                 }
                 #endif
             } else {

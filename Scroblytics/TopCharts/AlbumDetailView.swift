@@ -47,7 +47,17 @@ struct AlbumDetailView: View {
     @State private var isLoadingReleaseDate = false
     @State private var showingReleaseDateEdit = false
 
+    @AppStorage(DetailPageStyle.key) private var pageStyle = DetailPageStyle.classic.rawValue
+
     var body: some View {
+        if DetailPageStyle.resolve(storedValue: pageStyle) == .new {
+            DetailPagePlaceholder(navigation: navigation, artist: ArtistIdentity(name: identity.artist), album: nil, title: identity.name)
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DetailBreadcrumbBar(

@@ -28,7 +28,17 @@ struct ArtistDetailView: View {
     @State private var yourTags: TagsLoadState = .loading
     @State private var timeListenedSeconds: Int?
 
+    @AppStorage(DetailPageStyle.key) private var pageStyle = DetailPageStyle.classic.rawValue
+
     var body: some View {
+        if DetailPageStyle.resolve(storedValue: pageStyle) == .new {
+            DetailPagePlaceholder(navigation: navigation, artist: nil, album: nil, title: identity.name)
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DetailBreadcrumbBar(navigation: navigation, artist: nil, album: nil, current: identity.name)

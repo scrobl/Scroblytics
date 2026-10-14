@@ -168,6 +168,7 @@ struct ScroblyticsApp: App {
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
+        DetailChecks.runHeadlessIfRequested()
         PerfChecks.runHeadlessIfRequested(container: modelContainer)
         Task { @MainActor in ProgressSimulator.startIfRequested() }
         TestProfile.seedAccountIfRequested()
@@ -474,6 +475,8 @@ private struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
                 HelpLinkButton(articleID: "offline-mode", title: "What Offline mode does")
             }
+
+            DetailPageStyleSettingsSection()
 
             PrivacySettingsSection()
             SupportSettingsSection()

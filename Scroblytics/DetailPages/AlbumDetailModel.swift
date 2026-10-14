@@ -216,17 +216,18 @@ final class AlbumDetailModel {
             if turnover.basis == .canonical {
                 facts.append(DetailFact(id: "tracks", label: "Tracks", value: .text(turnover.trackCount.formatted()), systemImage: "music.note.list"))
             }
-            // An uncertain or missing match is a thing to fix, so the tile asks for a look and the button opens the fix.
+            // The turnover rate is the number that depends on the album match, so this tile carries the way to fix it, always. An
+            // uncertain or missing match also outlines the tile and swaps the pencil for a warning.
             let matchNote: String? = turnover.ambiguous ? "Uncertain match" : (turnover.noCanonicalMatch ? "No match found" : nil)
             var rate = DetailFact(
                 id: "turnover", label: "Turnover", value: .text(AlbumTurnoverEngine.formatTurnoverRate(turnover.rateDays)),
                 detail: matchNote, mayHaveDetail: true, systemImage: "repeat"
             )
+            rate.onEdit = onFixAlbumMatch
+            rate.editHelp = "Fix album match…"
             if matchNote != nil {
                 rate.attention = true
-                rate.onEdit = onFixAlbumMatch
                 rate.editImage = "exclamationmark.triangle.fill"
-                rate.editHelp = "Fix album match…"
             }
             facts.append(rate)
             facts.append(DetailFact(id: "cycles", label: "Full cycles", value: .text(turnover.cyclesCompleted.formatted()), systemImage: "checkmark.circle"))

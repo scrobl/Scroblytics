@@ -67,9 +67,10 @@ enum DetailChecks {
             let clean = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover()), onFixAlbumMatch: {})
             check("a matched album shows tracks, turnover, full cycles and this cycle", clean.map(\.label) == ["Tracks", "Turnover", "Full cycles", "This cycle"], "\(clean.map(\.label))")
             check("their values read plainly", clean[0].displayText == "11" && clean[1].displayText == AlbumTurnoverEngine.formatTurnoverRate(38) && clean[2].displayText == "7" && clean[3].displayText == "8 of 11", "\(clean.map(\.displayText))")
-            check("a clean match asks for no attention and has no fix button", clean.allSatisfy { !$0.attention && $0.onEdit == nil })
+            check("a clean match asks for no attention", clean.allSatisfy { !$0.attention })
+            check("the Turnover tile always carries the way to fix the match, as a pencil, and no other tile does", clean[1].onEdit != nil && clean[1].editImage == "pencil" && clean[1].editHelp == "Fix album match…" && clean.filter { $0.onEdit != nil }.count == 1)
             let uncertain = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover(ambiguous: true)), onFixAlbumMatch: { edits += 100 })
-            check("an uncertain match says so, asks for a look, and its button is the fix", uncertain[1].detail == "Uncertain match" && uncertain[1].attention && uncertain[1].editHelp == "Fix album match…")
+            check("an uncertain match says so, asks for a look, and its button is the fix, as a warning", uncertain[1].detail == "Uncertain match" && uncertain[1].attention && uncertain[1].editHelp == "Fix album match…" && uncertain[1].editImage == "exclamationmark.triangle.fill")
             uncertain[1].onEdit?()
             check("pressing it runs the fix", edits >= 100)
             let fresh = AlbumDetailModel.turnoverFacts(.ready(DetailSnapshots.sampleTurnover(cycles: 3, heard: 0)), onFixAlbumMatch: {})
@@ -150,6 +151,7 @@ enum DetailChecks {
             check("recently played puts the newest play first and the unplayed last", AlbumTrackRows.sorted(merged, by: .recentlyPlayed, metric: .scrobbles).map(\.title) == ["Bonus Track", "Song One", "Song Two", "Song Four", "Song Six", "Song Three", "Song Five"])
             check("release year puts tracks with a year first, the rest in tracklist order", AlbumTrackRows.sorted(merged, by: .releaseYear, metric: .scrobbles).first?.title == "Song Six")
             check("sorting never drops or repeats a row", AlbumTrackSort.allCases.allSatisfy { Set(AlbumTrackRows.sorted(merged, by: $0, metric: .scrobbles).map(\.id)) == Set(merged.map(\.id)) && AlbumTrackRows.sorted(merged, by: $0, metric: .scrobbles).count == merged.count })
+
 
             // The sort directions.
             func titles(_ sort: AlbumTrackSort, _ ascending: Bool?, _ rows: [AlbumTrackRow]? = nil) -> [String] {

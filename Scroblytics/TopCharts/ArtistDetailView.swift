@@ -32,7 +32,7 @@ struct ArtistDetailView: View {
 
     var body: some View {
         if DetailPageStyle.resolve(storedValue: pageStyle) == .new {
-            DetailPagePlaceholder(navigation: navigation, artist: nil, album: nil, title: identity.name)
+            NewArtistDetailPage(identity: identity, settings: settings, navigation: navigation)
         } else {
             legacyBody
         }

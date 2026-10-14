@@ -52,28 +52,3 @@ struct DetailPageStyleSettingsSection: View {
         }
     }
 }
-
-/// What the new detail pages show until each page is built: a way back and a note, so the switch can be tried safely.
-struct DetailPagePlaceholder: View {
-    let navigation: DetailNavigationCoordinator
-    let artist: ArtistIdentity?
-    let album: AlbumIdentity?
-    let title: String
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                DetailBreadcrumbBar(navigation: navigation, artist: artist, album: album, current: title)
-                ContentUnavailableView(
-                    "New layout in progress",
-                    systemImage: "square.grid.2x2",
-                    description: Text("This page isn't built yet. Switch back to Classic in Settings › General.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 240)
-            }
-            .padding()
-        }
-        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
-        .navigationTitle(title)
-    }
-}

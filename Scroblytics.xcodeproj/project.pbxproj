@@ -124,7 +124,9 @@
 		78766134FF36D073C6EB4CCF /* UpdateChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ED07F507E472BF9732996EC /* UpdateChecks.swift */; };
 		78C9A9AF8BC5FAF4D936AD93 /* UpdateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB1989CDEE4933BD193CC49 /* UpdateStore.swift */; };
 		796E51A797EDE924A5253C56 /* ImageResolutionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92DB7A3989BC4BFF52643B9 /* ImageResolutionEngine.swift */; };
+		7C0AC83C7BA7D84274C035B1 /* ArtistDetailModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3488DC8AC450E656757B3EA /* ArtistDetailModel.swift */; };
 		7C47B8A0CC61D309DF6EF0B6 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D719F6B51AD25665E7F81D /* WelcomeView.swift */; };
+		7C63A0FFCEEC83CB2D15600A /* ArtistPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14A94D6E40BB0B9606F5A654 /* ArtistPage.swift */; };
 		7E2F0A3CE7F471ABCC6693A8 /* FirstRunChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A53E1B7BF00639062AFAF96 /* FirstRunChecks.swift */; };
 		7E435A9D1BEDD2700D42E612 /* TrendsLoyaltyChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD46CE377CD609C55D40350F /* TrendsLoyaltyChart.swift */; };
 		7FB6AF9D79B1536D235DDCC3 /* RecentScrobblesEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED8DCFE7B5B3D101F122FA3 /* RecentScrobblesEngine.swift */; };
@@ -294,6 +296,7 @@
 		0EDAC91A28ABC0E22C794D07 /* AskSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskSchema.swift; sourceTree = "<group>"; };
 		0F42BFDA67CDF54DAC09A6FD /* GlobalSearchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSearchEngine.swift; sourceTree = "<group>"; };
 		12D719F6B51AD25665E7F81D /* WelcomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
+		14A94D6E40BB0B9606F5A654 /* ArtistPage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtistPage.swift; sourceTree = "<group>"; };
 		15823A406059F0DBE9DFD419 /* StaleRecordReviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StaleRecordReviewView.swift; sourceTree = "<group>"; };
 		15D73EF52AB3B4B79839F0D0 /* ActivityEvents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ActivityEvents.swift; sourceTree = "<group>"; };
 		15F42ED7142076CF4DF72172 /* TestProfilesView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestProfilesView.swift; sourceTree = "<group>"; };
@@ -445,6 +448,7 @@
 		9FF7CFB9EAABD5979F3C0E16 /* ReportProblemView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReportProblemView.swift; sourceTree = "<group>"; };
 		A14A85287D87610B62A648B3 /* QueryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryEngine.swift; sourceTree = "<group>"; };
 		A2F8B1E6CEA3C756C5036673 /* LastfmAccountForm.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LastfmAccountForm.swift; sourceTree = "<group>"; };
+		A3488DC8AC450E656757B3EA /* ArtistDetailModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtistDetailModel.swift; sourceTree = "<group>"; };
 		A5BD585200B4FF7D0E09EDAA /* AskChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskChips.swift; sourceTree = "<group>"; };
 		A74C21D2FE2C371C5D14B8DA /* AskModelEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskModelEngine.swift; sourceTree = "<group>"; };
 		A78D6C754631A0074CDE31F7 /* Connectivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Connectivity.swift; sourceTree = "<group>"; };
@@ -892,6 +896,8 @@
 				5D222C9209CF8E48F7AF662A /* AlbumTrackRows.swift */,
 				3793741CC9B90A6AB66B085F /* AlbumTrackTable.swift */,
 				301524F3174119C8F3D6E860 /* SubListSortDirection.swift */,
+				A3488DC8AC450E656757B3EA /* ArtistDetailModel.swift */,
+				14A94D6E40BB0B9606F5A654 /* ArtistPage.swift */,
 			);
 			name = DetailPages;
 			path = DetailPages;
@@ -1429,6 +1435,8 @@
 				C9681FC20B785D5725387955 /* AlbumTrackRows.swift in Sources */,
 				9BB83DAA725B5A29D969C8C7 /* AlbumTrackTable.swift in Sources */,
 				8A214846E0BE9AD1CE12CBC2 /* SubListSortDirection.swift in Sources */,
+				7C0AC83C7BA7D84274C035B1 /* ArtistDetailModel.swift in Sources */,
+				7C63A0FFCEEC83CB2D15600A /* ArtistPage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

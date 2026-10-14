@@ -52,6 +52,20 @@ enum DetailSnapshots {
     }
 
     @MainActor
+    static func artistCard(stats: EntityStats?) -> some View {
+        DetailHeaderCard(
+            entity: .artist, name: "Artist A", subtitle: nil, tertiary: nil, imageURL: nil, stats: stats,
+            errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 300 * 3600,
+            yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 4), TopChartsEngine.YearlyRank(year: 2023, rank: 7)]
+        ) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)
+                Text("dream pop · shoegaze · 2010s").font(AppTypography.metadata)
+            }
+        }
+    }
+
+    @MainActor
     static func albumCard(stats: EntityStats?, turnover: AlbumTurnoverState, title: String = "Album Name") -> some View {
         let released = DetailFact(id: "released", label: "Released", value: .text("Sep 12, 2018"), systemImage: "calendar", onEdit: {})
         return DetailHeaderCard(
@@ -150,6 +164,10 @@ enum DetailSnapshots {
                     await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover(ambiguous: true))), width: width, dark: dark, container: container, to: base.appending(path: "album-uncertain-\(Int(width))-\(mode).png"))
                     await render(albumCard(stats: nil, turnover: .loading), width: width, dark: dark, container: container, to: base.appending(path: "album-loading-\(Int(width))-\(mode).png"))
                 }
+            }
+            for width in [1200, 700, 440] as [CGFloat] {
+                await render(artistCard(stats: sampleStats(loved: false)), width: width, dark: true, container: container, to: base.appending(path: "artist-\(Int(width))-dark.png"))
+                await render(artistCard(stats: nil), width: width, dark: false, container: container, to: base.appending(path: "artist-loading-\(Int(width))-light.png"))
             }
             let longTitle = "The Idler Wheel Is Wiser Than the Driver of the Screw and Whipping Cords Will Serve You More Than Ropes Will Ever Do (Deluxe Version)"
             for width in [1600, 1000, 700] as [CGFloat] {

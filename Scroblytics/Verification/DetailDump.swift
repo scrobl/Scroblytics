@@ -96,6 +96,33 @@ enum DetailDump {
                 }
             }
 
+            // MARK: Artists
+            var artistCounts: [String: (artist: String, count: Int)] = [:]
+            for play in history {
+                let key = TextNormalization.artistIdentityKey(play.artistName)
+                let current = artistCounts[key] ?? (play.artistName, 0)
+                artistCounts[key] = (current.artist, current.count + 1)
+            }
+            for entry in artistCounts.values.sorted(by: { $0.count > $1.count }).prefix(3) {
+                let model = ArtistDetailModel()
+                model.bind(identity: ArtistIdentity(name: entry.artist), context: container.mainContext)
+                let all = DateRange(from: .distantPast, to: Date().addingTimeInterval(86400))
+                let started = Date()
+                model.loadOldestScrobbleDate()
+                model.loadStats(range: all)
+                await model.loadYearlyTopRanks()
+                let seconds = Date().timeIntervalSince(started)
+                let artistKey = TextNormalization.artistIdentityKey(entry.artist)
+                let plays = history.filter { TextNormalization.artistIdentityKey($0.artistName) == artistKey }
+                check("artist page plays equal an independent count (\(entry.count) plays)", model.stats?.plays == plays.count, "\(model.stats?.plays ?? -1) vs \(plays.count)")
+                check("first and last scrobble of the artist match", model.stats?.firstScrobble == plays.map(\.playedAt).min() && model.stats?.lastScrobble == plays.map(\.playedAt).max())
+                let headline = DetailHeaderCard<EmptyView>.headline(stats: model.stats, metric: .scrobbles, timeListenedSeconds: nil)
+                check("the artist's four headline tiles have values", headline.count == 4 && headline.allSatisfy(\.hasValue))
+                print("      loaded in \(String(format: "%.2f", seconds)) s; ranks \(model.yearlyTopRanks.map { "#\($0.rank)·\($0.year)" }.joined(separator: " "))")
+            }
+
+
+
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

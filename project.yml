@@ -17,8 +17,8 @@ targets:
         DEVELOPMENT_TEAM: GZSS69ZNX8
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.9.6"
-        CURRENT_PROJECT_VERSION: "7"
+        MARKETING_VERSION: "0.9.7"
+        CURRENT_PROJECT_VERSION: "8"
         SWIFT_VERSION: "6.0"
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_ENTITLEMENTS: Config/Scroblytics.entitlements

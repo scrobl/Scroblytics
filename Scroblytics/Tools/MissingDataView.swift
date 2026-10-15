@@ -121,8 +121,8 @@ struct MissingDataView: View {
                         .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
                     ContentUnavailableView(
-                        "Nothing’s missing", systemImage: "checkmark.circle",
-                        description: Text("Every \(options.target.pluralLabel.lowercased()) already has \(field.label.lowercased()).")
+                        field.wording == nil ? "Nothing’s missing" : "Nothing to review", systemImage: "checkmark.circle",
+                        description: Text(field.wording?.empty ?? "Every \(options.target.pluralLabel.lowercased()) already has \(field.label.lowercased()).")
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 }
@@ -235,7 +235,7 @@ struct MissingDataView: View {
         let percent = data.universeCount == 0 ? 0 : Int((Double(data.missingCount + data.pendingCount) / Double(data.universeCount) * 100).rounded())
         return ToolHeadlineCard("Coverage") {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(data.missingCount + data.pendingCount) of \(data.universeCount) \(options.target.pluralLabel.lowercased()) (\(percent)%) missing \(data.field.label.lowercased())")
+                Text("\(data.missingCount + data.pendingCount) of \(data.universeCount) \(options.target.pluralLabel.lowercased()) (\(percent)%) \(data.field.wording?.coverage ?? "missing \(data.field.label.lowercased())")")
                 if data.field.resolverKind != nil {
                     Text("\(data.missingCount.formatted()) confirmed missing, \(data.pendingCount.formatted()) not yet checked")
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -249,7 +249,8 @@ struct MissingDataView: View {
             ForEach(rows) { row in
                 Row(
                     row: row, onOpen: { open(row) }, onGoToDetail: { goToDetail(row) },
-                    onFixAlbumMatch: row.target == .album ? { openAlbumMatchFix(for: row) } : nil
+                    onFixAlbumMatch: row.target == .album ? { openAlbumMatchFix(for: row) } : nil,
+                    onKeepMerged: field.canKeepMerged ? { keepMerged(row) } : nil
                 )
             }
         }
@@ -303,7 +304,9 @@ struct MissingDataView: View {
                 .buttonStyle(.bordered)
                 .disabled(isResolving || isImportingDurations || data.pendingCount == 0 || Connectivity.shared.isOffline)
                 .help(data.pendingCount == 0
-                    ? "Every item here has already been checked and confirmed to have no \(data.field.label.lowercased()) — resolving again won’t change that. Use the row’s own edit option to set a value by hand."
+                    ? (data.field.wording != nil
+                        ? "Every item here has already been checked — resolving again won’t change that."
+                        : "Every item here has already been checked and confirmed to have no \(data.field.label.lowercased()) — resolving again won’t change that. Use the row’s own edit option to set a value by hand.")
                     : "Starts a fresh lookup for the \(data.pendingCount.formatted()) item(s) that haven’t been checked yet. Confirmed-missing items are untouched — they need a manual override instead.")
             }
             Button("Advanced") {
@@ -428,9 +431,15 @@ struct MissingDataView: View {
         case "releaseDate": openReleaseDateEdit(for: row)
         case "duration": openDurationEdit(for: row)
         case "bpm": openBPMEdit(for: row)
-        case "albumMatch": openAlbumMatchFix(for: row)
+        case "albumMatch", "mergedEditions": openAlbumMatchFix(for: row)
         default: break
         }
+    }
+
+    /// "Keep merged": the person looked at this edition name and wants it counted with the album's others, so it leaves the list.
+    private func keepMerged(_ row: MissingDataRow) {
+        try? AlbumMatchFixEngine.keepMerged(context: modelContext, artist: row.artist, album: row.name)
+        Task { await recompute() }
     }
 
     /// The row's own bucketing already dropped any album whose group couldn't be found (see
@@ -525,8 +534,17 @@ private struct Row: View {
     let onOpen: () -> Void
     let onGoToDetail: () -> Void
     let onFixAlbumMatch: (() -> Void)?
+    var onKeepMerged: (() -> Void)? = nil
 
     var body: some View {
+        HStack(spacing: 8) {
+            rowButton
+            keepMergedButton
+        }
+        Divider()
+    }
+
+    private var rowButton: some View {
         Button(action: onOpen) {
             HStack(spacing: 12) {
                 EntityThumbnail(url: row.imageURL, entity: thumbnailEntity(for: row.target))
@@ -544,6 +562,9 @@ private struct Row: View {
                     }
                     if row.target != .artist {
                         Text(row.artist).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if let detail = row.detail {
+                        Text(detail).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 8)
@@ -567,7 +588,16 @@ private struct Row: View {
         .buttonStyle(.plain)
         .drillDownHighlight()
         .entityContextMenu(target: imageTarget, currentImageURL: row.imageURL, onFixAlbumMatch: onFixAlbumMatch, onOpen: onGoToDetail)
-        Divider()
+    }
+
+    /// Beside the row rather than inside it, so the row's own click target stays whole.
+    @ViewBuilder
+    private var keepMergedButton: some View {
+        if let onKeepMerged {
+            Button("Keep Merged", action: onKeepMerged)
+                .buttonStyle(.bordered).controlSize(.small)
+                .help("Count this edition name together with the album’s other editions, and stop listing it here.")
+        }
     }
 
     private var imageTarget: ImageTarget {
@@ -586,3 +616,20 @@ private struct Row: View {
         }
     }
 }
+
+#if DEBUG
+/// Offscreen layout snapshots of a Merged Editions row (`SCROBLYTICS_LAYOUT_SNAPSHOT_EDITION`).
+enum MissingDataRowPreview {
+    @MainActor
+    static func view(name: String, detail: String, pending: Bool) -> some View {
+        let row = MissingDataRow(
+            id: QueryEntityID(target: .album, artist: "Artist A", name: name), target: .album, artist: "Artist A", name: name,
+            bucket: pending ? .pending : .missing, imageURL: nil, album: nil, plays: 178, lastPlayed: Date().addingTimeInterval(-86400 * 3), detail: detail
+        )
+        return VStack(alignment: .leading, spacing: 1) {
+            Row(row: row, onOpen: {}, onGoToDetail: {}, onFixAlbumMatch: {}, onKeepMerged: {})
+        }
+        .padding(.horizontal, 10)
+    }
+}
+#endif

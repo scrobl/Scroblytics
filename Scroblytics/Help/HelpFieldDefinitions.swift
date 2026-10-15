@@ -107,6 +107,7 @@ enum HelpFieldDefinitions {
         "missingImage": "Yes when no artwork resolves for it: no custom or downloaded image, nothing inherited from its album, and no usable art on its scrobbles (Last.fm’s grey placeholder doesn’t count). Artists never fall back to scrobble art. Reflects the last time artwork was refreshed.",
         "customImage": "Yes when you picked its image yourself. Artwork it merely shows because its album has one doesn’t count.",
         "needsMatchReview": "Yes when the album’s Last.fm match is uncertain or not found and you haven’t fixed it — the albums worth opening “Fix album match…” on. Pending until the album’s tracklist has been looked up.",
+        "mergedEditionReview": "Yes when this album name is counted together with other editions of the album, but at least 3 of the different tracks you played under it aren’t on the album’s matched tracklist — an edition with tracks of its own (an anniversary edition, demos, a live version) that is probably better counted on its own, from “Fix album match…”. No once you counted it on its own or chose to keep it merged; no for an album with one name or no real tracklist. Pending until the album’s tracklist has been looked up.",
     ]
 
     // MARK: Dates
@@ -147,6 +148,8 @@ enum HelpFieldDefinitions {
     // MARK: Album metadata
 
     private static let album: [String: String] = [
+        "albumEditionNames": "How many edition names of the album (the standard album, a Deluxe or Anniversary edition…) are counted together for turnover and the album match. 1 for an album with a single name, or an edition you counted on its own.",
+        "albumOffListTracks": "How many different tracks you played under this album name that aren’t on the album’s matched tracklist, ignoring edition words in titles. No value when the album has no real tracklist (turnover then uses the tracks you played). Pending until the tracklist has been looked up.",
         "albumMatchStatus": "How the album’s tracklist was matched on Last.fm. “Confirmed by you”: you fixed the match, or saved a tracklist. “Using played tracks”: you chose to ignore Last.fm’s tracklist. “Auto-matched”: found and looked consistent. “Uncertain match”: found but the track counts disagree. “No match found”. Pending until the tracklist has been looked up.",
     ]
 

@@ -235,6 +235,108 @@ enum EditionChecks {
             for item in (try? context.fetch(FetchDescriptor<AlbumTurnoverCompletionCache>())) ?? [] { context.delete(item) }
             try? context.save()
 
+            // MARK: The Merged Editions finder (Query fields and the Missing Data field)
+            cleanUp()
+            do {
+                let base = "Disc One", special = "Disc One (Anniversary Edition)"
+                let specialKey = TextNormalization.editionIdentityKey(artist: artist, album: special)
+                let baseAlbumKey = TextNormalization.albumIdentityKey(artist: artist, album: base)
+                func library(extra: Int) -> [ScrobbleSnapshot] {
+                    var out: [ScrobbleSnapshot] = []
+                    for _ in 0..<2 { for t in core { out.append(play(base, t)) } }
+                    for t in core + bonus.prefix(extra) { out.append(play(special, t)) }
+                    return out
+                }
+                /// The turnover snapshot the app would have after "Fix album match…" confirmed the base album's list.
+                func snapshot(list: Bool = true, confirmed: Bool = true, separate: Bool = false, reviewed: Bool = false) -> AlbumTurnoverEngine.Snapshot {
+                    var snap = AlbumTurnoverEngine.Snapshot()
+                    if confirmed { snap.resolutions[baseAlbumKey] = .canonical(canonicalArtist: artist, canonicalAlbum: base) }
+                    if list { snap.tracklists[AlbumTurnoverEngine.tracklistCacheKey(artist: artist, album: base)] = .found(AlbumTracklist(album: base, artist: artist, tracks: core)) }
+                    if separate {
+                        snap.separateEditions = [specialKey]
+                        snap.editionResolutions[specialKey] = .canonical(canonicalArtist: artist, canonicalAlbum: special)
+                        snap.tracklists[AlbumTurnoverEngine.tracklistCacheKey(artist: artist, album: special)] = .found(AlbumTracklist(album: special, artist: artist, tracks: core + bonus))
+                    }
+                    if reviewed { snap.reviewedEditions = [specialKey] }
+                    return snap
+                }
+                struct Values { var names: Double?; var off: Double?; var review: Bool?; var offState = ""; var reviewState = "" }
+                func evaluate(_ plays: [ScrobbleSnapshot], _ snap: AlbumTurnoverEngine.Snapshot) -> [String: Values] {
+                    var spec = QuerySpec(target: .album)
+                    spec.columns = [QueryFieldRef("albumEditionNames"), QueryFieldRef("albumOffListTracks"), QueryFieldRef("mergedEditionReview")]
+                    guard let validated = try? spec.validate(against: .standard) else { return [:] }
+                    let run = QueryRun(target: .album, asOf: Date(), scrobbles: plays, allTimeScrobbles: plays, snapshots: QuerySnapshots(turnover: snap, turnoverGroups: TurnoverGroupCache()))
+                    let result = QueryEngine.evaluate(validated, run: run)
+                    func key(_ id: String) -> String? { result.columns.first { $0.field.id == id }?.cacheKey }
+                    var out: [String: Values] = [:]
+                    for row in result.rows {
+                        var v = Values()
+                        if let k = key("albumEditionNames"), case .value(.number(let n))? = row.cells[k] { v.names = n }
+                        if let k = key("albumOffListTracks") {
+                            switch row.cells[k] { case .value(.number(let n))?: v.off = n; case .pending?: v.offState = "pending"; default: v.offState = "missing" }
+                        }
+                        if let k = key("mergedEditionReview") {
+                            switch row.cells[k] { case .value(.bool(let b))?: v.review = b; case .pending?: v.reviewState = "pending"; default: v.reviewState = "missing" }
+                        }
+                        out[row.entity.id.name] = v
+                    }
+                    return out
+                }
+
+                let withBonus = library(extra: 4)
+                let merged = evaluate(withBonus, snapshot())
+                check("merged: the base name counts 2 edition names, no off-list tracks, not flagged", merged[base]?.names == 2 && merged[base]?.off == 0 && merged[base]?.review == false, "\(String(describing: merged[base]))")
+                check("merged: the edition with 4 bonus tracks has 4 off-list tracks and is flagged", merged[special]?.names == 2 && merged[special]?.off == 4 && merged[special]?.review == true, "\(String(describing: merged[special]))")
+                check("threshold: 3 off-list tracks flag it", evaluate(library(extra: 3), snapshot())[special]?.review == true)
+                check("threshold: 2 off-list tracks do not", evaluate(library(extra: 2), snapshot())[special]?.review == false)
+                check("an edition with nothing extra is not flagged", evaluate(library(extra: 0), snapshot())[special]?.review == false)
+
+                let pending = evaluate(withBonus, snapshot(list: false))
+                check("tracklist not cached yet: off-list and the flag are pending for both names", pending[base]?.reviewState == "pending" && pending[special]?.reviewState == "pending" && pending[special]?.offState == "pending")
+                check("tracklist not cached yet: the edition count still answers", pending[special]?.names == 2)
+                let observedOnly = evaluate(withBonus, snapshot(confirmed: false))
+                check("no real tracklist (an unconfirmed, uncertain match): no off-list count and not flagged", observedOnly[special]?.off == nil && observedOnly[special]?.review == false, "\(String(describing: observedOnly[special]))")
+
+                let apart = evaluate(withBonus, snapshot(separate: true))
+                check("counted on its own: each name counts 1, the edition is not flagged and has none off its own list", apart[special]?.names == 1 && apart[special]?.review == false && apart[special]?.off == 0 && apart[base]?.names == 1, "\(String(describing: apart[special]))")
+                let kept = evaluate(withBonus, snapshot(reviewed: true))
+                check("kept merged: still counted together, but never flagged", kept[special]?.names == 2 && kept[special]?.review == false && kept[special]?.off == 4)
+                let alone = evaluate(Array(withBonus.filter { $0.albumName == base }), snapshot())
+                check("an album with one name counts 1 and is never flagged", alone[base]?.names == 1 && alone[base]?.review == false)
+
+                // Missing Data lists exactly the flagged edition names, with a plain reason.
+                guard let field = MissingDataField.all.first(where: { $0.id == "mergedEditions" }) else { check("Merged Editions is a Missing Data field", false); print("1 CHECK(S) FAILED"); exit(1) }
+                func missing(_ plays: [ScrobbleSnapshot], _ snap: AlbumTurnoverEngine.Snapshot) -> MissingDataResult? {
+                    MissingDataEngine.compute(field: field, target: .album, scrobbles: plays, snapshots: QuerySnapshots(turnover: snap, turnoverGroups: TurnoverGroupCache()))
+                }
+                let list = missing(withBonus, snapshot())
+                check("Missing Data lists only the bonus-heavy edition, as confirmed", list?.rows.map(\.name) == [special] && list?.rows.first?.bucket == .missing && list?.universeCount == 2, "\(String(describing: list?.rows.map(\.name)))")
+                check("and says why", list?.rows.first?.detail == "4 played tracks aren’t on the album’s tracklist · counted with 1 other edition name", list?.rows.first?.detail ?? "nil")
+                check("not yet looked up: both names are listed as not yet checked", Set(missing(withBonus, snapshot(list: false))?.rows.map(\.name) ?? []) == [base, special] && missing(withBonus, snapshot(list: false))?.pendingCount == 2)
+                check("counted on its own or kept merged: the list is empty", missing(withBonus, snapshot(separate: true))?.rows.isEmpty == true && missing(withBonus, snapshot(reviewed: true))?.rows.isEmpty == true)
+                check("the Advanced hand-off asks for the flag and carries the explaining columns", MissingDataEngine.advancedSpec(field: field, target: .album).columns.map(\.id) == ["mergedEditionReview", "albumOffListTracks", "albumEditionNames"])
+
+                // Remembering the review: through the real store and a backup.
+                try? AlbumMatchFixEngine.keepMerged(context: context, artist: artist, album: special)
+                check("keep merged records the name as reviewed, not separate", AlbumTurnoverEngine.separateEditionKeys(context: context).isEmpty && AlbumTurnoverEngine.loadSnapshot(context: context).reviewedEditions == [specialKey])
+                check("and the loaded snapshot keeps it out of the finder", missing(withBonus, AlbumTurnoverEngine.loadSnapshot(context: context))?.rows.contains { $0.name == special } == false)
+                if let document = try? NativeBackupEngine.makeDocument(context: context), let (archive, summary) = try? NativeBackupEngine.inspect(document: document) {
+                    check("a backup carries the reviewed edition and does not count it as separate", archive.albumEditionMatches?.first?.countsSeparately == false && !summary.description.contains("editions counted separately"), summary.description)
+                    for item in (try? context.fetch(FetchDescriptor<AlbumEditionMatch>())) ?? [] { context.delete(item) }
+                    try? context.save()
+                    try? NativeBackupEngine.restoreAlbumEditionMatches(archive.albumEditionMatches, context: context)
+                    check("restoring brings back the review", AlbumTurnoverEngine.loadSnapshot(context: context).reviewedEditions == [specialKey])
+                    let oldStyle = NativeBackupFormat.AlbumEditionMatchRecord(artist: artist, title: special, matchMode: nil, canonicalArtist: nil, canonicalAlbum: nil, manualTracklist: nil)
+                    try? NativeBackupEngine.restoreAlbumEditionMatches([oldStyle], context: context)
+                    check("a record without the field (an older backup) means counted separately", AlbumTurnoverEngine.separateEditionKeys(context: context) == [specialKey])
+                } else {
+                    check("a backup can be made and read back", false)
+                }
+                try? AlbumMatchFixEngine.keepMerged(context: context, artist: artist, album: special)
+                try? AlbumMatchFixEngine.separateEdition(context: context, artist: artist, album: special)
+                check("choosing to count a reviewed edition on its own turns it back on", AlbumTurnoverEngine.separateEditionKeys(context: context) == [specialKey] && AlbumTurnoverEngine.loadSnapshot(context: context).reviewedEditions.isEmpty)
+            }
+
             cleanUp()
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)

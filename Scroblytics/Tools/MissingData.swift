@@ -35,6 +35,15 @@ struct MissingDataField: Identifiable, Sendable {
     /// to background-resolved value fields like Release Date/Duration) — a field declares its own
     /// reading here specifically so this distinction can never be silently dropped again.
     let bucket: @Sendable (QueryCell) -> MissingDataBucket?
+    /// Further Query columns whose cells explain a row, and how to say so in one line (nil = no second line). Cells are keyed
+    /// by field id.
+    var detailFieldIDs: [String] = []
+    var detailText: (@Sendable ([String: QueryCell]) -> String?)? = nil
+    /// For a field whose flagged rows aren't "missing" something: the coverage line's ending ("may be merged by mistake") and
+    /// the empty-state sentence. nil = the usual "missing <field>" wording.
+    var wording: (coverage: String, empty: String)? = nil
+    /// True when a row can be marked reviewed and left out of the list ("Keep merged").
+    var canKeepMerged = false
 
     private static func resolvedValueField(
         id: String, label: String, targets: [QueryTarget], queryFieldID: String, resolverKind: QueryResolverKind
@@ -75,6 +84,29 @@ struct MissingDataField: Identifiable, Sendable {
                 }
             }
         ),
+        MissingDataField(
+            id: "mergedEditions", label: "Merged Editions", targets: [.album], queryFieldID: "mergedEditionReview", resolverKind: .albumTracklists,
+            missingCondition: { QueryCondition(QueryFieldRef("mergedEditionReview"), .isTrue, []) },
+            bucket: { cell in
+                switch cell {
+                case .missing: nil
+                case .pending: .pending
+                case .value(.bool(true)): .missing
+                case .value(.bool(false)), .value: nil
+                }
+            },
+            detailFieldIDs: ["albumOffListTracks", "albumEditionNames"],
+            detailText: { cells in
+                guard case .value(.number(let off))? = cells["albumOffListTracks"] else { return nil }
+                var text = off == 1 ? "1 played track isn’t on the album’s tracklist" : "\(Int(off)) played tracks aren’t on the album’s tracklist"
+                if case .value(.number(let names))? = cells["albumEditionNames"], names > 1 {
+                    text += " · counted with \(Int(names) - 1) other edition name\(names > 2 ? "s" : "")"
+                }
+                return text
+            },
+            wording: (coverage: "may be merged by mistake", empty: "No album name looks merged by mistake."),
+            canKeepMerged: true
+        ),
     ]
 }
 
@@ -98,6 +130,8 @@ struct MissingDataRow: Identifiable, Sendable {
     let album: String?
     let plays: Int
     let lastPlayed: Date?
+    /// A second line explaining why the row is listed (only fields that define one).
+    var detail: String? = nil
 }
 
 enum MissingDataSort: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -136,7 +170,7 @@ enum MissingDataEngine {
     ) -> MissingDataResult? {
         var spec = QuerySpec(target: target)
         spec.asOf = now
-        spec.columns = [QueryFieldRef(field.queryFieldID), QueryFieldRef("plays"), QueryFieldRef("lastPlayed")]
+        spec.columns = [QueryFieldRef(field.queryFieldID), QueryFieldRef("plays"), QueryFieldRef("lastPlayed")] + field.detailFieldIDs.map { QueryFieldRef($0) }
         guard let validated = try? spec.validate(against: .standard) else { return nil }
         let run = QueryRun(target: target, asOf: now, scrobbles: scrobbles, allTimeScrobbles: scrobbles, snapshots: snapshots)
         let result = QueryEngine.evaluate(validated, run: run)
@@ -150,9 +184,17 @@ enum MissingDataEngine {
             let info = result.entityInfo[row.entity.id]
             let plays: Int = if case .value(.number(let n))? = row.cells[playsKey] { Int(n) } else { 0 }
             let lastPlayed: Date? = if case .value(.date(let d))? = row.cells[lastPlayedKey] { d } else { nil }
+            var detail: String?
+            if let detailText = field.detailText {
+                var cells: [String: QueryCell] = [:]
+                for id in field.detailFieldIDs {
+                    if let key = result.columns.first(where: { $0.field.id == id })?.cacheKey, let cell = row.cells[key] { cells[id] = cell }
+                }
+                detail = detailText(cells)
+            }
             rows.append(MissingDataRow(
                 id: row.entity.id, target: target, artist: row.entity.id.artist, name: row.entity.id.name,
-                bucket: bucket, imageURL: info?.imageURL, album: info?.album, plays: plays, lastPlayed: lastPlayed
+                bucket: bucket, imageURL: info?.imageURL, album: info?.album, plays: plays, lastPlayed: lastPlayed, detail: detail
             ))
         }
         return MissingDataResult(field: field, target: target, rows: rows, universeCount: result.universeCount)
@@ -186,7 +228,7 @@ enum MissingDataEngine {
     static func advancedSpec(field: MissingDataField, target: QueryTarget) -> QuerySpec {
         var spec = QuerySpec(target: target)
         spec.groups = [[field.missingCondition()]]
-        spec.columns = [QueryFieldRef(field.queryFieldID)]
+        spec.columns = [QueryFieldRef(field.queryFieldID)] + field.detailFieldIDs.map { QueryFieldRef($0) }
         return spec
     }
 

@@ -103,15 +103,16 @@ extension HelpContent {
         HelpArticle(
             id: "tool-missing-data",
             title: "Missing Data",
-            summary: "Find and fill in missing release dates, images, lengths, tempos and album matches.",
+            summary: "Find and fill in missing release dates, images, lengths, tempos and album matches, and spot editions merged by mistake.",
             blocks: [
-                .paragraph("Choose a **Field** — Release Date, Images, Duration, Tempo (BPM) or Album Match — and a Type (artist, album, track as applicable). A coverage line reads “N of M (X%) missing”, split into confirmed missing and not yet checked. What each means: [Missing Data](help://metrics-missing-data)."),
+                .paragraph("Choose a **Field** — Release Date, Images, Duration, Tempo (BPM), Album Match or Merged Editions — and a Type (artist, album, track as applicable). A coverage line reads “N of M (X%) missing”, split into confirmed missing and not yet checked. What each means: [Missing Data](help://metrics-missing-data)."),
                 .bullets([
                     "**Resolve Now** re-runs the lookup for items not yet checked.",
                     "**Import from Apple Music** (durations) matches tracks against your Music library and imports only confident matches, skipping ambiguous or unavailable ones. It needs the Music permission.",
                     "Click a row to open the right editor: choose an image, edit the release date or duration, or Fix album match.",
                     "**Advanced** opens the equivalent query (confirmed missing only).",
                 ]),
+                .paragraph("**Merged Editions** is different: it lists album names that are counted together with other editions of their album although they have tracks of their own. Each row says how many of the tracks you played under that name aren’t on the album’s tracklist (3 or more). Click a row to open **Fix album match…** and turn on **Count this edition on its own**, or press **Keep Merged** if the merge is what you want; the row then leaves the list for good. Rows marked “Not yet checked” need their tracklist looked up (**Resolve Now**)."),
             ]
         ),
         HelpArticle(

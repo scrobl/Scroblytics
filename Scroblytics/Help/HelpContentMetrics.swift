@@ -262,6 +262,7 @@ extension HelpContent {
                     ["Duration (tracks)", "Confirmed no match", "Length still being resolved"],
                     ["Tempo (tracks)", "Neither source has one (looked up again after about three months)", "Tempo still being looked up"],
                     ["Album match (albums)", "Uncertain or no match, not fixed by you", "Tracklist not looked up yet"],
+                    ["Merged editions (albums)", "An edition name counted with its album that has 3 or more played tracks not on the album’s tracklist, not yet counted on its own or kept merged", "Tracklist not looked up yet"],
                 ]),
                 .paragraph("**Resolve now** re-looks up only the items not yet checked. Items confirmed missing need a manual edit (or, for durations, **Import from Apple Music**). **Advanced** opens the equivalent Query, which can express only “confirmed missing”, so its count can be smaller."),
             ]

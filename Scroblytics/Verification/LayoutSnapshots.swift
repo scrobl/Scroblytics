@@ -272,6 +272,24 @@ enum LayoutSnapshots {
             let plays = (0..<6).map { i in ScrobbleSnapshot(artistName: "Artist A", albumName: i < 3 ? standard : deluxe, trackName: "Track \(i)", imageURL: nil, playedAt: base.addingTimeInterval(Double(i) * 60)) }
             let merged = AlbumTurnoverEngine.buildAlbumGroups(from: plays)[0]
             let separate = AlbumTurnoverEngine.buildAlbumGroups(from: plays, separateEditions: [TextNormalization.editionIdentityKey(artist: "Artist A", album: deluxe)]).first { $0.editionKey != nil }!
+            for width in [900, 560, 420] as [CGFloat] {
+                for dark in [true, false] {
+                    let view = MissingDataRowPreview.view(name: deluxe, detail: "17 played tracks aren’t on the album’s tracklist · counted with 1 other edition name", pending: width == 420)
+                        .frame(width: width).environment(\.colorScheme, dark ? .dark : .light)
+                    let host = NSHostingView(rootView: view)
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 120), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: width, height: 90))
+                    for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(120)); host.layoutSubtreeIfNeeded() }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        if let png = rep.representation(using: .png, properties: [:]) {
+                            try? png.write(to: URL(fileURLWithPath: folder).appending(path: "row-\(Int(width))-\(dark ? "dark" : "light").png"))
+                        }
+                    }
+                }
+            }
             for (name, group, opened) in [("merged", merged, deluxe), ("separate", separate, deluxe), ("plain", AlbumTurnoverEngine.buildAlbumGroups(from: Array(plays.prefix(3)))[0], standard)] {
                 for dark in [true, false] {
                     let view = AlbumMatchFixView(group: group, openedFrom: opened, modelContext: container.mainContext, client: nil, onResolved: {})

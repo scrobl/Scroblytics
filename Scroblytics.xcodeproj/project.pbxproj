@@ -111,6 +111,7 @@
 		6842915DA707764C59B32297 /* LastfmSigning.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E8CD3478E72189FBCCD020 /* LastfmSigning.swift */; };
 		692A648EA98681F553A32D8F /* OverviewDrillChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4AF8C87C92292F68F7CB1A /* OverviewDrillChecks.swift */; };
 		69C9D85CEFCFE51EE5957FA6 /* EntityTagsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE49A1EF817D44A35A7DDBD5 /* EntityTagsEngine.swift */; };
+		69F88297B3904CC5646495E7 /* DetailLoadMemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F63838339CB68FE4110025 /* DetailLoadMemo.swift */; };
 		6A1AA58002B6255253720AA2 /* MostRecentMostOftenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBABBB2BF060AAEC749FCAAA /* MostRecentMostOftenView.swift */; };
 		6A64350940A1393A6406ED4F /* AlbumMatchFixEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D69A2695F5B6AF502744D87D /* AlbumMatchFixEngine.swift */; };
 		6C54A3DA9AEDCC90EB379A9A /* TrackDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABEC7C605198B4546CB60A1 /* TrackDetailView.swift */; };
@@ -343,6 +344,7 @@
 		3793741CC9B90A6AB66B085F /* AlbumTrackTable.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AlbumTrackTable.swift; sourceTree = "<group>"; };
 		388436BA25E06CE2D52410B3 /* AppIdentity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppIdentity.swift; sourceTree = "<group>"; };
 		38A3ADB4E17AF34AE84FFF42 /* KeychainChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeychainChecks.swift; sourceTree = "<group>"; };
+		38F63838339CB68FE4110025 /* DetailLoadMemo.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DetailLoadMemo.swift; sourceTree = "<group>"; };
 		3993BD3D8AE0575E458421E3 /* NativeBackup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeBackup.swift; sourceTree = "<group>"; };
 		39A8D38A2DB7D07F0FAD2343 /* CredentialsProblemViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CredentialsProblemViews.swift; sourceTree = "<group>"; };
 		3A17F116B1650D326F18D206 /* MissingDataView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MissingDataView.swift; sourceTree = "<group>"; };
@@ -909,6 +911,7 @@
 				A3488DC8AC450E656757B3EA /* ArtistDetailModel.swift */,
 				14A94D6E40BB0B9606F5A654 /* ArtistDetailView.swift */,
 				CFC81CEE9F6FB1F957BAD856 /* AlbumTrackDurations.swift */,
+				38F63838339CB68FE4110025 /* DetailLoadMemo.swift */,
 			);
 			name = DetailPages;
 			path = DetailPages;
@@ -1453,6 +1456,7 @@
 				0505993A2BE73437C119EB7D /* OverviewChecks.swift in Sources */,
 				2AA206F1A110BBCB73F11921 /* EditionChecks.swift in Sources */,
 				DB2F37C0ACF7B99789D527C5 /* QueryEditionFields.swift in Sources */,
+				69F88297B3904CC5646495E7 /* DetailLoadMemo.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

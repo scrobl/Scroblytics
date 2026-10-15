@@ -177,7 +177,7 @@ final class QueryBuilderModel {
 
     private func reloadSnapshots() async {
         let container = container
-        let loaded = await offMain { await QuerySnapshotReader(modelContainer: container).loadAll() }
+        let loaded = await QuerySnapshotReader.loadAll(container: container)
         durations = loaded.durations
         bpm = loaded.bpm
         releaseDates = loaded.releaseDates
@@ -507,6 +507,13 @@ actor QuerySnapshotReader {
         let images: ImageStatusSnapshot
         let entityTags: EntityTagsSnapshot
         let libraryPresence: LibraryPresenceSnapshot
+    }
+
+    /// The snapshots, read on a background thread. Use this rather than creating the reader and awaiting `loadAll()`
+    /// from main-actor code: a model actor awaited from there runs on the main thread (see `offMain`), which froze the
+    /// window for seconds on a large library.
+    static func loadAll(container: ModelContainer) async -> Loaded {
+        await offMain { await QuerySnapshotReader(modelContainer: container).loadAll() }
     }
 
     func loadAll() -> Loaded {

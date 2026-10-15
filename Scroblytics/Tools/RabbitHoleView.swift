@@ -21,6 +21,9 @@ struct RabbitHoleView: View {
     @State private var scrobbles: [ScrobbleSnapshot]?
     @State private var snapshots = QuerySnapshots()
     @State private var tagVocabulary: [QueryTagSuggestion] = []
+    /// When `loadLibrary` last finished. The tool's `.task` runs again whenever its tab reappears; reading the whole library
+    /// again for that took seconds and is only worth doing when what it read could have changed.
+    @State private var libraryLoadedAt: Date?
     @State private var isSearching = false
     @State private var isGenerating = false
     @State private var totalBeforeConditions: Int?
@@ -376,6 +379,7 @@ struct RabbitHoleView: View {
     }
 
     private func loadLibrary() async {
+        if scrobbles != nil, let libraryLoadedAt, Date().timeIntervalSince(libraryLoadedAt) < 300 { return }
         do {
             if scrobbles == nil {
                 let fetched = try await offMain {
@@ -383,7 +387,7 @@ struct RabbitHoleView: View {
                 }
                 scrobbles = QueryIdentity.canonicalizingArtists(fetched)
             }
-            let loaded = await QuerySnapshotReader(modelContainer: modelContainer).loadAll()
+            let loaded = await QuerySnapshotReader.loadAll(container: modelContainer)
             snapshots = QuerySnapshots(
                 popularity: popularityStore.snapshot,
                 durations: loaded.durations,
@@ -397,6 +401,7 @@ struct RabbitHoleView: View {
             tagVocabulary = loaded.entityTags.vocabulary.map {
                 QueryTagSuggestion(tag: $0.tag, items: $0.items)
             }
+            libraryLoadedAt = Date()
         } catch {
             errorMessage = error.localizedDescription
         }

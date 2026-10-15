@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 #if DEBUG
@@ -243,6 +244,45 @@ enum DetailChecks {
             check("four tiles are two and two, not three and one", columns(560, 4) == 2 && columns(450, 4) == 2)
             check("five tiles in four columns become three and two", columns(640, 5) == 3)
             check("three tiles that fit two are two and one", columns(300, 3) == 2)
+
+            // Reappearing pages keep what they have (a tab switched back to must not reload every page of its stack).
+            var memo = DetailLoadMemo()
+            let memoNow = Date()
+            check("a page never loaded is not fresh", !memo.isFresh(for: "a", now: memoNow))
+            memo.record("a", now: memoNow)
+            check("a page just loaded is fresh for the same item", memo.isFresh(for: "a", now: memoNow.addingTimeInterval(30)))
+            check("a different item is not fresh", !memo.isFresh(for: "b", now: memoNow.addingTimeInterval(30)))
+            check("a page loaded long ago is not fresh", !memo.isFresh(for: "a", now: memoNow.addingTimeInterval(DetailLoadMemo.freshFor + 1)))
+            memo.reset()
+            check("a reset page loads again", !memo.isFresh(for: "a", now: memoNow))
+            let memoModel = ArtistDetailModel()
+            check("a new model has loaded nothing", !memoModel.isLoaded(for: "x"))
+            memoModel.markLoaded("x")
+            check("and remembers what it loaded", memoModel.isLoaded(for: "x") && !memoModel.isLoaded(for: "y"))
+            // One header picture is resolved from a few rows, the same answer as the whole-library index.
+            let container = try? ModelContainer(for: Schema([Artist.self, Album.self, Track.self, AlbumImageOverride.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            if let container {
+                let context = ModelContext(container)
+                let artist = Artist(normalizedName: "artist a", name: "Artist A")
+                context.insert(artist)
+                context.insert(Album(identityKey: TextNormalization.albumIdentityKey(artist: "Artist A", album: "Album"), title: "Album", normalizedTitle: TextNormalization.normalizeAlbumName("Album"), artist: artist))
+                context.insert(Track(identityKey: TextNormalization.lovedKey(artist: "Artist A", track: "Song"), title: "Song", normalizedTitle: "song", artist: artist))
+                try? context.save()
+                let targets = [
+                    ImageTarget(kind: .artist, artist: "Artist A", album: nil, track: nil), ImageTarget(kind: .artist, artist: " ARTIST a ", album: nil, track: nil),
+                    ImageTarget(kind: .album, artist: "Artist A", album: "Album", track: nil), ImageTarget(kind: .album, artist: "Artist A", album: "Album (Deluxe Edition)", track: nil),
+                    ImageTarget(kind: .track, artist: "Artist A", album: "Album", track: "Song"), ImageTarget(kind: .track, artist: "Nobody", album: nil, track: "Nothing"),
+                ]
+                let full = (try? ImageResolutionEngine.imageLookup(context: context)) ?? [:]
+                for fallback in [nil, "https://example.invalid/a.jpg"] as [String?] {
+                    let agree = targets.allSatisfy { target in
+                        ImageResolutionEngine.effectiveImageURL(for: target, lookup: full, fallbackURL: fallback) == (try? ImageResolutionEngine.effectiveImageURL(for: target, context: context, fallbackURL: fallback))
+                    }
+                    check("a header picture resolved from its own rows matches the whole-library lookup (fallback \(fallback == nil ? "none" : "given"))", agree)
+                }
+            } else {
+                check("an in-memory store opens for the picture lookup check", false)
+            }
 
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)

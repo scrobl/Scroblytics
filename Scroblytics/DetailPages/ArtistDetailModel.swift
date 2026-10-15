@@ -8,6 +8,11 @@ import SwiftData
 final class ArtistDetailModel {
     private(set) var identity = ArtistIdentity(name: "")
     private var context: ModelContext?
+    /// See `DetailLoadMemo`: the view skips its loads when it only reappears.
+    @ObservationIgnored private(set) var loadMemo = DetailLoadMemo()
+
+    func isLoaded(for id: String) -> Bool { loadMemo.isFresh(for: id) }
+    func markLoaded(_ id: String) { loadMemo.record(id) }
 
     var oldestScrobbleDate: Date?
     var stats: EntityStats?

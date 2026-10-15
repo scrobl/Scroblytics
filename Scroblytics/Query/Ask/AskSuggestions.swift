@@ -334,7 +334,7 @@ final class AskSuggestionStore {
         guard let canonical = try? await offMain({
             try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
         }) else { return }
-        let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
+        let loaded = await QuerySnapshotReader.loadAll(container: container)
         let tagCounts = loaded.entityTags.vocabulary
         let computed = await Task.detached(priority: .utility) {
             AskSuggestionFacts.compute(scrobbles: canonical, lovedKeys: loaded.lovedKeys, tagCounts: tagCounts, libraryChecked: loaded.libraryPresence.checkedAt != nil)

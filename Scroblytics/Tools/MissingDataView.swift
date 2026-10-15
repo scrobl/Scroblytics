@@ -338,7 +338,7 @@ struct MissingDataView: View {
                 all = QueryIdentity.canonicalizingArtists(fetched)
                 scrobbles = all
             }
-            let loaded = await QuerySnapshotReader(modelContainer: modelContainer).loadAll()
+            let loaded = await QuerySnapshotReader.loadAll(container: modelContainer)
             let snapshots = QuerySnapshots(
                 durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, images: loaded.images,
                 turnoverGroups: turnoverGroupCache

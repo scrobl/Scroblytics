@@ -68,6 +68,8 @@ struct TrackDetailView: View {
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .navigationTitle(identity.name)
         .task(id: identity.id) {
+            // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
+            if model.isLoaded(for: identity.id) { return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
@@ -79,6 +81,7 @@ struct TrackDetailView: View {
             async let duration: Void = model.loadDuration()
             async let release: Void = model.loadReleaseDate()
             _ = await (ranks, tags, duration, release)
+            if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
         .onChange(of: settings.compareMode) { reloadForRange() }

@@ -29,6 +29,11 @@ enum AlbumTurnoverState {
 final class AlbumDetailModel {
     private(set) var identity = AlbumIdentity(artist: "", name: "")
     private var context: ModelContext?
+    /// See `DetailLoadMemo`: the view skips its loads when it only reappears.
+    @ObservationIgnored private(set) var loadMemo = DetailLoadMemo()
+
+    func isLoaded(for id: String) -> Bool { loadMemo.isFresh(for: id) }
+    func markLoaded(_ id: String) { loadMemo.record(id) }
     private var latestRangeID = ""
     /// The Last.fm client for the saved account, read from the Keychain once per page (and again only while there is none).
     private var client: LastfmAPIClient?

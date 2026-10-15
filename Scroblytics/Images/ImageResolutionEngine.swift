@@ -357,7 +357,54 @@ enum ImageResolutionEngine {
 
     @MainActor
     static func effectiveImageURL(for target: ImageTarget, context: ModelContext, fallbackURL: String? = nil) throws -> String? {
-        effectiveImageURL(for: target, lookup: try imageLookup(context: context), fallbackURL: fallbackURL)
+        effectiveImageURL(for: target, lookup: try imageLookup(for: target, context: context), fallbackURL: fallbackURL)
+    }
+
+    /// The part of `imageLookup(context:)` that `effectiveImageURL(for:lookup:)` can read for ONE target: the same entries,
+    /// built the same way, from the few rows that can match it. Resolving a single picture (a detail page's header) used to
+    /// build the whole-library index on the main thread, which took about a third of a second on a mid-sized library and
+    /// repeated for every page on every return to the tab.
+    static func imageLookup(for target: ImageTarget, context: ModelContext) throws -> [String: String] {
+        var lookup: [String: String] = [:]
+
+        func addAlbums(artist: String, album: String) throws {
+            let normalized = TextNormalization.normalizeAlbumName(album)
+            for row in try context.fetch(FetchDescriptor<Album>(predicate: #Predicate { $0.normalizedTitle == normalized })) {
+                guard let artistName = row.artist?.name else { continue }
+                let rowTarget = ImageTarget(kind: .album, artist: artistName, album: row.title, track: nil)
+                if let url = customURL(filename: row.customImageFilename) ?? detectedURL(filename: row.detectedImageFilename) {
+                    lookup[lookupKey(for: rowTarget)] = url.absoluteString
+                }
+            }
+            for override in try context.fetch(FetchDescriptor<AlbumImageOverride>()) {
+                if let url = customURL(filename: override.filename) {
+                    lookup[customAlbumLookupKey(artist: override.artist, album: override.album)] = url.absoluteString
+                }
+            }
+        }
+
+        switch target.kind {
+        case .artist:
+            let key = TextNormalization.artistIdentityKey(target.artist)
+            for artist in try context.fetch(FetchDescriptor<Artist>(predicate: #Predicate { $0.normalizedName == key })) {
+                let rowTarget = ImageTarget(kind: .artist, artist: artist.name, album: nil, track: nil)
+                if let url = customURL(filename: artist.customImageFilename) ?? detectedURL(filename: artist.detectedImageFilename) {
+                    lookup[lookupKey(for: rowTarget)] = url.absoluteString
+                }
+            }
+        case .album:
+            try addAlbums(artist: target.artist, album: target.album ?? "")
+        case .track:
+            let trackKey = TextNormalization.lovedKey(artist: target.artist, track: target.track ?? "")
+            for track in try context.fetch(FetchDescriptor<Track>(predicate: #Predicate { $0.identityKey == trackKey })) {
+                guard let artistName = track.artist?.name, let url = customURL(filename: track.customImageFilename) else { continue }
+                let rowTarget = ImageTarget(kind: .track, artist: artistName, album: nil, track: track.title)
+                lookup[lookupKey(for: rowTarget)] = url.absoluteString
+            }
+            // A track with no picture of its own shows its album's.
+            if let album = target.album { try addAlbums(artist: target.artist, album: album) }
+        }
+        return lookup
     }
 
     /// A track's own most-played album (by scrobble count, so a track that appears on several releases

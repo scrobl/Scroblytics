@@ -313,7 +313,7 @@ struct SimilarSoundsView: View {
                 let fetched = try await ScrobbleHistoryCache.shared.snapshots(container: container)
                 scrobbles = QueryIdentity.canonicalizingArtists(fetched)
             }
-            let loaded = await QuerySnapshotReader(modelContainer: modelContainer).loadAll()
+            let loaded = await QuerySnapshotReader.loadAll(container: modelContainer)
             snapshots = QuerySnapshots(
                 popularity: popularityStore.snapshot, durations: loaded.durations, releaseDates: loaded.releaseDates,
                 turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, images: loaded.images

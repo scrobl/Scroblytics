@@ -293,7 +293,7 @@ enum TagQuerySource {
         let scrobbles = try await offMain {
             try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
         }
-        let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
+        let loaded = await QuerySnapshotReader.loadAll(container: container)
         let snapshots = QuerySnapshots(
             popularity: popularity?.snapshot ?? .empty, durations: loaded.durations, releaseDates: loaded.releaseDates,
             turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, flaggedKeys: loaded.flaggedKeys,

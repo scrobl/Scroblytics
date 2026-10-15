@@ -313,7 +313,7 @@ enum MissingDataDebugEval {
             let field = MissingDataField.all.first { $0.id == fieldID } ?? MissingDataField.all[2]
             let targetRaw = ProcessInfo.processInfo.environment["SCROBLYTICS_MISSINGDATA_TARGET"] ?? field.targets[0].rawValue
             let target = QueryTarget(rawValue: targetRaw) ?? field.targets[0]
-            let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
+            let loaded = await QuerySnapshotReader.loadAll(container: container)
             let snapshots = QuerySnapshots(
                 durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, images: loaded.images
             )

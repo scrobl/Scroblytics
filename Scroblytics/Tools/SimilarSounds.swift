@@ -165,7 +165,7 @@ enum SimilarSoundsDebugEval {
             do {
                 let raw = try container.mainContext.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
                 let scrobbles = QueryIdentity.canonicalizingArtists(raw)
-                let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
+                let loaded = await QuerySnapshotReader.loadAll(container: container)
                 let snapshots = QuerySnapshots(
                     durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover,
                     lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, images: loaded.images

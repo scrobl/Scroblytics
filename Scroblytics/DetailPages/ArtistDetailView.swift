@@ -60,6 +60,8 @@ struct ArtistDetailView: View {
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .navigationTitle(identity.name)
         .task(id: identity.id) {
+            // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
+            if model.isLoaded(for: identity.id) { return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             model.loadStats(range: range)
@@ -67,6 +69,7 @@ struct ArtistDetailView: View {
             async let tags: Void = model.loadTags()
             async let time: Void = model.loadTimeListened(range: range)
             _ = await (ranks, tags, time)
+            if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
         .onChange(of: settings.compareMode) { reloadForRange() }

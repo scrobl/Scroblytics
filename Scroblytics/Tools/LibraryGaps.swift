@@ -409,7 +409,7 @@ enum LibraryGapsDebugEval {
                     let canon = try await offMain {
                         try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                     }
-                    let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
+                    let loaded = await QuerySnapshotReader.loadAll(container: container)
                     let snapshots = QuerySnapshots(libraryPresence: loaded.libraryPresence)
                     func evaluate(_ conditions: [QueryCondition]) throws -> Set<String> {
                         var spec = QuerySpec(target: .track)
@@ -449,7 +449,7 @@ enum LibraryGapsDebugEval {
                     let canon = try await offMain {
                         try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                     }
-                    let loaded = await QuerySnapshotReader(modelContainer: container).loadAll()
+                    let loaded = await QuerySnapshotReader.loadAll(container: container)
                     var spec = QuerySpec(target: .track)
                     spec.groups = [[QueryCondition("inAppleLibrary", .isFalse)]]
                     spec.columns = [QueryFieldRef("plays")]

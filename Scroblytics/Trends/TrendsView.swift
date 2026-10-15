@@ -262,7 +262,7 @@ struct TrendsView: View {
             let container = modelContainer
             let snapshots: QuerySnapshots
             if let querySnapshots { snapshots = querySnapshots } else {
-                let loaded = await offMain { await QuerySnapshotReader(modelContainer: container).loadAll() }
+                let loaded = await QuerySnapshotReader.loadAll(container: container)
                 guard latestRequestID == requestID else { return }
                 snapshots = QuerySnapshots(
                     durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover,

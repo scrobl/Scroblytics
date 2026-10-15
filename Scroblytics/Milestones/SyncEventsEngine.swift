@@ -128,8 +128,9 @@ enum SyncEventsEngine {
             grouping: scrobbles.filter { !$0.albumName.isEmpty && touchedArtists.contains(TextNormalization.artistIdentityKey($0.artistName)) },
             by: \.artistName
         )
+        let separate = AlbumTurnoverEngine.separateEditionKeys(context: context)
         let groups = await offMain {
-            byArtist.values.flatMap { AlbumTurnoverEngine.buildAlbumGroups(from: $0) }
+            byArtist.values.flatMap { AlbumTurnoverEngine.buildAlbumGroups(from: $0, separateEditions: separate) }
                 .filter { !TextNormalization.isCompilationArtist($0.artist) }
         }
         var result: [NewAlbumTurnover] = []

@@ -45,6 +45,7 @@
 		25818536AD0A542B3673E36A /* CredentialsProblemViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A8D38A2DB7D07F0FAD2343 /* CredentialsProblemViews.swift */; };
 		25AE67B5F835BF26817E7B01 /* TheClimbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86BE5C0DC594B2F36A0D0776 /* TheClimbView.swift */; };
 		28B3A168EB4F6C681867EA91 /* LastfmAccountForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F8B1E6CEA3C756C5036673 /* LastfmAccountForm.swift */; };
+		2AA206F1A110BBCB73F11921 /* EditionChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DFB139ADF6102C35F148E2 /* EditionChecks.swift */; };
 		2B5F9228A229E57A77B2FA56 /* TestProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A99EB41FFB476C0B022B9F /* TestProfile.swift */; };
 		2C1CE181A0621E390E9F5BF6 /* QueryField.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89C006F5918382FC0E21897 /* QueryField.swift */; };
 		2C1FA8DD92F13BFAC75AA015 /* AskExamples.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A26E08C13C09BBA902D4594 /* AskExamples.swift */; };
@@ -474,6 +475,7 @@
 		B44EA5486AF4477944C07512 /* MusicBrainzAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicBrainzAPIClient.swift; sourceTree = "<group>"; };
 		B5FFBEAC3E93C815079E66A4 /* HelpModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpModel.swift; sourceTree = "<group>"; };
 		B660323F181943A0585DFA1A /* FadingFavoritesView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FadingFavoritesView.swift; sourceTree = "<group>"; };
+		B6DFB139ADF6102C35F148E2 /* EditionChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditionChecks.swift; sourceTree = "<group>"; };
 		B7D73DAFEDC85F823B117E72 /* Scroblytics.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = Scroblytics.entitlements; path = Config/Scroblytics.entitlements; sourceTree = SOURCE_ROOT; };
 		B801F401C530C49ED84EB1C3 /* DiagnosticsChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiagnosticsChecks.swift; sourceTree = "<group>"; };
 		B8869751982F117FBE0474E3 /* TrendsComputeGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsComputeGate.swift; sourceTree = "<group>"; };
@@ -591,6 +593,7 @@
 				DB4AF8C87C92292F68F7CB1A /* OverviewDrillChecks.swift */,
 				38A3ADB4E17AF34AE84FFF42 /* KeychainChecks.swift */,
 				3DEF01BC48764ABE1267A58E /* OverviewChecks.swift */,
+				B6DFB139ADF6102C35F148E2 /* EditionChecks.swift */,
 			);
 			path = Verification;
 			sourceTree = "<group>";
@@ -1445,6 +1448,7 @@
 				2D1EA80B884343114E741837 /* KeychainChecks.swift in Sources */,
 				25818536AD0A542B3673E36A /* CredentialsProblemViews.swift in Sources */,
 				0505993A2BE73437C119EB7D /* OverviewChecks.swift in Sources */,
+				2AA206F1A110BBCB73F11921 /* EditionChecks.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

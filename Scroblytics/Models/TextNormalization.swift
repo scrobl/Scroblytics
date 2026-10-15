@@ -255,9 +255,17 @@ enum TextNormalization {
         "\(artist)\(albumKeySeparator)\(normalizeAlbumName(album))"
     }
 
+    /// One exact album name of one artist, edition words kept (case and spacing ignored): the identity of an
+    /// edition that is counted on its own (`AlbumEditionMatch`). Unlike `albumIdentityKey`, "Album" and
+    /// "Album (25th Anniversary Edition)" differ.
+    static func editionIdentityKey(artist: String, album: String) -> String {
+        let name = album.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
+        return "\(artistIdentityKey(artist))\(albumKeySeparator)\(name)"
+    }
+
     /// Exact album-variant identity for presentation overrides. Unlike
     /// `albumIdentityKey`, this deliberately preserves edition qualifiers so
-    /// “Monster” and “Monster (25th Anniversary Edition)” can have different
+    /// “Album” and “Album (25th Anniversary Edition)” can have different
     /// artwork while still sharing grouped statistics and match metadata.
     static func albumArtworkIdentityKey(artist: String, album: String) -> String {
         "\(artistIdentityKey(artist))\(albumKeySeparator)\(album.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"

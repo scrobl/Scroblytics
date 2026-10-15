@@ -141,13 +141,14 @@ extension HelpContent {
                 .heading("Which tracklist is used"),
                 .steps([
                     "A decision you saved with **Fix album match…** always wins (a Last.fm alternate, an Apple Music edition, a pasted list, or “use the tracks I’ve played”).",
+                    "An edition you set apart with **Count this edition on its own** has its own decision, and with none it asks Last.fm for its exact title (edition words kept) instead of the plain release, so a 64-track anniversary edition is compared with its own 64-track list.",
                     "Otherwise the Last.fm tracklist for the album is looked up (and cached) and judged. It is **ambiguous** if the tracklist is more than twice or under 70% the length of the distinct tracks you’ve played, if you have scrobbled under 60% of its titles, or if either list is empty. Otherwise it is a confident match.",
                     "With no usable match the tracks you have actually played are used.",
                 ]),
                 .heading("Details"),
                 .bullets([
                     "Albums with fewer than 2 tracks are excluded.",
-                    "Editions of one album are grouped: names are normalized (bracketed edition, region and year words removed) and clustered when equal, when one is a whole-word part of the other that adds only edition words, or when they are very similar (about 72% by edit distance).",
+                    "Editions of one album are grouped (unless you count one on its own): names are normalized (bracketed edition, region and year words removed) and clustered when equal, when one is a whole-word part of the other that adds only edition words, or when they are very similar (about 72% by edit distance).",
                     "Duplicate titles on a tracklist count by occurrence. A deep cut you have never played stalls the cycle.",
                     "The tool evaluates the top 50, 100, 150, 200 or 250 albums by plays, or all. Compilations (Various Artists, Soundtrack…) are excluded unless you include them.",
                     "On Overview, “N turned over” counts albums whose most recent completion falls in the selected range.",

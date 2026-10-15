@@ -28,16 +28,19 @@ struct QueryEntity: Identifiable, Hashable, Sendable {
 final class TurnoverGroupCache: @unchecked Sendable {
     private let lock = NSLock()
     private var key: [Double]?
+    private var separated: Set<String> = []
     private var cached: [String: [AlbumGroup]] = [:]
 
-    func groups(for scrobbles: [ScrobbleSnapshot]) -> [String: [AlbumGroup]] {
+    /// `separating`: the editions counted on their own (`AlbumTurnoverEngine.Snapshot.separateEditions`).
+    func groups(for scrobbles: [ScrobbleSnapshot], separating: Set<String> = []) -> [String: [AlbumGroup]] {
         lock.lock(); defer { lock.unlock() }
         let first: Double = scrobbles.first?.playedAt.timeIntervalSince1970 ?? 0
         let last: Double = scrobbles.last?.playedAt.timeIntervalSince1970 ?? 0
         let k: [Double] = [Double(scrobbles.count), first, last]
-        if key == k { return cached }
-        cached = AlbumTurnoverEngine.buildGroupsByArtist(scrobbles: scrobbles)
+        if key == k, separated == separating { return cached }
+        cached = AlbumTurnoverEngine.buildGroupsByArtist(scrobbles: scrobbles, separateEditions: separating)
         key = k
+        separated = separating
         return cached
     }
 }

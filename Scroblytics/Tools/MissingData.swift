@@ -233,8 +233,8 @@ enum MissingDataEngine {
             }
             let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
             let ids = Set(rows.map(\.id))
-            let byArtist = turnoverGroups.groups(for: scrobbles)
             let snapshot = AlbumTurnoverEngine.loadSnapshot(context: context)
+            let byArtist = turnoverGroups.groups(for: scrobbles, separating: snapshot.separateEditions)
             var seen = Set<String>()
             var requests: [AlbumTurnoverEngine.TracklistRequest] = []
             for row in rows where ids.contains(row.id) {

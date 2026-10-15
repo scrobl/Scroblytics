@@ -106,6 +106,8 @@ enum NativeBackupFormat {
         var lovedAuditDecisions: [LovedAuditDecisionRecord]?
         /// Tag Management playlist rules. Optional for the same reason as above.
         var tagRules: [TagRuleRecord]?
+        /// Editions counted on their own, with their match decisions. Optional for the same reason as above.
+        var albumEditionMatches: [AlbumEditionMatchRecord]?
         var theme: String
         var images: [String: Data]
     }
@@ -148,6 +150,12 @@ enum NativeBackupFormat {
         let lastfmArtist: String; let lastfmTrack: String; let appleArtist: String; let appleTrack: String
         let sameTrack: Bool; let decidedAt: Date
     }
+    struct AlbumEditionMatchRecord: Codable {
+        let artist: String; let title: String
+        let matchMode: String?; let canonicalArtist: String?; let canonicalAlbum: String?; let manualTracklist: [String]?
+        /// False = reviewed and kept merged. Absent in archives written before it existed, which means true.
+        var countsSeparately: Bool? = nil
+    }
     struct ToolFilterRecord: Codable { let toolId: String; let optionsJSON: Data; let advancedGroupsJSON: Data }
 }
 
@@ -176,12 +184,14 @@ enum NativeBackupEngine {
         var dismissedLibraryGaps = 0
         var lovedAuditDecisions = 0
         var tagRules = 0
+        var albumEditionMatches = 0
 
         var description: String {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
             if dismissedLibraryGaps > 0 { text += " · \(dismissedLibraryGaps) confirmed library gaps" }
             if lovedAuditDecisions > 0 { text += " · \(lovedAuditDecisions) loved-audit decisions" }
             if tagRules > 0 { text += " · \(tagRules) tag rules" }
+            if albumEditionMatches > 0 { text += " · \(albumEditionMatches) editions counted separately" }
             return text
         }
     }
@@ -267,6 +277,7 @@ enum NativeBackupEngine {
         try restoreDismissedLibraryGaps(archive.dismissedLibraryGaps, context: context, save: false)
         try restoreLovedAuditDecisions(archive.lovedAuditDecisions, context: context, save: false)
         try restoreTagRules(archive.tagRules, context: context, save: false)
+        try restoreAlbumEditionMatches(archive.albumEditionMatches, context: context, save: false)
 
         UserDefaults.standard.set(archive.theme, forKey: AppearancePreference.storageKey)
         let appSettings = try context.fetch(FetchDescriptor<AppSettings>()).first
@@ -303,6 +314,25 @@ enum NativeBackupEngine {
                 pairKey: key, lastfmArtist: record.lastfmArtist, lastfmTrack: record.lastfmTrack,
                 appleArtist: record.appleArtist, appleTrack: record.appleTrack, sameTrack: record.sameTrack, decidedAt: record.decidedAt
             ))
+        }
+        if save { try context.save() }
+    }
+
+    /// Replaces the editions counted on their own with the archive's; `nil` (an older archive) leaves the current ones alone.
+    static func restoreAlbumEditionMatches(_ records: [NativeBackupFormat.AlbumEditionMatchRecord]?, context: ModelContext, save: Bool = true) throws {
+        guard let records else { return }
+        for item in try context.fetch(FetchDescriptor<AlbumEditionMatch>()) { context.delete(item) }
+        var seen = Set<String>()
+        for record in records {
+            let key = TextNormalization.editionIdentityKey(artist: record.artist, album: record.title)
+            guard seen.insert(key).inserted else { continue }
+            let edition = AlbumEditionMatch(editionKey: key, artist: record.artist, title: record.title)
+            edition.matchResolutionMode = record.matchMode.flatMap(AlbumMatchMode.init(rawValue:))
+            edition.canonicalArtist = record.canonicalArtist
+            edition.canonicalAlbum = record.canonicalAlbum
+            edition.manualTracklist = record.manualTracklist
+            edition.countsSeparately = record.countsSeparately ?? true
+            context.insert(edition)
         }
         if save { try context.save() }
     }
@@ -346,10 +376,13 @@ enum NativeBackupEngine {
         let tagRules = try context.fetch(FetchDescriptor<TagPlaylistRule>()).map {
             NativeBackupFormat.TagRuleRecord(id: $0.id, playlistPersistentID: $0.playlistPersistentID, playlistName: $0.playlistName, tags: $0.tags, mirrorRemovals: $0.mirrorRemovals, createdAt: $0.createdAt, lastAppliedAt: $0.lastAppliedAt)
         }
+        let editionMatches = try context.fetch(FetchDescriptor<AlbumEditionMatch>()).map {
+            NativeBackupFormat.AlbumEditionMatchRecord(artist: $0.artist, title: $0.title, matchMode: $0.matchResolutionMode?.rawValue, canonicalArtist: $0.canonicalArtist, canonicalAlbum: $0.canonicalAlbum, manualTracklist: $0.manualTracklist, countsSeparately: $0.countsSeparately)
+        }
         let username = try context.fetch(FetchDescriptor<SyncState>()).first?.username
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         let theme = UserDefaults.standard.string(forKey: AppearancePreference.storageKey) ?? AppearancePreference.dark.rawValue
-        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, theme: theme, images: images)
+        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, theme: theme, images: images)
     }
 
     private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
@@ -366,7 +399,7 @@ enum NativeBackupEngine {
     }
 
     private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
-        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0)
+        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0)
     }
 
     private static func findOrCreateArtist(named name: String, context: ModelContext) throws -> Artist {

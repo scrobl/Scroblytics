@@ -8,6 +8,10 @@ struct AlbumGroup: Sendable {
     let variants: [String]
     /// Ascending by playedAt.
     let scrobbles: [ScrobbleSnapshot]
+    /// Set when this group is one edition the person chose to count on its own (`AlbumEditionMatch`): its
+    /// `TextNormalization.editionIdentityKey`. Such a group's match decision lives on that row, not on the
+    /// shared `Album`, and Last.fm is asked for its exact title.
+    var editionKey: String? = nil
 }
 
 enum MatchConfidence: Sendable {
@@ -109,7 +113,9 @@ enum AlbumTurnoverEngine {
     /// genuinely expensive across a whole library (was the actual cause of a
     /// multi-second UI freeze, confirmed directly), so `fetchRankings`/
     /// `fetchAllCompletions` run it off the main actor.
-    nonisolated static func buildAlbumGroups(from scrobbles: [ScrobbleSnapshot]) -> [AlbumGroup] {
+    /// `separateEditions` (`AlbumEditionMatch.editionKey`s) pulls those exact names out of their cluster into
+    /// groups of their own; the other names of the cluster stay together. Empty = every edition merges.
+    nonisolated static func buildAlbumGroups(from scrobbles: [ScrobbleSnapshot], separateEditions: Set<String> = []) -> [AlbumGroup] {
         var byNorm: [String: [ScrobbleSnapshot]] = [:]
         var normKeysOrdered: [String] = []
         for s in scrobbles {
@@ -162,11 +168,55 @@ enum AlbumTurnoverEngine {
                 scrobbles: groupScrobbles.sorted { $0.playedAt < $1.playedAt }
             ))
         }
-        return groups
+        return separateEditions.isEmpty ? groups : splitEditions(groups, separate: separateEditions)
+    }
+
+    /// Pulls each separated edition's name variants out of its group into a group of its own (see
+    /// `buildAlbumGroups`). A group whose only names are separated editions simply becomes that edition's group.
+    nonisolated private static func splitEditions(_ groups: [AlbumGroup], separate: Set<String>) -> [AlbumGroup] {
+        var result: [AlbumGroup] = []
+        for group in groups {
+            func key(_ variant: String) -> String { TextNormalization.editionIdentityKey(artist: group.artist, album: variant) }
+            var splitKeys: [String] = []
+            for variant in group.variants where separate.contains(key(variant)) && !splitKeys.contains(key(variant)) {
+                splitKeys.append(key(variant))
+            }
+            guard !splitKeys.isEmpty else { result.append(group); continue }
+
+            func subgroup(variants: Set<String>, editionKey: String?) -> AlbumGroup {
+                let scrobbles = group.scrobbles.filter { variants.contains($0.albumName) }
+                var counts: [String: Int] = [:]
+                for s in scrobbles { counts[s.albumName, default: 0] += 1 }
+                let ordered = group.variants.filter { variants.contains($0) }
+                let displayName = ordered.sorted { a, b in
+                    let ca = counts[a] ?? 0, cb = counts[b] ?? 0
+                    return ca != cb ? ca > cb : a < b
+                }.first ?? group.displayName
+                return AlbumGroup(
+                    artist: group.artist, displayName: displayName,
+                    normalizedName: editionKey == nil ? group.normalizedName : TextNormalization.normalizeAlbumName(displayName),
+                    variants: ordered, scrobbles: scrobbles, editionKey: editionKey
+                )
+            }
+
+            let remaining = Set(group.variants.filter { !separate.contains(key($0)) })
+            if !remaining.isEmpty { result.append(subgroup(variants: remaining, editionKey: nil)) }
+            for editionKey in splitKeys {
+                result.append(subgroup(variants: Set(group.variants.filter { key($0) == editionKey }), editionKey: editionKey))
+            }
+        }
+        return result
     }
 
     /// Finds the group an album name belongs to (by normalized match against its variants).
     nonisolated static func findAlbumGroup(_ groups: [AlbumGroup], album: String) -> AlbumGroup? {
+        // An edition counted on its own shares its normalized name with the group it left, so the exact name decides first.
+        if let first = groups.first {
+            let exact = TextNormalization.editionIdentityKey(artist: first.artist, album: album)
+            if let hit = groups.first(where: { g in g.variants.contains { TextNormalization.editionIdentityKey(artist: g.artist, album: $0) == exact } }) {
+                return hit
+            }
+        }
         let norm = TextNormalization.normalizeAlbumName(album)
         return groups.first { g in
             g.normalizedName == norm || g.variants.contains { TextNormalization.normalizeAlbumName($0) == norm }
@@ -221,6 +271,12 @@ enum AlbumTurnoverEngine {
     /// or one exists but has never been resolved — both mean "take the auto-classify
     /// path", same as before this bridge existed.
     static func storedResolution(context: ModelContext, group: AlbumGroup) -> StoredAlbumResolution? {
+        // An edition counted on its own never reads the shared `Album` decision (it belongs to the other editions).
+        if let editionKey = group.editionKey {
+            var descriptor = FetchDescriptor<AlbumEditionMatch>(predicate: #Predicate { $0.editionKey == editionKey })
+            descriptor.fetchLimit = 1
+            return (try? context.fetch(descriptor).first).flatMap { resolution(from: $0) }
+        }
         let keys = resolutionKeys(for: group)
         let descriptor = FetchDescriptor<Album>(predicate: #Predicate { keys.contains($0.identityKey) })
         let albums = (try? context.fetch(descriptor)) ?? []
@@ -246,18 +302,36 @@ enum AlbumTurnoverEngine {
     /// The `Album` row → `StoredAlbumResolution` bridge, shared by the per-group lookup above
     /// and the query framework's bulk snapshot.
     nonisolated static func resolution(from album: Album) -> StoredAlbumResolution? {
-        guard let mode = album.matchResolutionMode else { return nil }
+        resolution(mode: album.matchResolutionMode, canonicalArtist: album.canonicalArtist, canonicalAlbum: album.canonicalAlbum, manualTracklist: album.manualTracklist)
+    }
+
+    /// The same bridge for an edition counted on its own.
+    nonisolated static func resolution(from edition: AlbumEditionMatch) -> StoredAlbumResolution? {
+        resolution(mode: edition.matchResolutionMode, canonicalArtist: edition.canonicalArtist, canonicalAlbum: edition.canonicalAlbum, manualTracklist: edition.manualTracklist)
+    }
+
+    nonisolated static func resolution(mode: AlbumMatchMode?, canonicalArtist: String?, canonicalAlbum: String?, manualTracklist: [String]?) -> StoredAlbumResolution? {
+        guard let mode else { return nil }
         switch mode {
         case .canonical:
-            guard let canonicalArtist = album.canonicalArtist, let canonicalAlbum = album.canonicalAlbum else { return nil }
+            guard let canonicalArtist, let canonicalAlbum else { return nil }
             return .canonical(canonicalArtist: canonicalArtist, canonicalAlbum: canonicalAlbum)
         case .observed:
             return .observed
         case .manual:
-            guard let tracks = album.manualTracklist, !tracks.isEmpty else { return nil }
+            guard let tracks = manualTracklist, !tracks.isEmpty else { return nil }
             return .manual(tracks: tracks)
         }
     }
+
+    /// The `editionKey`s of every edition the person counts on its own.
+    nonisolated static func separateEditionKeys(context: ModelContext) -> Set<String> {
+        Set(((try? context.fetch(FetchDescriptor<AlbumEditionMatch>())) ?? []).filter(\.countsSeparately).map(\.editionKey))
+    }
+
+    /// An edition name needs at least this many played tracks that aren't on the album's tracklist before the Merged
+    /// Editions finder suggests counting it on its own. Fewer is a stray track or two, not extra material.
+    nonisolated static let mergedEditionOffListMinimum = 3
 
     /// `"<queried artist><separator><queried album>"`, trimmed + lowercased —
     /// using the same fix as `TextNormalization.albumIdentityKey`: a literal NUL byte
@@ -364,7 +438,10 @@ enum AlbumTurnoverEngine {
         case .canonical(let cArtist, let cAlbum)?:
             return TracklistRequest(artist: cArtist, album: cAlbum, isCanonicalResolution: true)
         case nil:
-            return TracklistRequest(artist: group.artist, album: TextNormalization.stripEditionSuffix(group.displayName), isCanonicalResolution: false)
+            // A merged group looks up the plain release (its names differ only by edition words); an edition counted
+            // on its own is its own Last.fm album, so it asks for its exact title.
+            let album = group.editionKey == nil ? TextNormalization.stripEditionSuffix(group.displayName) : group.displayName
+            return TracklistRequest(artist: group.artist, album: album, isCanonicalResolution: false)
         }
     }
 
@@ -574,6 +651,13 @@ enum AlbumTurnoverEngine {
         "\(artist)\u{0}\(TextNormalization.normalizeAlbumName(displayName))"
     }
 
+    /// The group's identity for caches and lists. An edition counted on its own gets its own, so it never shares a
+    /// row with the group it left.
+    nonisolated static func groupKey(for group: AlbumGroup) -> String {
+        if let editionKey = group.editionKey { return "\(group.artist)\u{0}edition:\(editionKey)" }
+        return groupKey(artist: group.artist, displayName: group.displayName)
+    }
+
     struct AlbumTurnover: Sendable {
         let artist: String
         let album: String
@@ -618,7 +702,7 @@ enum AlbumTurnoverEngine {
             lastTurnoverDate: cycles.lastCycleEndDate, trackCount: match.trackCount, observedDistinct: match.observedDistinct,
             inProgressHeard: cycles.inProgressHeard, inProgressTotal: cycles.inProgressTotal, inProgressMissing: cycles.inProgressMissing,
             tracks: cycles.trackStates, isCompilation: TextNormalization.isCompilationArtist(group.artist),
-            groupKey: groupKey(artist: group.artist, displayName: group.displayName),
+            groupKey: groupKey(for: group),
             imageURL: TextNormalization.firstNonPlaceholderImage(group.scrobbles.map(\.imageURL))
         )
     }
@@ -640,11 +724,18 @@ enum AlbumTurnoverEngine {
         var tracklists: [String: AlbumTracklistResult] = [:]
         /// `Album.identityKey` → saved resolution (only albums that have one).
         var resolutions: [String: StoredAlbumResolution] = [:]
+        /// `AlbumEditionMatch.editionKey` → that edition's saved resolution (only editions that have one).
+        var editionResolutions: [String: StoredAlbumResolution] = [:]
+        /// Every edition counted on its own; pass to `buildAlbumGroups` so groups agree with this snapshot.
+        var separateEditions: Set<String> = []
+        /// Editions the person reviewed and chose to keep merged (`AlbumEditionMatch.countsSeparately == false`).
+        var reviewedEditions: Set<String> = []
 
         nonisolated static let empty = Snapshot()
 
         nonisolated func resolution(for group: AlbumGroup) -> StoredAlbumResolution? {
-            AlbumTurnoverEngine.resolutionKeys(for: group).lazy.compactMap { resolutions[$0] }.first
+            if let editionKey = group.editionKey { return editionResolutions[editionKey] }
+            return AlbumTurnoverEngine.resolutionKeys(for: group).lazy.compactMap { resolutions[$0] }.first
         }
 
         /// The cached catalog lookup a group's resolution needs, or nil when it needs none or
@@ -660,6 +751,26 @@ enum AlbumTurnoverEngine {
                   tracklists[AlbumTurnoverEngine.tracklistCacheKey(artist: request.artist, album: request.album)] == nil
             else { return nil }
             return request
+        }
+
+        /// The album's real tracklist, normalized, for comparing played tracks against it: `.pending` while the tracklist it
+        /// needs isn't cached, `.none` when the album has no real tracklist (turnover uses the tracks played instead), else the titles.
+        enum Titles: Sendable {
+            case pending
+            case none
+            case titles(Set<String>)
+        }
+
+        nonisolated func canonicalTitles(for group: AlbumGroup) -> Titles {
+            let resolution = resolution(for: group)
+            var found: AlbumTracklistResult?
+            if let request = AlbumTurnoverEngine.tracklistRequest(group: group, resolution: resolution) {
+                guard let cached = tracklists[AlbumTurnoverEngine.tracklistCacheKey(artist: request.artist, album: request.album)] else { return .pending }
+                found = cached
+            }
+            let match = AlbumTurnoverEngine.matchResult(group: group, resolution: resolution, lookup: found)
+            guard match.basis == .canonical else { return .none }
+            return .titles(Set(match.denominatorTitles.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty }))
         }
 
         /// The album's match status, or nil while the tracklist it needs isn't cached yet. Unlike
@@ -696,14 +807,19 @@ enum AlbumTurnoverEngine {
         for album in (try? context.fetch(FetchDescriptor<Album>())) ?? [] {
             if let resolution = resolution(from: album) { snapshot.resolutions[album.identityKey] = resolution }
         }
+        for edition in (try? context.fetch(FetchDescriptor<AlbumEditionMatch>())) ?? [] {
+            guard edition.countsSeparately else { snapshot.reviewedEditions.insert(edition.editionKey); continue }
+            snapshot.separateEditions.insert(edition.editionKey)
+            if let resolution = resolution(from: edition) { snapshot.editionResolutions[edition.editionKey] = resolution }
+        }
         return snapshot
     }
 
     /// Every album group in `scrobbles`, keyed by artist — the same per-artist grouping
     /// `buildAllGroups` does, synchronously.
-    nonisolated static func buildGroupsByArtist(scrobbles: [ScrobbleSnapshot]) -> [String: [AlbumGroup]] {
+    nonisolated static func buildGroupsByArtist(scrobbles: [ScrobbleSnapshot], separateEditions: Set<String> = []) -> [String: [AlbumGroup]] {
         let byArtist = Dictionary(grouping: scrobbles.filter { !$0.albumName.isEmpty }, by: \.artistName)
-        return byArtist.mapValues { buildAlbumGroups(from: $0) }
+        return byArtist.mapValues { buildAlbumGroups(from: $0, separateEditions: separateEditions) }
     }
 
     enum TurnoverSort {
@@ -726,11 +842,11 @@ enum AlbumTurnoverEngine {
     /// main actor's own timer continuations were measurably delayed while
     /// this loop ran, the same "app feels frozen" symptom as before, just
     /// via thread-pool contention instead of a direct main-actor block.
-    nonisolated static func buildCandidates(scrobbles allScrobbles: [ScrobbleSnapshot], includeCompilations: Bool) async -> [AlbumGroup] {
+    nonisolated static func buildCandidates(scrobbles allScrobbles: [ScrobbleSnapshot], includeCompilations: Bool, separateEditions: Set<String> = []) async -> [AlbumGroup] {
         let byArtist = Dictionary(grouping: allScrobbles.filter { !$0.albumName.isEmpty }, by: \.artistName)
         var candidates: [AlbumGroup] = []
         for (index, artistScrobbles) in byArtist.values.enumerated() {
-            for group in buildAlbumGroups(from: artistScrobbles) {
+            for group in buildAlbumGroups(from: artistScrobbles, separateEditions: separateEditions) {
                 if !includeCompilations, TextNormalization.isCompilationArtist(group.artist) { continue }
                 // Source also widens this to a cached canonical tracklist's
                 // size when a stored resolution exists, so a manually
@@ -768,8 +884,9 @@ enum AlbumTurnoverEngine {
     ) async throws -> [AlbumTurnover] {
         let container = context.container
         let snapshots = try await offMain { try await AlbumTurnoverDataReader(modelContainer: container).fetchSortedSnapshots() }
+        let separate = await offMain { await AlbumTurnoverDataReader(modelContainer: container).separateEditions() }
         var candidates = await offMain {
-            await buildCandidates(scrobbles: snapshots, includeCompilations: includeCompilations)
+            await buildCandidates(scrobbles: snapshots, includeCompilations: includeCompilations, separateEditions: separate)
         }
         candidates.sort { $0.scrobbles.count > $1.scrobbles.count }
         let evaluated = Array(candidates.prefix(limit))
@@ -875,11 +992,11 @@ enum AlbumTurnoverEngine {
     /// needs every group, not a candidate shortlist. `nonisolated` for the
     /// same reason as `buildCandidates`: the fuzzy-matching pass inside
     /// `buildAlbumGroups` is genuinely expensive run across a whole library.
-    nonisolated static func buildAllGroups(scrobbles allScrobbles: [ScrobbleSnapshot]) async -> [AlbumGroup] {
+    nonisolated static func buildAllGroups(scrobbles allScrobbles: [ScrobbleSnapshot], separateEditions: Set<String> = []) async -> [AlbumGroup] {
         let byArtist = Dictionary(grouping: allScrobbles.filter { !$0.albumName.isEmpty }, by: \.artistName)
         var groups: [AlbumGroup] = []
         for (index, artistScrobbles) in byArtist.values.enumerated() {
-            groups.append(contentsOf: buildAlbumGroups(from: artistScrobbles))
+            groups.append(contentsOf: buildAlbumGroups(from: artistScrobbles, separateEditions: separateEditions))
             // Same thread-pool-starvation reasoning as `buildCandidates`.
             if index % 5 == 4 { await Task.yield() }
         }
@@ -909,7 +1026,8 @@ enum AlbumTurnoverEngine {
 
         let container = context.container
         let snapshots = try await offMain { try await AlbumTurnoverDataReader(modelContainer: container).fetchSortedSnapshots() }
-        let allGroups = await offMain { await buildAllGroups(scrobbles: snapshots) }
+        let separate = await offMain { await AlbumTurnoverDataReader(modelContainer: container).separateEditions() }
+        let allGroups = await offMain { await buildAllGroups(scrobbles: snapshots, separateEditions: separate) }
 
         var completions: [String: Date] = [:]
         for turnover in try await resolveTurnovers(for: allGroups, context: context, client: client) {
@@ -946,5 +1064,9 @@ actor AlbumTurnoverDataReader {
 
     func loadSnapshot() -> AlbumTurnoverEngine.Snapshot {
         AlbumTurnoverEngine.loadSnapshot(context: modelContext)
+    }
+
+    func separateEditions() -> Set<String> {
+        AlbumTurnoverEngine.separateEditionKeys(context: modelContext)
     }
 }

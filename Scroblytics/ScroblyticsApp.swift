@@ -127,6 +127,7 @@ struct ScroblyticsApp: App {
             LibraryPresenceCheck.self,
             LibraryGapDismissal.self,
             LovedAuditDecision.self,
+            AlbumEditionMatch.self,
             TagPlaylistRule.self,
         ])
         #if DEBUG
@@ -172,6 +173,7 @@ struct ScroblyticsApp: App {
         KeychainChecks.runHeadlessIfRequested()
         OverviewChecks.runHeadlessIfRequested()
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
+        EditionChecks.runHeadlessIfRequested(container: modelContainer)
         DetailSnapshots.runHeadlessIfRequested(container: modelContainer)
         DetailDump.runHeadlessIfRequested(container: modelContainer)
         PerfChecks.runHeadlessIfRequested(container: modelContainer)

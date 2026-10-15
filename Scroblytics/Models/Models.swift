@@ -148,6 +148,31 @@ final class Album {
     }
 }
 
+/// An album edition the person chose to count on its own ("Album (25th Anniversary Edition)" next to "Album").
+/// Edition names normally merge into one album for turnover, so one match decision covers them all; a row here
+/// (with `countsSeparately`) pulls one exact name out of that merge and carries that edition's own match decision. The decision fields mirror
+/// `Album`'s; a nil `matchResolutionMode` means "automatic" (Last.fm is asked for the edition's exact title).
+@Model
+final class AlbumEditionMatch {
+    /// `TextNormalization.editionIdentityKey(artist:album:)` — the artist plus the album's exact name.
+    @Attribute(.unique) var editionKey: String
+    var artist: String
+    var title: String
+    var matchResolutionMode: AlbumMatchMode?
+    var canonicalArtist: String?
+    var canonicalAlbum: String?
+    var manualTracklist: [String]?
+    /// False = the person looked at this edition and chose to keep it merged with the others ("reviewed"): it is not
+    /// counted on its own and the Merged Editions finder stops listing it. True = counted on its own.
+    var countsSeparately: Bool = true
+
+    init(editionKey: String, artist: String, title: String) {
+        self.editionKey = editionKey
+        self.artist = artist
+        self.title = title
+    }
+}
+
 /// A custom image attached to one exact Last.fm album title. Album rows group
 /// edition variants for statistics and match metadata, so storing this on
 /// `Album` would incorrectly share artwork between distinct releases.

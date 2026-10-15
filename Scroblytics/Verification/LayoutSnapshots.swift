@@ -25,6 +25,10 @@ enum LayoutSnapshots {
             snapshotAlmostThere(into: folder, container: container)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_EDITION"] {
+            snapshotEditionSheet(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_KEYCHAIN"] {
             snapshotKeychain(into: folder)
             return
@@ -249,6 +253,39 @@ enum LayoutSnapshots {
                                     try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(kind)-\(name)-\(Int(width))-\(dark ? "dark" : "light").png"))
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_EDITION=<folder>`: the Fix album match sheet with its "Count this edition on its own" choice, for an
+    /// album with two edition names and for an edition already counted on its own, in light and dark.
+    @MainActor
+    private static func snapshotEditionSheet(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let base = Date(timeIntervalSince1970: 1_700_000_000)
+            let standard = "Album Name", deluxe = "Album Name (25th Anniversary Edition)"
+            let plays = (0..<6).map { i in ScrobbleSnapshot(artistName: "Artist A", albumName: i < 3 ? standard : deluxe, trackName: "Track \(i)", imageURL: nil, playedAt: base.addingTimeInterval(Double(i) * 60)) }
+            let merged = AlbumTurnoverEngine.buildAlbumGroups(from: plays)[0]
+            let separate = AlbumTurnoverEngine.buildAlbumGroups(from: plays, separateEditions: [TextNormalization.editionIdentityKey(artist: "Artist A", album: deluxe)]).first { $0.editionKey != nil }!
+            for (name, group, opened) in [("merged", merged, deluxe), ("separate", separate, deluxe), ("plain", AlbumTurnoverEngine.buildAlbumGroups(from: Array(plays.prefix(3)))[0], standard)] {
+                for dark in [true, false] {
+                    let view = AlbumMatchFixView(group: group, openedFrom: opened, modelContext: container.mainContext, client: nil, onResolved: {})
+                        .environment(\.colorScheme, dark ? .dark : .light)
+                    let host = NSHostingView(rootView: view)
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: 560, height: 640))
+                    for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        if let png = rep.representation(using: .png, properties: [:]) {
+                            try? png.write(to: URL(fileURLWithPath: folder).appending(path: "sheet-\(name)-\(dark ? "dark" : "light").png"))
                         }
                     }
                 }

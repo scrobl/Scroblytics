@@ -174,9 +174,8 @@ final class AlbumDetailModel {
             let container = context.container
             let scrobbles = try await offMain { try await AlbumScrobbleReader(modelContainer: container).fetchArtistScrobbles(artist: artist) }
             guard !Task.isCancelled, identity.id == requested.id else { return }
-            let groups = AlbumTurnoverEngine.buildAlbumGroups(from: scrobbles)
-            let targetNorm = TextNormalization.normalizeAlbumName(requested.name)
-            guard let group = groups.first(where: { $0.normalizedName == targetNorm || $0.variants.contains(requested.name) }) else {
+            let groups = AlbumTurnoverEngine.buildAlbumGroups(from: scrobbles, separateEditions: AlbumTurnoverEngine.separateEditionKeys(context: context))
+            guard let group = AlbumTurnoverEngine.findAlbumGroup(groups, album: requested.name) else {
                 turnoverState = .unavailable
                 return
             }
@@ -203,10 +202,17 @@ final class AlbumDetailModel {
             id: "released", label: "Released", value: release, corrected: releaseDate != nil && releaseDateOverride() != nil,
             systemImage: "calendar", onEdit: onEditReleaseDate
         )
-        return [released] + Self.turnoverFacts(turnoverState, onFixAlbumMatch: onFixAlbumMatch)
+        return [released] + Self.turnoverFacts(turnoverState, sharedWithEditions: countsWithOtherEditions, onFixAlbumMatch: onFixAlbumMatch)
     }
 
-    static func turnoverFacts(_ state: AlbumTurnoverState, onFixAlbumMatch: @escaping () -> Void) -> [DetailFact] {
+    /// True when this album's turnover is counted together with other edition names of it (so its numbers cover them all).
+    /// "Fix album match…" can then count this edition on its own.
+    var countsWithOtherEditions: Bool {
+        guard let group = currentGroup, group.editionKey == nil else { return false }
+        return Set(group.variants.map { TextNormalization.editionIdentityKey(artist: group.artist, album: $0) }).count > 1
+    }
+
+    static func turnoverFacts(_ state: AlbumTurnoverState, sharedWithEditions: Bool = false, onFixAlbumMatch: @escaping () -> Void) -> [DetailFact] {
         switch state {
         case .unavailable:
             return []
@@ -229,10 +235,10 @@ final class AlbumDetailModel {
             let matchNote: String? = turnover.ambiguous ? "Uncertain match" : (turnover.noCanonicalMatch ? "No match found" : nil)
             var rate = DetailFact(
                 id: "turnover", label: "Turnover", value: .text(AlbumTurnoverEngine.formatTurnoverRate(turnover.rateDays)),
-                detail: matchNote, mayHaveDetail: true, systemImage: "repeat"
+                detail: matchNote ?? (sharedWithEditions ? "Counted with all editions" : nil), mayHaveDetail: true, systemImage: "repeat"
             )
             rate.onEdit = onFixAlbumMatch
-            rate.editHelp = "Fix album match…"
+            rate.editHelp = sharedWithEditions ? "Fix album match… or count this edition on its own" : "Fix album match…"
             if matchNote != nil {
                 rate.attention = true
                 rate.editImage = "exclamationmark.triangle.fill"

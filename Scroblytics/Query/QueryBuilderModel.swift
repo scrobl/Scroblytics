@@ -420,7 +420,7 @@ final class QueryBuilderModel {
         let requests: [AlbumTurnoverEngine.TracklistRequest] = await Task.detached(priority: .userInitiated) {
             let inScope = scopedSpec.countedPlays(scope)
             var seen = Set<String>()
-            return cache.groups(for: inScope).values.flatMap { $0 }.compactMap { snapshot.missingRequest(for: $0) }
+            return cache.groups(for: inScope, separating: snapshot.separateEditions).values.flatMap { $0 }.compactMap { snapshot.missingRequest(for: $0) }
                 .filter { seen.insert(AlbumTurnoverEngine.tracklistCacheKey(artist: $0.artist, album: $0.album)).inserted }
         }.value
         for (index, request) in requests.enumerated() {

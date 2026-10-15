@@ -14,7 +14,7 @@ enum AlbumTurnoverDebugDump {
             do {
             let context = container.mainContext
             let scrobbles = try context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
-            let groups = await AlbumTurnoverEngine.buildAllGroups(scrobbles: scrobbles)
+            let groups = await AlbumTurnoverEngine.buildAllGroups(scrobbles: scrobbles, separateEditions: AlbumTurnoverEngine.separateEditionKeys(context: context))
             let cachedKeys = Set(try context.fetch(FetchDescriptor<AlbumTracklistCacheEntry>()).map(\.cacheKey))
             let client = LastfmAPIClient(apiKey: "unused", username: "unused")
             var lines: [String] = []
@@ -23,13 +23,9 @@ enum AlbumTurnoverDebugDump {
                 let resolution = AlbumTurnoverEngine.storedResolution(context: context, group: group)
                 // Which lookup would resolveTurnover make? Mirror its branching only far enough to
                 // know whether a cache row exists; anything that would hit the network is skipped.
-                var needsLookup = true
-                var lookupKey = AlbumTurnoverEngine.tracklistCacheKey(artist: group.artist, album: TextNormalization.stripEditionSuffix(group.displayName))
-                switch resolution {
-                case .observed?, .manual?: needsLookup = false
-                case .canonical(let a, let b)?: lookupKey = AlbumTurnoverEngine.tracklistCacheKey(artist: a, album: b)
-                case nil: break
-                }
+                let request = AlbumTurnoverEngine.tracklistRequest(group: group, resolution: resolution)
+                let needsLookup = request != nil
+                let lookupKey = request.map { AlbumTurnoverEngine.tracklistCacheKey(artist: $0.artist, album: $0.album) } ?? ""
                 if needsLookup, !cachedKeys.contains(lookupKey) { skipped += 1; continue }
                 let t = try await AlbumTurnoverEngine.resolveAlbumTurnover(context: context, group: group, resolution: resolution, client: client)
                 let fields: [String] = [

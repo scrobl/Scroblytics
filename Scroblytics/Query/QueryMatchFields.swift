@@ -8,8 +8,8 @@ import Foundation
 extension QueryFieldRegistry {
     private static func matchStatuses(_ run: QueryRun) -> [QueryEntityID: AlbumMatchStatus?] {
         run.memoized("albumMatchStatus") {
-            let byArtist = run.snapshots.turnoverGroups.groups(for: run.scrobbles)
             let snapshot = run.snapshots.turnover
+            let byArtist = run.snapshots.turnoverGroups.groups(for: run.scrobbles, separating: snapshot.separateEditions)
             return Dictionary(uniqueKeysWithValues: run.universe.entities.compactMap { entity -> (QueryEntityID, AlbumMatchStatus?)? in
                 guard let group = byArtist[entity.artist].flatMap({ AlbumTurnoverEngine.findAlbumGroup($0, album: entity.name) }) else { return nil }
                 return (entity.id, snapshot.matchStatus(for: group))

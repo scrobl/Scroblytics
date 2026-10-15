@@ -11,8 +11,8 @@ import Foundation
 extension QueryFieldRegistry {
     private static func turnoverLookups(_ run: QueryRun, scope: QueryScope?) -> [QueryEntityID: AlbumTurnoverEngine.Snapshot.Lookup?] {
         run.memoized("turnover.lookups.\(scope?.cacheKey ?? "-")") {
-            let byArtist = run.snapshots.turnoverGroups.groups(for: run.engineView(scope).scrobbles)
             let snapshot = run.snapshots.turnover
+            let byArtist = run.snapshots.turnoverGroups.groups(for: run.engineView(scope).scrobbles, separating: snapshot.separateEditions)
             return Dictionary(uniqueKeysWithValues: run.universe.entities.map { entity in
                 let group = byArtist[entity.artist].flatMap { AlbumTurnoverEngine.findAlbumGroup($0, album: entity.name) }
                 return (entity.id, group.map { snapshot.lookup(for: $0) })

@@ -99,7 +99,7 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $showingFixSheet) {
             if let group = model.currentGroup {
                 AlbumMatchFixView(
-                    group: group, modelContext: modelContext, client: model.makeClient(),
+                    group: group, openedFrom: identity.name, modelContext: modelContext, client: model.makeClient(),
                     onResolved: { Task { await model.loadTurnover() } }
                 )
             }

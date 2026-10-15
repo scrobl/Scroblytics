@@ -87,6 +87,7 @@ struct MissingDataView: View {
     private struct AlbumMatchFixContext: Identifiable {
         let id = UUID()
         let group: AlbumGroup
+        let album: String
         let client: LastfmAPIClient?
     }
     @State private var releaseDateEditContext: ReleaseDateEditContext?
@@ -191,7 +192,7 @@ struct MissingDataView: View {
         }
         .sheet(item: $albumMatchFixContext) { context in
             AlbumMatchFixView(
-                group: context.group, modelContext: modelContext, client: context.client,
+                group: context.group, openedFrom: context.album, modelContext: modelContext, client: context.client,
                 onResolved: { Task { await recompute() } }
             )
         }
@@ -436,10 +437,10 @@ struct MissingDataView: View {
     /// `MissingDataField`'s `albumMatch` entry), so by construction this should always find one — but
     /// stay silent rather than crash if scrobbles changed underneath it since the list was built.
     private func openAlbumMatchFix(for row: MissingDataRow) {
-        let byArtist = turnoverGroupCache.groups(for: scrobbles ?? [])
+        let byArtist = turnoverGroupCache.groups(for: scrobbles ?? [], separating: AlbumTurnoverEngine.separateEditionKeys(context: modelContext))
         guard let groups = byArtist[row.artist], let group = AlbumTurnoverEngine.findAlbumGroup(groups, album: row.name) else { return }
         let client = LastfmCredentialsStore.load().map { LastfmAPIClient(apiKey: $0.apiKey, username: $0.username) }
-        albumMatchFixContext = AlbumMatchFixContext(group: group, client: client)
+        albumMatchFixContext = AlbumMatchFixContext(group: group, album: row.name, client: client)
     }
 
     /// Duplicates `EntityContextMenu.chooseCustomImage()`'s own inline panel + write — no separate

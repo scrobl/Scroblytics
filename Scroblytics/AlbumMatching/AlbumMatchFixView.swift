@@ -39,6 +39,9 @@ private enum PastedTracklistParser {
 /// check its tracklist without risking applying the wrong one by accident.
 struct AlbumMatchFixView: View {
     let group: AlbumGroup
+    /// The exact album name the sheet was opened from (a page's or a row's own name), for "Count this edition on its
+    /// own". Defaults to the group's display name.
+    var openedFrom: String? = nil
     let modelContext: ModelContext
     let client: LastfmAPIClient?
     let onResolved: () -> Void
@@ -83,6 +86,9 @@ struct AlbumMatchFixView: View {
 
     @State private var selection: Selection?
     @State private var hasExistingResolution = false
+    /// Staged like everything else here: only Save applies it.
+    @State private var countOnItsOwn = false
+    @State private var editionStateLoaded = false
 
     @State private var lastfmAlternates: LoadState<[LastfmCandidate]> = .idle
     @State private var expandedLastfmID: UUID?
@@ -106,17 +112,70 @@ struct AlbumMatchFixView: View {
     /// automatic-classifier path might otherwise imply.
     private static let searchLimit = 12
 
-    private var observedTitles: [String] { AlbumTurnoverEngine.distinctObserved(group).titles }
+    private var observedTitles: [String] { AlbumTurnoverEngine.distinctObserved(effectiveGroup).titles }
+
+    // MARK: - Counting an edition on its own
+
+    private var openedName: String { openedFrom ?? group.displayName }
+    private var isSeparateNow: Bool { group.editionKey != nil }
+
+    /// Offered when the album has more than one edition name (so there is something to set apart), or when this
+    /// edition is already counted on its own (so it can be merged back).
+    private var canChooseEdition: Bool {
+        if isSeparateNow { return true }
+        return Set(group.variants.map { TextNormalization.editionIdentityKey(artist: group.artist, album: $0) }).count > 1
+    }
+
+    /// The group this sheet decides for: the whole album, or — with the choice staged — just the opened edition.
+    private var effectiveGroup: AlbumGroup {
+        guard !isSeparateNow, countOnItsOwn else { return group }
+        let key = TextNormalization.editionIdentityKey(artist: group.artist, album: openedName)
+        let variants = group.variants.filter { TextNormalization.editionIdentityKey(artist: group.artist, album: $0) == key }
+        guard !variants.isEmpty else { return group }
+        let name = variants.contains(openedName) ? openedName : variants[0]
+        return AlbumGroup(
+            artist: group.artist, displayName: name, normalizedName: TextNormalization.normalizeAlbumName(name), variants: variants,
+            scrobbles: group.scrobbles.filter { variants.contains($0.albumName) }, editionKey: key
+        )
+    }
+
+    /// With an edition set apart and then un-ticked, the rest of the album's plays aren't known to this sheet, so the
+    /// match choices wait until it has been merged back.
+    private var showsMatchChoices: Bool { !(isSeparateNow && !countOnItsOwn) }
+    private var editionChoiceChanged: Bool { canChooseEdition && countOnItsOwn != isSeparateNow }
+
+    private var editionNote: String {
+        if isSeparateNow && !countOnItsOwn {
+            return "Save to merge this edition back into its album. Its own match choice is dropped; choose the album's match again afterwards if you need to."
+        }
+        if countOnItsOwn {
+            return isSeparateNow
+                ? "“\(group.displayName)” is counted as its own album, with its own plays, Last.fm tracklist and turnover."
+                : "“\(openedName)” will be counted as its own album, with its own plays, Last.fm tracklist and turnover. Last.fm’s album of that title is selected below when it has one; press Save to apply."
+        }
+        return "Use this when an edition has extra discs or different tracks, like an anniversary edition. Its plays and turnover are then counted separately from the other editions of this album."
+    }
+
+    @ViewBuilder
+    private var editionSection: some View {
+        Section("Edition") {
+            Toggle("Count this edition on its own", isOn: $countOnItsOwn)
+            Text(editionNote).font(AppTypography.supporting).foregroundStyle(.secondary)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    Text("\(group.artist) — \(group.displayName)").font(AppTypography.sectionTitle)
+                    Text("\(effectiveGroup.artist) — \(effectiveGroup.displayName)").font(AppTypography.sectionTitle)
                     Text("Pick the edition whose tracklist best matches what you've played — a green check marks tracks you've scrobbled. Tap a row to select it, tap the chevron to preview its tracklist first — nothing is applied until you press Save.")
                         .font(AppTypography.supporting).foregroundStyle(.secondary)
                 }
 
+                if canChooseEdition { editionSection }
+
+                if showsMatchChoices {
                 Section("Last.fm alternates") {
                     lastfmSection
                 }
@@ -171,6 +230,7 @@ struct AlbumMatchFixView: View {
                         ) { selection = .resetToAutomatic }
                     }
                 }
+                }
 
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }
@@ -185,14 +245,28 @@ struct AlbumMatchFixView: View {
                 Button(isSaving ? "Saving…" : "Save") { save() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(selection == nil || isSaving)
+                    .disabled((selection == nil && !editionChoiceChanged) || isSaving)
             }
             .padding()
         }
         .frame(minWidth: 560, minHeight: 520, maxHeight: 680)
-        .task {
-            hasExistingResolution = AlbumTurnoverEngine.storedResolution(context: modelContext, group: group) != nil
+        .onAppear {
+            if !editionStateLoaded { countOnItsOwn = isSeparateNow; editionStateLoaded = true }
+        }
+        .task(id: countOnItsOwn) {
+            // The choices belong to whichever album is being decided (the whole album, or the edition on its own),
+            // so a staged change of it starts them again.
+            selection = nil
+            expandedLastfmID = nil
+            lastfmAlternates = .idle
+            hasExistingResolution = AlbumTurnoverEngine.storedResolution(context: modelContext, group: effectiveGroup) != nil
+            guard showsMatchChoices else { return }
             await loadLastfmAlternates()
+            // Setting an edition apart exists to use Last.fm's own album of that title, so it starts selected.
+            if countOnItsOwn, !isSeparateNow, selection == nil, case .loaded(let candidates) = lastfmAlternates,
+               let auto = candidates.first(where: { $0.isAutoMatch && $0.trackCount != nil }) {
+                selection = .canonical(candidateID: auto.id)
+            }
         }
         .sheet(isPresented: $showingPasteDialog) {
             PastedTracklistDialog(initialText: manualText) { acceptedText, acceptedTracks in
@@ -364,7 +438,9 @@ struct AlbumMatchFixView: View {
         }
         lastfmAlternates = .loading
 
-        let strippedAlbum = TextNormalization.stripEditionSuffix(group.displayName)
+        let deciding = effectiveGroup
+        // An edition on its own is its own Last.fm album, so it searches by its exact title.
+        let strippedAlbum = deciding.editionKey == nil ? TextNormalization.stripEditionSuffix(deciding.displayName) : deciding.displayName
         var seenKeys = Set<String>()
         var identities: [(artist: String, album: String, isAutoMatch: Bool)] = []
 
@@ -375,13 +451,13 @@ struct AlbumMatchFixView: View {
             identities.append((artist, album, isAutoMatch))
         }
 
-        addIdentity(group.artist, strippedAlbum, isAutoMatch: true)
+        addIdentity(deciding.artist, strippedAlbum, isAutoMatch: true)
         let searchResults = await client.searchAlbums(album: strippedAlbum, limit: Self.searchLimit)
         for r in searchResults {
             addIdentity(r.artist, r.album, isAutoMatch: false)
         }
 
-        let observed = AlbumTurnoverEngine.distinctObserved(group)
+        let observed = AlbumTurnoverEngine.distinctObserved(deciding)
         let observedNorm = Set(observed.titles.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty })
 
         var candidates: [LastfmCandidate] = []
@@ -472,7 +548,9 @@ struct AlbumMatchFixView: View {
     private func searchAppleMusic() async {
         appleMusicEditions = .loading
         do {
-            let editions = try await AppleMusicMatcher.findAlbumEditions(artist: group.artist, album: TextNormalization.stripEditionSuffix(group.displayName), observedTitles: observedTitles)
+            let deciding = effectiveGroup
+            let album = deciding.editionKey == nil ? TextNormalization.stripEditionSuffix(deciding.displayName) : deciding.displayName
+            let editions = try await AppleMusicMatcher.findAlbumEditions(artist: deciding.artist, album: album, observedTitles: observedTitles)
             appleMusicEditions = .loaded(editions)
         } catch {
             appleMusicEditions = .failed(error.localizedDescription)
@@ -482,12 +560,29 @@ struct AlbumMatchFixView: View {
     // MARK: - Save (the sole commit point)
 
     private func save() {
-        guard let selection else { return }
+        guard selection != nil || editionChoiceChanged else { return }
         isSaving = true
         errorMessage = nil
         Task {
             defer { isSaving = false }
             do {
+                // Counting the edition on its own (or merging it back) comes first: a match chosen in the same sheet
+                // belongs to whichever album that leaves.
+                var target = group
+                if editionChoiceChanged {
+                    if countOnItsOwn {
+                        let separated = effectiveGroup
+                        try AlbumMatchFixEngine.separateEdition(context: modelContext, artist: separated.artist, album: separated.displayName)
+                        target = separated
+                    } else if let key = group.editionKey {
+                        try AlbumMatchFixEngine.rejoinEdition(context: modelContext, key: key)
+                    }
+                }
+                guard let selection else {
+                    onResolved()
+                    dismiss()
+                    return
+                }
                 switch selection {
                 case .canonical(let candidateID):
                     // Reuses the tracklist already fetched while building the
@@ -500,19 +595,19 @@ struct AlbumMatchFixView: View {
                         errorMessage = "That candidate is no longer available — try again."
                         return
                     }
-                    try AlbumMatchFixEngine.applyCanonical(context: modelContext, group: group, canonicalArtist: candidate.canonicalArtist, canonicalAlbum: candidate.canonicalAlbum)
+                    try AlbumMatchFixEngine.applyCanonical(context: modelContext, group: target, canonicalArtist: candidate.canonicalArtist, canonicalAlbum: candidate.canonicalAlbum)
                 case .appleMusicEdition(let index):
                     guard case .loaded(let editions) = appleMusicEditions, editions.indices.contains(index) else {
                         errorMessage = "That Apple Music result is no longer available — try searching again."
                         return
                     }
-                    try AlbumMatchFixEngine.applyManual(context: modelContext, group: group, tracks: editions[index].tracks.map(\.title))
+                    try AlbumMatchFixEngine.applyManual(context: modelContext, group: target, tracks: editions[index].tracks.map(\.title))
                 case .manualPaste:
-                    try AlbumMatchFixEngine.applyManual(context: modelContext, group: group, tracks: manualTracks)
+                    try AlbumMatchFixEngine.applyManual(context: modelContext, group: target, tracks: manualTracks)
                 case .observed:
-                    try AlbumMatchFixEngine.applyObserved(context: modelContext, group: group)
+                    try AlbumMatchFixEngine.applyObserved(context: modelContext, group: target)
                 case .resetToAutomatic:
-                    try AlbumMatchFixEngine.resetToAutomatic(context: modelContext, group: group)
+                    try AlbumMatchFixEngine.resetToAutomatic(context: modelContext, group: target)
                 }
                 onResolved()
                 dismiss()

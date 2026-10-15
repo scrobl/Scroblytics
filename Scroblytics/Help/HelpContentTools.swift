@@ -81,7 +81,7 @@ extension HelpContent {
             title: "Album Turnovers",
             summary: "Albums you listen all the way through, and how often.",
             blocks: [
-                .paragraph("Ranks albums by completed listen-through cycles ([definition](help://metrics-turnover)). Sort by Fastest, Slowest, Most, Fewest, Most recent or Least recent turnovers. **Albums to evaluate** sets how many of your most-played albums are checked (50 to 250, or all); each needs a Last.fm tracklist lookup, so a big scan takes a while. Toggles include compilations (off by default), albums that haven’t turned over yet, and “only albums close to turnover” (one or two tracks away). An album whose match is uncertain shows a **Fix album match…** badge."),
+                .paragraph("Ranks albums by completed listen-through cycles ([definition](help://metrics-turnover)). Sort by Fastest, Slowest, Most, Fewest, Most recent or Least recent turnovers. **Albums to evaluate** sets how many of your most-played albums are checked (50 to 250, or all); each needs a Last.fm tracklist lookup, so a big scan takes a while. Toggles include compilations (off by default), albums that haven’t turned over yet, and “only albums close to turnover” (one or two tracks away). An album whose match is uncertain shows a **Fix album match…** badge. An edition you counted on its own is listed as a separate album."),
             ]
         ),
         HelpArticle(

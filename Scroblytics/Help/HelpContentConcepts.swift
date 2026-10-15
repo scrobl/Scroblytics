@@ -21,7 +21,7 @@ extension HelpContent {
                     ["**Query, Trends, Timeline, Milestones, Overview totals, most Tools**", "By exact artist and album name as scrobbled. “Album” and “Album (Deluxe)” are separate, and a compilation is one row per credited artist."],
                     ["**Global Search**", "By artist and album name with capitalization ignored."],
                     ["**Collage and Chart Toppers**", "By artist and a normalized album name, which combines editions of one album by one artist (Deluxe, Remastered, Anniversary, Mono/Stereo, region tags and years are ignored)."],
-                    ["**Album Turnover and Fix album match**", "Edition variants of one album are grouped by similar name, and a decision you save applies to all variants."],
+                    ["**Album Turnover and Fix album match**", "Edition variants of one album are grouped by similar name, and a decision you save applies to all variants, unless you choose **Count this edition on its own** in Fix album match… (an edition with extra discs or different tracks, such as an anniversary edition): it then has its own plays, tracklist and turnover."],
                 ]),
                 .callout(.note, "Because of these differences an album’s play count can differ between screens, most often for compilations, collaborations and editions. Scrobbles with no album are skipped wherever albums are counted. Artist totals don’t have this problem: every screen combines an artist’s spellings (below)."),
                 .heading("Tracks"),

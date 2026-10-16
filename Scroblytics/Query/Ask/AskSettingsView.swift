@@ -33,6 +33,9 @@ struct AskSettingsView: View {
                     if let measured = engine.measuredNote {
                         Text(measured).font(AppTypography.supportingDense).foregroundStyle(.secondary)
                     }
+                    if let speed = engine.localSpeedNote {
+                        Text(speed).font(AppTypography.supportingDense).foregroundStyle(.secondary)
+                    }
                     if engine.usesKey { keyRows }
                     if engine.usesBaseURL {
                         TextField("Server address", text: baseURLBinding, prompt: Text(engine.defaultBaseURL))

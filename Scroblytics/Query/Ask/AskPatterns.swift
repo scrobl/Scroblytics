@@ -466,6 +466,40 @@ enum AskPatterns {
         return (perArtist, perAlbum, perYear)
     }
 
+    /// "my most played song", "the top album": a singular superlative asks for the one.
+    static func asksForOne(_ request: String) -> Bool {
+        let text = request.lowercased()
+        // "the top song from each album" is one per album, not one in all.
+        guard !mentionsDiversity(request) else { return false }
+        return matches(text, #"\b(?:my|the)\s+(?:(?:most|least)[- ](?:played|listened(?: to)?|scrobbled)|top|favou?rite|best)\s+(?:song|track|album|artist|tune)\b(?!s)"#)
+    }
+
+    /// The number in "find 25 songs similar to X" / "40 tracks like X": a count, up to two words, then similar/like. Nil when there is none.
+    static func similarCount(in request: String) -> Int? {
+        let text = request.lowercased()
+        guard let n = firstNumber(text, #"\b(\d+|\#(numberWords))\b(?:\s+\w+){0,2}?\s+(?:similar|like)\b"#), n >= 1, n <= 500 else { return nil }
+        return n
+    }
+
+    /// True when the request has any wording about diversity (each, every, per, different, at most…). A cap the model sets with
+    /// none of it is a guess.
+    static func mentionsDiversity(_ request: String) -> Bool {
+        let text = request.lowercased().replacingOccurrences(of: "’", with: "'")
+        return matches(text, #"\b(?:per|each|every|distinct|different|unique|apiece)\b|\bat most\b|\bno more than\b|\bone (?:from|of each)\b|\bonly one\b|\bone track from\b"#)
+    }
+
+    /// An artist the request names after "by" ("songs by X"), matched against the library's real artist names; nil when it
+    /// names none (or something that is a sort, "sorted by plays").
+    static func namedArtist(in request: String, knownArtists: Set<String>) -> String? {
+        let text = request.lowercased().replacingOccurrences(of: "’", with: "'")
+        var index: [String: String] = [:]
+        for name in knownArtists { index[name.lowercased().replacingOccurrences(of: "’", with: "'")] = name }
+        for clause in byClauses(text) where sortFieldsIn(clause) == nil {
+            if let name = artistIn(clause, index: index) { return name }
+        }
+        return nil
+    }
+
     /// True when a note the model wrote under "unsupported" only restates a cap the app does support ("top song from
     /// each album — grouping by album isn't a field"): it names the thing being capped and a grouping word.
     static func restatesCap(_ note: String, caps: Caps) -> Bool {

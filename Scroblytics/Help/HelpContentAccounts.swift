@@ -68,6 +68,7 @@ extension HelpContent {
             summary: "Which engines exist, what each sends, and where keys are kept.",
             blocks: [
                 .paragraph("[Ask](help://ask) turns a sentence into filters using a language model. You choose the engine in **Settings › Ask**. In [Offline mode](help://offline-mode) the cloud engines (Claude, OpenAI, Gemini) are unavailable; Apple on-device, Ollama and a server on this Mac keep working."),
+                .paragraph("A model that runs on your own Mac can be slow on the first question: Ask’s instructions are long, and the model reads them before answering (about a minute for a 14-billion-parameter model the first time, then a few seconds while Ollama keeps it loaded and remembers them). Ollama is sent a leaner answer shape than the cloud services, so a smaller model has less to fill in."),
                 .table(headers: ["Engine", "Where it runs", "Key"], rows: [
                     ["**Apple on-device** (default)", "On this Mac, with Apple’s own model. Needs macOS 26 or later.", "None"],
                     ["**Claude (Anthropic)**", "Anthropic’s servers", "Your Anthropic API key"],

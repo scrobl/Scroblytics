@@ -271,13 +271,13 @@ struct AskEngineIndicator: View {
     @AppStorage(AskSettingsStore.key) private var stored: Data?
 
     /// What to say for a given choice; separate from the view so the wording can be checked.
-    static func describe(_ settings: AskSettings) -> (title: String, warning: String?) {
+    static func describe(_ settings: AskSettings) -> (title: String, warning: String?, note: String?) {
         let engine = settings.selected
         guard engine != .onDevice else {
-            return ("Apple on-device", "Limited: the on-device model understands fewer kinds of request and often misreads them. Check the filters before running, or choose a larger model.")
+            return ("Apple on-device", "Limited: the on-device model understands fewer kinds of request and often misreads them. Check the filters before running, or choose a larger model.", nil)
         }
         let model = settings.config(for: engine).model
-        return (model.isEmpty ? engine.label : "\(engine.label) · \(model)", nil)
+        return (model.isEmpty ? engine.label : "\(engine.label) · \(model)", nil, engine.localSpeedNote)
     }
 
     var body: some View {
@@ -319,6 +319,10 @@ struct AskEngineIndicatorLine: View {
             if let warning = description.warning {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let note = description.note {
+                Label(note, systemImage: "clock")
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

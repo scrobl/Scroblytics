@@ -33,21 +33,52 @@ struct AskModelEngine: AskEngine {
         // A diversity cap the request states in so many words is applied even when the model left it null (and wrote
         // the request into "unsupported" instead); a note that only restates a cap the app supports is removed.
         let stated = request.map { AskPatterns.groupLimit(in: $0) } ?? AskPatterns.Caps()
+        // The other way round: a smaller model sets caps nobody asked for ("my most played song" → 1 per artist, per album, per
+        // year). Caps the model chose count only when the request has diversity wording at all.
+        if let request, !AskPatterns.mentionsDiversity(request) {
+            query.perArtist = nil; query.perAlbum = nil; query.perReleaseYear = nil
+        }
         query.perArtist = query.perArtist ?? stated.perArtist
         query.perAlbum = query.perAlbum ?? stated.perAlbum
         query.perReleaseYear = query.perReleaseYear ?? stated.perReleaseYear
         let caps = AskPatterns.Caps(perArtist: query.perArtist, perAlbum: query.perAlbum, perReleaseYear: query.perReleaseYear)
         if !caps.isEmpty { query.unsupported = query.unsupported?.filter { !AskPatterns.restatesCap($0, caps: caps) } }
+        // A result count the request states outright ("top 50 tracks", "10 most recently played") is applied when the model left
+        // the limit out; a model given leave to omit keys omits it too often. Only that closed wording counts, never a guess.
+        if let request, query.limit == nil, wire.similar == nil {
+            if let stated = AskPatterns.read(request, knownTags: nil).count, stated >= 1 { query.limit = stated }
+            else if AskPatterns.asksForOne(request) { query.limit = 1 }
+        }
         // A number of results with no stated order means "the top": most played first.
         let ordered = query.limit != nil && (query.sorts ?? []).isEmpty
-        let interpretation = AskInterpreter.interpret(
+        var interpretation = AskInterpreter.interpret(
             query, target: target, registry: registry, now: now, count: nil, ordered: ordered, knownTags: context.knownTags
         )
+        // "find 25 songs similar to X": the number is the person's, whatever default an omitted key became.
+        var similar = wire.similar
+        if let request, let intent = similar, let stated = AskPatterns.similarCount(in: request) {
+            similar = AskSimilarIntent(seedText: intent.seedText, kind: intent.kind, artistHint: intent.artistHint, limit: stated)
+        }
+        var resolvedTerms = wire.resolvedTerms.filter { !$0.phrase.isEmpty && !$0.meaning.isEmpty }
+        // "songs by <an artist in the library>" with no artist condition in the answer: the model wrote the name somewhere else
+        // (or nowhere). The name is the person's own, matched against the library's real artists, and the filter is stated.
+        if let request, target != .artist, let known = context.knownArtists,
+           !interpretation.spec.groups.contains(where: { $0.contains { $0.field.id == "artist" } }),
+           let artist = AskPatterns.namedArtist(in: request, knownArtists: known) {
+            let condition = QueryCondition("artist", .textIs, [.text(artist)])
+            if interpretation.spec.groups.isEmpty {
+                interpretation.spec.groups = [[condition]]
+            } else {
+                interpretation.spec.groups = interpretation.spec.groups.map { [condition] + $0 }
+            }
+            interpretation.spec.columns = AskInterpreter.columns(for: interpretation.spec, target: target, registry: registry)
+            resolvedTerms.append(AskResolvedTerm(phrase: "by \(artist)", meaning: "the artist is \(artist)"))
+        }
         return AskTranslation(
             target: target, interpretation: interpretation, raw: String(data: reply.json, encoding: .utf8) ?? "", intro: "",
-            engine: engine, resolvedTerms: wire.resolvedTerms.filter { !$0.phrase.isEmpty && !$0.meaning.isEmpty },
+            engine: engine, resolvedTerms: resolvedTerms,
             usage: AskUsage(inputTokens: reply.inputTokens, outputTokens: reply.outputTokens, cachedTokens: reply.cachedTokens, seconds: seconds),
-            similar: wire.similar
+            similar: similar
         )
     }
 }
@@ -116,6 +147,13 @@ struct AskModelWire: Decodable {
         }
     }
 
+    /// "Compared with N earlier" where N is 0 or less is a filled-in blank (the schema makes a model write something there),
+    /// not a comparison: it means none.
+    private static func shift(_ shift: AskWire.Shift?) -> AskWire.Shift? {
+        guard let shift, shift.count >= 1, QueryScope.Unit(rawValue: shift.unit) != nil else { return nil }
+        return shift
+    }
+
     private enum Keys: String, CodingKey { case target, groups, sorts, limit, perArtist, perAlbum, perReleaseYear, unsupported, resolvedTerms, similarSeed, similarKind, similarArtist, similarLimit }
 
     init(from decoder: Decoder) throws {
@@ -150,9 +188,9 @@ struct AskModelWire: Decodable {
             groups: groups.map { group in group.map { cond in
                 AskWire.Condition(
                     field: cond.field, op: cond.op, value: cond.value?.number, valueTo: cond.valueTo?.number, text: cond.text, date: cond.date,
-                    dateTo: cond.dateTo, tags: (cond.tags?.isEmpty == false) ? cond.tags : nil, parameters: parameters(cond.parameters), scope: cond.scope?.wire, comparedAgo: cond.comparedAgo)
+                    dateTo: cond.dateTo, tags: (cond.tags?.isEmpty == false) ? cond.tags : nil, parameters: parameters(cond.parameters), scope: cond.scope?.wire, comparedAgo: Self.shift(cond.comparedAgo))
             } },
-            sorts: sorts.map { AskWire.Sort(field: $0.field, direction: $0.direction, parameters: parameters($0.parameters), scope: $0.scope?.wire, comparedAgo: $0.comparedAgo) },
+            sorts: sorts.map { AskWire.Sort(field: $0.field, direction: $0.direction, parameters: parameters($0.parameters), scope: $0.scope?.wire, comparedAgo: Self.shift($0.comparedAgo)) },
             limit: limitValue, unsupported: unsupported,
             perArtist: cap(.perArtist), perAlbum: cap(.perAlbum), perReleaseYear: cap(.perReleaseYear)
         )

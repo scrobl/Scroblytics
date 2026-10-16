@@ -178,6 +178,8 @@ enum QueryCapChecks {
         func read(_ reply: AskLLMReply, request: String?) -> AskTranslation? {
             try? AskModelEngine.read(reply, request: request, registry: .standard, context: .none, now: Date(), engine: "test", seconds: 0)
         }
+        // Any wording about diversity lets the model's own caps through (see `AskPatterns.mentionsDiversity`).
+        let cappedRequest = "tracks, per the usual rules"
         let sentence = "Show me the top song from each Band X album"
         let restated = #"["the top song from each album — grouping by album isn’t something a field can express"]"#
 
@@ -193,19 +195,19 @@ enum QueryCapChecks {
 
         let modelWrote = read(reply(conditions: artistCondition, sorts: playsDescending, caps: #""perArtist":null,"perAlbum":1,"perReleaseYear":null,"#), request: sentence)
         check("a reply that sets perAlbum: 1 gives the same cap", modelWrote?.interpretation.spec.groupLimit == QueryGroupLimit(perAlbum: 1), "\(String(describing: modelWrote?.interpretation.spec.groupLimit))")
-        let asString = read(reply(sorts: playsDescending, caps: #""perArtist":null,"perAlbum":"2","perReleaseYear":null,"#), request: "x")
+        let asString = read(reply(sorts: playsDescending, caps: #""perArtist":null,"perAlbum":"2","perReleaseYear":null,"#), request: cappedRequest)
         check("a cap written as the string \"2\" is read as 2", asString?.interpretation.spec.groupLimit?.perAlbum == 2)
-        let large = read(reply(sorts: playsDescending, caps: #""perArtist":500,"perAlbum":null,"perReleaseYear":null,"#), request: "x")
+        let large = read(reply(sorts: playsDescending, caps: #""perArtist":500,"perAlbum":null,"perReleaseYear":null,"#), request: cappedRequest)
         check("an over-large cap is held to 20", large?.interpretation.spec.groupLimit?.perArtist == 20)
-        let zero = read(reply(sorts: playsDescending, caps: #""perArtist":0,"perAlbum":null,"perReleaseYear":0,"#), request: "x")
+        let zero = read(reply(sorts: playsDescending, caps: #""perArtist":0,"perAlbum":null,"perReleaseYear":0,"#), request: cappedRequest)
         check("a cap of 0 means none", zero?.interpretation.spec.groupLimit == nil && zero?.interpretation.dropped.isEmpty == true)
 
         let year = read(reply(target: "album", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: "my most played album from every release year")
         check("albums with perReleaseYear: 1 keep the cap", year?.interpretation.spec.groupLimit == QueryGroupLimit(perReleaseYear: 1))
-        let artistTarget = read(reply(target: "artist", sorts: playsDescending, caps: #""perArtist":1,"perAlbum":1,"perReleaseYear":1,"#), request: "x")
+        let artistTarget = read(reply(target: "artist", sorts: playsDescending, caps: #""perArtist":1,"perAlbum":1,"perReleaseYear":1,"#), request: cappedRequest)
         check("on an artist query all three caps are dropped, each with a reason",
               artistTarget?.interpretation.spec.groupLimit == nil && artistTarget?.interpretation.dropped.count == 3, "\(String(describing: artistTarget?.interpretation.dropped))")
-        let albumTarget = read(reply(target: "album", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":1,"perReleaseYear":null,"#), request: "x")
+        let albumTarget = read(reply(target: "album", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":1,"perReleaseYear":null,"#), request: cappedRequest)
         check("per album on an album query is dropped with a reason", albumTarget?.interpretation.spec.groupLimit == nil && albumTarget?.interpretation.dropped.count == 1)
 
         let both = read(reply(sorts: playsDescending, limit: "10", caps: #""perArtist":1,"perAlbum":null,"perReleaseYear":null,"#), request: "top 10 songs, 1 per artist")
@@ -241,18 +243,18 @@ enum QueryCapChecks {
         func columnIDs(_ translation: AskTranslation?) -> [String] { translation?.interpretation.spec.columns.map(\.id) ?? [] }
         let yearAlbums = read(reply(target: "album", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: "my most played album from each release year")
         check("a per-release-year cap on albums shows the Release year column", columnIDs(yearAlbums).contains("releaseYear"), "\(columnIDs(yearAlbums))")
-        let yearTracks = read(reply(sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":2,"#), request: "x")
+        let yearTracks = read(reply(sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":2,"#), request: cappedRequest)
         check("…and on tracks", columnIDs(yearTracks).contains("releaseYear") && columnIDs(yearTracks).first == "plays", "\(columnIDs(yearTracks))")
         let yearAndBase = columnIDs(yearAlbums)
         check("…with the usual Plays and Last played still there", yearAndBase == ["plays", "releaseYear", "lastPlayed"], "\(yearAndBase)")
         let noCap = read(reply(target: "album", sorts: playsDescending), request: "my top albums")
         check("without a cap no Release year column is added", !columnIDs(noCap).contains("releaseYear"))
-        let artistCap = read(reply(target: "artist", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: "x")
+        let artistCap = read(reply(target: "artist", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: cappedRequest)
         check("a cap dropped for an artist query adds no column", !columnIDs(artistCap).contains("releaseYear"))
-        let albumCaps = read(reply(sorts: playsDescending, caps: #""perArtist":1,"perAlbum":1,"perReleaseYear":null,"#), request: "x")
+        let albumCaps = read(reply(sorts: playsDescending, caps: #""perArtist":1,"perAlbum":1,"perReleaseYear":null,"#), request: cappedRequest)
         check("per-artist and per-album caps add no column (artist and album are in each row already)", columnIDs(albumCaps) == ["plays", "lastPlayed"], "\(columnIDs(albumCaps))")
         let yearCondition = #"[{"field":"releaseYear","op":"greaterThan","value":1990,"valueTo":null,"text":null,"date":null,"dateTo":null,"tags":[],"parameters":[],"scope":null,"comparedAgo":null}]"#
-        let yearBoth = read(reply(target: "album", conditions: yearCondition, sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: "x")
+        let yearBoth = read(reply(target: "album", conditions: yearCondition, sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: cappedRequest)
         check("a request that already filters on release year gets one such column, not two", columnIDs(yearBoth).filter { $0 == "releaseYear" }.count == 1, "\(columnIDs(yearBoth))")
         if let spec = yearAlbums?.interpretation.spec, let result = try? run(spec) {
             let key = result.columns.first { $0.field.id == "releaseYear" }?.cacheKey
@@ -265,6 +267,88 @@ enum QueryCapChecks {
             check("the Ask reading runs and carries a Release year column", false)
         }
 
+        // A smaller model's blanks and guesses (what a local model wrote for these exact requests).
+        let junkScope = #"{"days":0,"from":"2026-10-16","kind":"absolute","shiftCount":0,"shiftUnit":"day","to":"2026-10-16","unit":"day"}"#
+        let junkCondition = #"[{"comparedAgo":{"count":0,"unit":"year"},"date":"2026-10-16","dateTo":"2026-10-16","field":"artist","op":"textIs","parameters":[],"scope":"# + junkScope + #","tags":[],"text":"Artist A","value":null,"valueTo":null}]"#
+        let junkSort = #"[{"comparedAgo":{"count":0,"unit":"year"},"direction":"descending","field":"plays","parameters":[],"scope":"# + junkScope + "}]"
+        let blanks = read(reply(conditions: junkCondition, sorts: junkSort, limit: "10"), request: "top 10 songs by Artist A")
+        check("a period and a 'compare with 0 earlier' written on a name field are ignored, not fatal", blanks?.interpretation.dropped.isEmpty == true, "\(String(describing: blanks?.interpretation.dropped))")
+        check("…so the artist filter, the sort and the limit all survive",
+              blanks?.interpretation.spec.groups.first?.first?.field.id == "artist" && blanks?.interpretation.spec.sorts.count == 1 && blanks?.interpretation.spec.limit == 10)
+        let zeroCompare = #"[{"comparedAgo":{"count":0,"unit":"day"},"direction":"descending","field":"plays","parameters":[],"scope":{"kind":"calendar","unit":"year","days":0,"from":"","to":"","shiftCount":0,"shiftUnit":"none"}}]"#
+        let zeroed = read(reply(sorts: zeroCompare), request: "most played this year")
+        check("a zero comparison on a field that does take a period is none: the period is kept", zeroed?.interpretation.dropped.isEmpty == true && { if case .field(let ref)? = zeroed?.interpretation.spec.sorts.first?.key { return ref.scope != nil } else { return false } }(), "\(String(describing: zeroed?.interpretation.dropped))")
+
+        // Caps the request never asked for.
+        let allOnes = #""perArtist":1,"perAlbum":1,"perReleaseYear":1,"#
+        let guessed = read(reply(sorts: playsDescending, limit: "1", caps: allOnes), request: "my most played song by Artist A")
+        check("caps set with no diversity wording in the request are dropped", guessed?.interpretation.spec.groupLimit == nil && guessed?.interpretation.dropped.isEmpty == true, "\(String(describing: guessed?.interpretation.spec.groupLimit))")
+        let wanted = read(reply(sorts: playsDescending, limit: "10", caps: #""perArtist":1,"perAlbum":null,"perReleaseYear":null,"#), request: "top 10 songs from different artists")
+        check("…while 'different artists' lets the model's per-artist cap through", wanted?.interpretation.spec.groupLimit == QueryGroupLimit(perArtist: 1))
+        for (text, expected) in [("2 songs per artist", true), ("one track from each album", true), ("each year", true), ("at most 3 per band", true), ("my most played song by X", false), ("top 10 albums", false), ("songs I played this week", false)] {
+            check("diversity wording: “\(text)” → \(expected)", AskPatterns.mentionsDiversity(text) == expected)
+        }
+
+        // "by <an artist in the library>" with no artist condition in the answer.
+        let known: Set<String> = ["Artist A", "Artist B & Artist C"]
+        let withLibrary = AskContext(knownArtists: known)
+        func readWith(_ reply: AskLLMReply, _ request: String, _ context: AskContext = withLibrary) -> AskTranslation? {
+            try? AskModelEngine.read(reply, request: request, registry: .standard, context: context, now: Date(), engine: "test", seconds: 0)
+        }
+        let wrongField = #"[{"field":"plays","op":"greaterThan","value":0,"valueTo":null,"text":"Artist A","date":null,"dateTo":null,"tags":[],"parameters":[],"scope":null,"comparedAgo":null}]"#
+        let fixed = readWith(reply(conditions: wrongField, sorts: playsDescending, limit: "1"), "my most played song by Artist A")
+        let fixedArtist = fixed?.interpretation.spec.groups.flatMap { $0 }.first { $0.field.id == "artist" }
+        check("a named library artist with no artist condition gets one", fixedArtist?.op == .textIs && fixedArtist?.operands == [.text("Artist A")], "\(String(describing: fixed?.interpretation.spec.groups))")
+        check("…and the added filter is said out loud", fixed?.resolvedTerms.contains { $0.phrase == "by Artist A" && $0.meaning == "the artist is Artist A" } == true)
+        let none = readWith(reply(sorts: playsDescending, limit: "1"), "my most played song by Artist A")
+        check("…even when the model wrote no condition at all", none?.interpretation.spec.groups == [[QueryCondition("artist", .textIs, [.text("Artist A")])]], "\(String(describing: none?.interpretation.spec.groups))")
+        let already = readWith(reply(conditions: artistCondition, sorts: playsDescending, limit: "1"), "my most played song by Artist A")
+        check("an artist condition the model wrote is not doubled", already?.interpretation.spec.groups.flatMap { $0 }.filter { $0.field.id == "artist" }.count == 1)
+        let stranger = readWith(reply(sorts: playsDescending), "my most played song by Nobody Known")
+        check("a name that isn't a library artist adds nothing", stranger?.interpretation.spec.groups.isEmpty == true)
+        let sorted = readWith(reply(sorts: playsDescending), "my songs sorted by plays")
+        check("“sorted by plays” is a sort, not an artist", sorted?.interpretation.spec.groups.isEmpty == true)
+        let noLibrary = readWith(reply(sorts: playsDescending), "my most played song by Artist A", .none)
+        check("without the library's artist names nothing is guessed", noLibrary?.interpretation.spec.groups.isEmpty == true)
+        let artistQuery = readWith(reply(target: "artist", sorts: playsDescending), "artists by Artist A")
+        check("an artist query never gets an artist condition added", artistQuery?.interpretation.spec.groups.isEmpty == true)
+        check("an artist with an ampersand is found whole", AskPatterns.namedArtist(in: "albums by Artist B & Artist C", knownArtists: known) == nil || AskPatterns.namedArtist(in: "albums by Artist B & Artist C", knownArtists: known) == "Artist B & Artist C")
+
+        // Numbers the request states that a model left out.
+        let leanTop = AskLLMReply(json: Data(#"{"target":"track","groups":[],"sorts":[{"field":"plays","direction":"descending"}]}"#.utf8))
+        check("“top 50 tracks of all time”: a limit the model left out is applied from the wording", read(leanTop, request: "top 50 tracks of all time")?.interpretation.spec.limit == 50)
+        check("“10 most recently played tracks” → 10", read(leanTop, request: "10 most recently played tracks")?.interpretation.spec.limit == 10)
+        check("a request with no count gets no limit", read(leanTop, request: "tracks longer than 6 minutes")?.interpretation.spec.limit == nil)
+        check("a limit the model did write is kept", read(reply(sorts: playsDescending, limit: "7"), request: "top 50 tracks")?.interpretation.spec.limit == 7)
+        for (text, expected) in [("my most played song by Artist A", true), ("the top album", true), ("my favorite track", true), ("my most played songs", false), ("top songs of 2024", false), ("my most played song this year", true), ("the top song from each album", false), ("my most played album from each release year", false), ("songs I played most", false)] {
+            check("a singular superlative asks for one: “\(text)” → \(expected)", AskPatterns.asksForOne(text) == expected)
+        }
+        check("“my most played song by …” gets a limit of 1 when the model left it out", read(leanTop, request: "my most played song by Artist A")?.interpretation.spec.limit == 1)
+        for (text, expected) in [("find 25 songs similar to Song A", 25), ("40 tracks similar to Song A by Artist A", 40), ("ten songs like Song A", 10)] as [(String, Int)] {
+            check("similar count: “\(text)” → \(expected)", AskPatterns.similarCount(in: text) == expected)
+        }
+        for text in ["recommend some music like Artist A", "songs like 3 Doors Down", "what should I listen to if I like Album A"] {
+            check("similar count: “\(text)” → none", AskPatterns.similarCount(in: text) == nil)
+        }
+        let seedReply = AskLLMReply(json: Data(#"{"target":"track","groups":[],"similarSeed":"Song A"}"#.utf8))
+        check("a similar request takes its number from the wording", read(seedReply, request: "find 25 songs similar to Song A")?.similar?.limit == 25)
+        check("…and keeps the default without one", read(seedReply, request: "recommend some music like Song A")?.similar?.limit == AskSimilarIntent.defaultLimit)
+        let bogus = AskLLMReply(json: Data(#"{"target":"track","groups":[],"unsupported":[",", " . ", "a real note"]}"#.utf8))
+        check("an 'unsupported' note with no letters or digits is noise and is dropped", read(bogus, request: "x")?.interpretation.unsupported == ["a real note"], "\(String(describing: read(bogus, request: "x")?.interpretation.unsupported))")
+
+        // What Ollama is sent: only what a query can't exist without is required; the cloud schema is unchanged.
+        let strict = AskPortableSchema.build(registry: .standard)
+        let local = AskSchemaAdapter.ollama(strict.object())
+        let localRequired = Set(local["required"] as? [String] ?? [])
+        check("the Ollama schema requires only the target and the groups", localRequired == ["target", "groups"], "\(localRequired)")
+        let groupsSchema = ((local["properties"] as? [String: Any])?["groups"] as? [String: Any])?["items"] as? [String: Any]
+        let conditionSchema = groupsSchema?["items"] as? [String: Any]
+        check("…and a condition only its field and operator", Set(conditionSchema?["required"] as? [String] ?? []) == ["field", "op"], "\(String(describing: conditionSchema?["required"]))")
+        let strictRequired = Set(strict.object()["required"] as? [String] ?? [])
+        check("the schema cloud providers get still requires every key", strictRequired.isSuperset(of: ["target", "groups", "sorts", "limit", "perArtist", "perAlbum", "perReleaseYear", "unsupported"]), "\(strictRequired)")
+        let lean = read(AskLLMReply(json: Data(#"{"target":"track","groups":[[{"field":"artist","op":"textIs","text":"Artist A"}]],"sorts":[{"field":"plays","direction":"descending"}],"limit":1}"#.utf8)), request: "my most played song by Artist A")
+        check("an answer that leaves out every unused key reads fine", lean?.interpretation.dropped.isEmpty == true && lean?.interpretation.spec.limit == 1 && lean?.interpretation.spec.groupLimit == nil && lean?.interpretation.spec.groups.first?.first?.field.id == "artist")
+
         // The engine indicator under the Ask box.
         var settings = AskSettings()
         let onDevice = AskEngineIndicator.describe(settings)
@@ -275,6 +359,12 @@ enum QueryCapChecks {
             let model = settings.config(for: engine).model
             check("the indicator for \(engine.label) names it and its model, with no warning",
                   line.title.hasPrefix(engine.label) && (model.isEmpty || line.title.hasSuffix(model)) && line.warning == nil, line.title)
+        }
+        for engine in AskEngineID.allCases {
+            settings.selected = engine
+            let note = AskEngineIndicator.describe(settings).note
+            let isLocal = engine == .ollama || engine == .openAICompatible
+            check("the first-answer-is-slow note is shown for \(engine.label) only if it runs on your own Mac or server", (note != nil) == isLocal && (note?.contains("first question") ?? true), note ?? "none")
         }
         settings.selected = .openAI
         settings.set(AskProviderConfig(model: "model-x", baseURL: ""), for: .openAI)

@@ -326,13 +326,16 @@ struct OllamaClient: AskLLMClient {
 
     static let contextTokens = 16384
 
+    /// Appended to the shared prompt: the schema Ollama gets doesn't require every key (see `AskSchemaAdapter.ollama`).
+    static let omitNote = "\n\nWrite only the keys the request needs; leave out every other key (no zeros, empty strings or placeholder dates)."
+
     func request(system: String, user: String, schema: AskJSONSchema) throws -> URLRequest {
         var request = URLRequest(url: try AskHTTP.url(baseURL, "/api/chat"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = [
             "model": model, "stream": false,
-            "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
+            "messages": [["role": "system", "content": system + Self.omitNote], ["role": "user", "content": user]],
             "format": AskSchemaAdapter.ollama(schema.object()),
             "options": ["temperature": 0, "num_ctx": Self.contextTokens],
         ]
@@ -448,7 +451,26 @@ enum AskSchemaAdapter {
 
     /// Ollama turns the schema into a grammar; plain `anyOf` with null is the form its structured outputs document.
     static func ollama(_ node: [String: Any]) -> [String: Any] {
-        convert(node, upperCaseTypes: false, nullKeyword: "anyOf", keepAdditional: true)
+        relaxRequired(convert(node, upperCaseTypes: false, nullKeyword: "anyOf", keepAdditional: true))
+    }
+
+    /// A local model told to write every key fills the ones it has no use for with zeros and made-up dates ("compare with
+    /// 0 days earlier", a date range on a name), and spends most of its time writing them. The schema Ollama gets leaves a
+    /// key out when it isn't needed: only what the query can't exist without is required. Cloud providers keep the strict
+    /// every-key schema (some require it). The reader (`AskModelWire`) already treats a missing key as none.
+    private static func relaxRequired(_ node: [String: Any]) -> [String: Any] {
+        var dict = node
+        if let properties = dict["properties"] as? [String: Any] {
+            let keys = Set(properties.keys)
+            if keys.contains("groups") { dict["required"] = ["target", "groups"].filter(keys.contains) }
+            else if keys.contains("field"), keys.contains("op") { dict["required"] = ["field", "op"] }
+            else if keys.contains("field"), keys.contains("direction") { dict["required"] = ["field", "direction"] }
+            else if keys.contains("kind") { dict["required"] = ["kind"] }
+            dict["properties"] = properties.mapValues { value in (value as? [String: Any]).map(relaxRequired) ?? value }
+        }
+        if let items = dict["items"] as? [String: Any] { dict["items"] = relaxRequired(items) }
+        if let anyOf = dict["anyOf"] as? [[String: Any]] { dict["anyOf"] = anyOf.map(relaxRequired) }
+        return dict
     }
 
     private static func convert(_ node: Any, upperCaseTypes: Bool, nullKeyword: String, keepAdditional: Bool) -> [String: Any] {

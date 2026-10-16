@@ -88,7 +88,7 @@ enum AskInterpreter {
         spec.groupLimit = groupLimit(perArtist: query.perArtist, perAlbum: query.perAlbum, perReleaseYear: query.perReleaseYear, target: target, dropped: &dropped)
 
         spec.columns = columns(for: spec, target: target, registry: registry)
-        let unsupported = (query.unsupported ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let unsupported = (query.unsupported ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.contains { $0.isLetter || $0.isNumber } }
         return AskInterpretation(spec: spec, dropped: dropped, unsupported: unsupported)
     }
 
@@ -199,6 +199,9 @@ enum AskInterpreter {
             }
             ref.parameters[key] = option
         }
+        // A period on a field that measures no period (a name, a total) is a blank the model filled in, not something the person
+        // asked for; it is ignored rather than failing the whole condition.
+        guard field.supportsScope else { return ref }
         if let scope { ref.scope = try makeScope(scope, calendar: calendar) }
         if let baseline {
             ref.baseline = try makeScope(baseline, calendar: calendar)

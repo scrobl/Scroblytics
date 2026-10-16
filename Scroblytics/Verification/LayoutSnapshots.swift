@@ -200,7 +200,10 @@ enum LayoutSnapshots {
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             var cloud = AskSettings()
             cloud.selected = .anthropic
-            for (name, settings) in [("ondevice", AskSettings()), ("cloud", cloud)] {
+            var local = AskSettings()
+            local.selected = .ollama
+            local.set(AskProviderConfig(model: "model-x:14b", baseURL: "http://localhost:11434"), for: .ollama)
+            for (name, settings) in [("ondevice", AskSettings()), ("cloud", cloud), ("ollama", local)] {
                 for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                     for width in [540, 420, 320] as [CGFloat] {
                         let view = AskEngineIndicatorLine(settings: settings)

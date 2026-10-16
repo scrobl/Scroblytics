@@ -91,6 +91,16 @@ enum AskEngineID: String, CaseIterable, Codable, Sendable, Identifiable {
         switch self {
         case .anthropic: "Measured on 66 test requests: claude-sonnet-5-5 read 63 correctly (95%); claude-haiku-4-5-20251001 read 59 (89%) and costs less; the on-device model read about 55% (and can’t do “similar to” requests)."
         case .openAI: "Measured on 66 test requests: gpt-6-luna read 63 correctly (95%) and is the cheapest; gpt-6.1-sol read 62 (94%), slower and about 20× the price; gpt-4o read 61 (92%). Each request carries a prompt of about 10,000 tokens, so an account on OpenAI’s lowest rate-limit tier can hit its tokens-per-minute limit after a few questions in a minute."
+        case .ollama: "Measured on 66 test requests: qwen2.5:14b on a Mac with 24 GB of memory read 58 correctly (88%), about 2 seconds each once loaded."
+        default: nil
+        }
+    }
+
+    /// What to expect from a model that runs on this Mac (or a server you run): the first question after a pause is slow.
+    var localSpeedNote: String? {
+        switch self {
+        case .ollama, .openAICompatible:
+            "The first question after a pause can take up to a minute while the model loads and reads Ask’s instructions. After that, answers take a few seconds."
         default: nil
         }
     }

@@ -1,15 +1,21 @@
 import SwiftUI
+import SwiftData
 
 struct NowPlayingShelf: View {
     let track: NowPlayingTrack
     let onOpen: () -> Void
     let onDismiss: () -> Void
 
+    @Environment(\.modelContext) private var modelContext
+    /// The artwork every other screen shows for this track (your own image, a saved or inherited album image), falling back to what
+    /// Last.fm reported for the play, which can be another edition's cover.
+    @State private var resolvedImageURL: String?
+
     var body: some View {
         HStack(spacing: 8) {
             Button(action: onOpen) {
                 HStack(spacing: 12) {
-                    ArtworkImage(urlString: track.imageURL, contentMode: .fill) {
+                    ArtworkImage(urlString: resolvedImageURL ?? track.imageURL, contentMode: .fill) {
                         ZStack {
                             Color.secondary.opacity(0.12)
                             Image(systemName: "music.note")
@@ -79,6 +85,13 @@ struct NowPlayingShelf: View {
         .padding(.vertical, 9)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+        .task(id: track.id) { reloadImage() }
+        .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in reloadImage() }
+    }
+
+    private func reloadImage() {
+        let target = ImageTarget(kind: .track, artist: track.artist, album: track.album.isEmpty ? nil : track.album, track: track.track)
+        resolvedImageURL = (try? ImageResolutionEngine.effectiveImageURL(for: target, context: modelContext, fallbackURL: track.imageURL)) ?? nil
     }
 
     private var detail: String {

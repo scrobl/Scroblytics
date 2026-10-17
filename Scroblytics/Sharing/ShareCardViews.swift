@@ -1,0 +1,224 @@
+import AppKit
+import SwiftUI
+
+/// The one dark card design. Sizes are in points (see `ShareSize.points`); the renderer scales to pixels. Everything it draws is handed
+/// in (pictures already loaded), because an image renderer draws one frame and waits for nothing.
+struct ShareTopListCardView: View {
+    let card: ShareCard
+    let options: ShareOptions
+    let identity: ShareIdentity
+    let images: [String: NSImage]
+
+    private var rows: [ShareRow] { card.visibleRows(for: options) }
+    private var size: CGSize { options.size.points }
+    private var columns: Int { options.size.columns }
+    private let margin: CGFloat = 64
+    private let gold = Color(red: 1.0, green: 0.82, blue: 0.32)
+
+    var body: some View {
+        ZStack {
+            background
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .padding(.bottom, 28)
+                list
+                if hasFooter { footer.padding(.top, 20) }
+            }
+            .padding(margin)
+        }
+        .frame(width: size.width, height: size.height)
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var hasFooter: Bool { identity.showsFooter || !(identity.name ?? "").isEmpty }
+
+    // MARK: Background
+
+    private var background: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.07), Color(red: 0.10, green: 0.09, blue: 0.13)], startPoint: .top, endPoint: .bottom)
+            if let top = rows.first?.imageURL, let image = images[top] {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .blur(radius: 70)
+                    .opacity(0.34)
+                    .clipped()
+            }
+            Rectangle().fill(Color.black.opacity(0.35))
+        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(card.period.uppercased())
+                    .font(.system(size: 26, weight: .bold))
+                    .tracking(3)
+                    .foregroundStyle(gold)
+                    .lineLimit(1)
+                Spacer(minLength: 16)
+                if options.showDate {
+                    Text(card.generatedAt.formatted(date: .abbreviated, time: .omitted))
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+            }
+            Text(card.title)
+                .font(.system(size: 76, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            Text(card.measure)
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.68))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            if showsMovementCaption, let note = card.movementNote {
+                HStack(spacing: 8) {
+                    Text("▲▼")
+                        .font(.system(size: 22, weight: .bold))
+                    Text("Movement \(note)")
+                        .font(.system(size: 24, weight: .medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+                .foregroundStyle(Color.white.opacity(0.5))
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private var showsMovementCaption: Bool { options.showMovement && card.hasMovement }
+
+    // MARK: Rows
+
+    private var list: some View {
+        GeometryReader { proxy in
+            let perColumn = max(1, Int((Double(rows.count) / Double(columns)).rounded(.up)))
+            let gap: CGFloat = columns > 1 ? 56 : 0
+            let columnWidth = (proxy.size.width - gap * CGFloat(columns - 1)) / CGFloat(columns)
+            let rowHeight = min(proxy.size.height / CGFloat(perColumn), 190)
+            HStack(alignment: .top, spacing: gap) {
+                ForEach(0..<columns, id: \.self) { column in
+                    VStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()).filter { $0.offset / perColumn == column }, id: \.offset) { _, row in
+                            rowView(row, height: rowHeight, width: columnWidth)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(width: columnWidth)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: ShareRow, height: CGFloat, width: CGFloat) -> some View {
+        let art = height - 14
+        let titleSize = min(max(height * 0.33, 20), 40)
+        HStack(spacing: height * 0.16) {
+            Text("\(row.rank)")
+                .font(.system(size: min(max(height * 0.40, 22), 48), weight: .heavy, design: .rounded))
+                .foregroundStyle(row.rank == 1 ? gold : Color.white.opacity(0.8))
+                .frame(width: height * 0.62, alignment: .center)
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+            artwork(row, side: art)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                    .font(.system(size: titleSize, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let subtitle = row.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: titleSize * 0.72, weight: .regular))
+                        .foregroundStyle(Color.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            if options.showMovement, card.hasMovement { changeBadge(row.change, size: titleSize * 0.62) }
+            if options.showValues {
+                Text(row.value)
+                    .font(.system(size: titleSize * 0.8, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+        .frame(width: width, height: height)
+    }
+
+    @ViewBuilder
+    private func artwork(_ row: ShareRow, side: CGFloat) -> some View {
+        Group {
+            if let url = row.imageURL, let image = images[url] {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Color.white.opacity(0.10)
+                    Image(systemName: "music.note")
+                        .font(.system(size: side * 0.36))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                }
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: side * 0.12, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func changeBadge(_ change: ShareChange, size: CGFloat) -> some View {
+        switch change {
+        case .none:
+            EmptyView()
+        case .same:
+            badge("–", color: Color.white.opacity(0.18), foreground: Color.white.opacity(0.7), size: size)
+        case .up(let n):
+            badge("▲\(n)", color: Color(red: 0.20, green: 0.70, blue: 0.40), foreground: .white, size: size)
+        case .down(let n):
+            badge("▼\(n)", color: Color(red: 0.85, green: 0.28, blue: 0.30), foreground: .white, size: size)
+        case .new:
+            badge("NEW", color: Color(red: 0.55, green: 0.38, blue: 0.90), foreground: .white, size: size)
+        }
+    }
+
+    private func badge(_ text: String, color: Color, foreground: Color, size: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: max(size, 14), weight: .bold, design: .rounded))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, size * 0.55)
+            .padding(.vertical, size * 0.22)
+            .background(color, in: Capsule())
+            .fixedSize()
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack {
+            if let name = identity.name, !name.isEmpty {
+                HStack(spacing: 12) {
+                    LastfmMark(size: 34)
+                    Text(name)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            if identity.showsFooter {
+                Text("Scroblytics")
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.5))
+            }
+        }
+    }
+}

@@ -41,7 +41,25 @@ extension HelpContent {
                     "**Create Apple Music Playlist** exports the chart’s tracks that are in your Music library.",
                     "**Chart race** animates cumulative rankings across the range.",
                     "List or grid layout is a toggle.",
+                    "**Share** makes an image or text of the chart as it is on screen ([Sharing](help://screen-sharing)).",
                 ]),
+            ]
+        ),
+        HelpArticle(
+            id: "screen-sharing",
+            title: "Sharing",
+            summary: "The Share button: an image or text of what you are looking at, for friends or a Reddit post.",
+            blocks: [
+                .paragraph("A **Share** button appears where something worth showing is: today on [Top Charts](help://screen-top-charts), with more screens to follow. It opens a preview of a card made from exactly what is on screen, with options that suit that card (size, how many rows, whether to show plays and movement) and four ways to send it on."),
+                .bullets([
+                    "**Copy Image** puts the card on the clipboard. Paste it into a Reddit post, a message or a document.",
+                    "**Save PNG…** saves it as a file (twice the card’s size, so it stays sharp when shrunk).",
+                    "**Share…** opens the macOS Share menu (Messages, Mail, AirDrop, Notes and so on).",
+                    "**Copy Text** copies the same list as a Markdown table (Reddit shows it as a table), a Markdown list, or plain text.",
+                ]),
+                .paragraph("Cards are square, portrait or wide. The card uses the pictures saved on this Mac; with [Offline mode](help://offline-mode) on, a picture that isn’t saved is left out and the preview says so."),
+                .heading("What a card says about you"),
+                .paragraph("Nothing by default: no Last.fm name and no “Scroblytics” credit. Turn on **Show my Last.fm name** (from your saved account) or **Show “Scroblytics” on the card** in the preview, or under Settings › General › Sharing; your choice is remembered. A card is made on your Mac. Nothing is sent anywhere unless you paste it or pick a target in the Share menu, and no Reddit or other account is used."),
             ]
         ),
         HelpArticle(

@@ -93,7 +93,9 @@ struct ShareCardView: View {
     let images: [String: NSImage]
 
     var body: some View {
-        if card.drawsTree(for: options) {
+        if let snapshot = card.snapshot {
+            ShareChartCardView(card: card, snapshot: snapshot, options: options, identity: identity)
+        } else if card.drawsTree(for: options) {
             ShareTreeCardView(card: card, options: options, identity: identity, images: images)
         } else if card.profile?.highlights.isEmpty == false {
             ShareRecapCardView(card: card, options: options, identity: identity, images: images)

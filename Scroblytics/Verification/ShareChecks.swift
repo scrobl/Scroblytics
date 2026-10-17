@@ -13,6 +13,10 @@ enum ShareChecks {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         let env = ProcessInfo.processInfo.environment
+        if let folder = env["SCROBLYTICS_SHARE_SNAPSHOT_TRENDS"] {
+            Task { @MainActor in await writeTrendsSnapshots(into: folder) }
+            return
+        }
         if env["SCROBLYTICS_SHARE_STRESS"] != nil {
             Task { @MainActor in stress() }
             return
@@ -371,6 +375,33 @@ enum ShareChecks {
                 check("…or a sort", asked.text(whenQueryIs: withSort) == nil)
             }
             check("an Ask request carries the question, and defaults to none", AskQueryRequest(spec: QuerySpec(target: .album), action: .run, question: "q").question == "q" && AskQueryRequest(spec: QuerySpec(target: .album), action: .run).question == nil)
+
+            // MARK: A chart (a picture of what is on screen, in a card)
+            func chartPicture(_ color: NSColor) -> NSImage {
+                NSImage(size: NSSize(width: 900, height: 300), flipped: false) { rect in color.setFill(); rect.fill(); NSColor.white.setFill(); NSRect(x: 60, y: 40, width: 700, height: 6).fill(); return true }
+            }
+            let chartA = ShareSnapshot(image: chartPicture(.systemBlue)), chartB = ShareSnapshot(image: chartPicture(.systemOrange))
+            let chartCard = ShareCard(title: "Volume over time", period: "Last 6 months", measure: "Compared with the 6 months before", rows: [], valueLabel: "", hasMovement: false, kindID: "trends.volume-over-time", snapshot: chartA)
+            check("a chart card is not a list, has no pictures to load and starts wide", !chartCard.isList && chartCard.pictureURLs(for: ShareOptions()).isEmpty && chartCard.defaultOptions.size == .wide && card.defaultOptions.size == .square)
+            check("two snapshots are two different pictures", chartA == chartA && chartA != chartB)
+            check("a card remembers nothing until chosen, then the choice", ShareSettings.options(for: chartCard.kindID, fallback: chartCard.defaultOptions, defaults: suite).size == .wide && { var chosen = chartCard.defaultOptions; chosen.size = .portrait; ShareSettings.save(chosen, for: chartCard.kindID, defaults: suite); return ShareSettings.options(for: chartCard.kindID, fallback: chartCard.defaultOptions, defaults: suite).size == .portrait }())
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                let png = ShareRenderer.png(card: chartCard, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("a chart card, \(size.label): a PNG at 2x, not blank", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                var other = chartCard; other.snapshot = chartB
+                check("a chart card, \(size.label): shows its picture, and the footer", png != ShareRenderer.png(card: other, options: o, identity: .anonymous, images: [:]) && png != ShareRenderer.png(card: chartCard, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:]))
+            }
+            var withSummary = chartCard
+            withSummary.chartSummary = ShareChartSummary(headline: "12,345 scrobbles", change: "+8% vs Jan 1, 2025 – Oct 17, 2025", isUp: true)
+            var withDown = withSummary
+            withDown.chartSummary?.isUp = false
+            var withDetail = chartCard
+            withDetail.chartSummary = ShareChartSummary(headline: "Busiest: Fri 9 PM", detail: "412 scrobbles")
+            check("the chart's headline numbers are printed above its picture; down is drawn differently from up; a plain detail line works", ShareRenderer.png(card: withSummary, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: chartCard, options: ShareOptions(), identity: .anonymous, images: [:]) && ShareRenderer.png(card: withSummary, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: withDown, options: ShareOptions(), identity: .anonymous, images: [:]) && ShareRenderer.png(card: withDetail, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: chartCard, options: ShareOptions(), identity: .anonymous, images: [:]))
+            var dateOff = ShareOptions(); dateOff.showDate = false
+            check("the date can be left off a chart card", ShareRenderer.png(card: chartCard, options: dateOff, identity: .anonymous, images: [:]) != ShareRenderer.png(card: chartCard, options: ShareOptions(), identity: .anonymous, images: [:]))
 
             // MARK: Milestones and Timeline
             let reached = Date(timeIntervalSince1970: 1_700_000_000), firstPlay = Date(timeIntervalSince1970: 1_690_000_000)
@@ -830,6 +861,98 @@ enum ShareChecks {
         check("memory is flat over the last rounds (grew \(Int(growth)) MB)", growth < 60)
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)
+    }
+
+
+    // MARK: Trends charts
+
+    /// `SCROBLYTICS_SHARE_SNAPSHOT_TRENDS=<folder>`: hosts the real Trends charts in an off-screen window on made-up listening, takes the
+    /// picture a chart's Share button takes, and writes the cards made from them (and the raw pictures), so they can be looked at.
+    @MainActor
+    private static func writeTrendsSnapshots(into folder: String) async {
+        try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        // Eighteen months of made-up listening: a few artists, evening-heavy, with sessions of several tracks in a row.
+        let calendar = AppCalendars.listening
+        let end = Date()
+        let start = calendar.date(byAdding: .month, value: -18, to: end)!
+        var plays: [ScrobbleSnapshot] = []
+        var day = start
+        var seed = 7
+        func next(_ n: Int) -> Int { seed = (seed &* 1103515245 &+ 12345) & 0x7fffffff; return seed % n }
+        while day < end {
+            for _ in 0..<(next(9) + 2) {
+                let artist = next(12)
+                let hour = 17 + next(7)
+                var at = calendar.date(bySettingHour: min(hour, 23), minute: next(50), second: 0, of: day) ?? day
+                for track in 0..<(next(4) + 1) {
+                    plays.append(ScrobbleSnapshot(artistName: "Artist \(artist)", albumName: "Album \(artist)-\(next(3))", trackName: "Track \(artist)-\(next(12))-\(track)", imageURL: nil, playedAt: at))
+                    at = at.addingTimeInterval(Double(180 + next(120)))
+                }
+            }
+            day = calendar.date(byAdding: .day, value: 1, to: day)!
+        }
+        plays.sort { $0.playedAt < $1.playedAt }
+        // The flow chart needs many artists to fill its grid (a real library has dozens), in sittings of several tracks.
+        var flowPlays: [ScrobbleSnapshot] = []
+        day = start
+        while day < end {
+            for _ in 0..<(next(6) + 2) {
+                var at = calendar.date(bySettingHour: 17 + next(6), minute: next(50), second: 0, of: day) ?? day
+                for track in 0..<(next(5) + 3) {
+                    let artist = next(40)
+                    flowPlays.append(ScrobbleSnapshot(artistName: "Artist number \(artist)", albumName: "Album \(artist)", trackName: "Track \(artist)-\(track)", imageURL: nil, playedAt: at))
+                    at = at.addingTimeInterval(Double(180 + next(120)))
+                }
+            }
+            day = calendar.date(byAdding: .day, value: 1, to: day)!
+        }
+        flowPlays.sort { $0.playedAt < $1.playedAt }
+        let range = DateRange(from: calendar.date(byAdding: .month, value: -6, to: end)!, to: end)
+        let compare = DateRange(from: calendar.date(byAdding: .month, value: -12, to: end)!, to: calendar.date(byAdding: .month, value: -6, to: end)!.addingTimeInterval(-1))
+        let openQuery: (QuerySpec, String) -> Void = { _, _ in }
+        let sample: [(String, String, AnyView)] = [
+            ("Volume over time", "volume", AnyView(TrendsVolumeChart(inputs: .init(scrobbles: plays, durations: .empty, range: range, compareRange: compare, version: 1), openQuery: openQuery))),
+            ("When you listen", "heatmap", AnyView(TrendsHeatmapChart(inputs: .init(scrobbles: plays, durations: .empty, range: range, compareRange: nil, version: 1), openQuery: openQuery))),
+            ("Discovery", "discovery", AnyView(TrendsDiscoveryChart(inputs: .init(scrobbles: plays, durations: .empty, range: range, compareRange: compare, version: 1), openQuery: openQuery))),
+            ("Rankings", "rankbump", AnyView(TrendsRankBumpChart(inputs: .init(scrobbles: plays, durations: .empty, range: range, version: 1), openQuery: openQuery))),
+            ("Long tail", "longtail", AnyView(TrendsLongTailChart(inputs: .init(scrobbles: plays, snapshots: QuerySnapshots(), range: range, version: 1), openQuery: openQuery))),
+            ("Loyalty", "loyalty", AnyView(TrendsLoyaltyChart(inputs: .init(scrobbles: plays, durations: .empty, range: range, compareRange: compare, version: 1), openQuery: openQuery, openEntity: { _ in }))),
+            ("Listening flow", "flow", AnyView(TrendsFlowChart(inputs: .init(scrobbles: flowPlays, snapshots: QuerySnapshots(), range: range, compareRange: compare, version: 1), openArtist: { _ in }, openQuery: openQuery))),
+        ]
+        for (title, slug, chart) in sample {
+            let capture = ShareChartCapture()
+            let view = ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(title).font(AppTypography.sectionTitle)
+                    chart.environment(\.shareChartCapture, capture)
+                }
+                .padding(20)
+            }
+            .frame(width: 1000, height: 900)
+            .background(Color(nsColor: .windowBackgroundColor))
+            let host = NSHostingView(rootView: view)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.contentView = host
+            for _ in 0..<30 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+            if let whole = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: whole)
+                try? whole.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "window-\(slug).png"))
+            }
+            guard let image = capture.image() else { print("no picture for \(title)"); continue }
+            if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "raw-\(slug).png"))
+            }
+            let card = ShareCard(title: title, period: "Last 6 months", measure: capture.summary?.change == nil ? "Compared with the 6 months before" : "", rows: [], valueLabel: "", hasMovement: false, kindID: "trends.\(slug)", snapshot: ShareSnapshot(image: image), chartSummary: capture.summary)
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                if let png = ShareRenderer.png(card: card, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:], scale: 1) {
+                    try? png.write(to: URL(fileURLWithPath: folder).appending(path: "trends-\(slug)-\(size.rawValue).png"))
+                }
+            }
+            print("\(title): picture \(Int(image.size.width)) × \(Int(image.size.height))")
+        }
+        exit(0)
     }
 
     // MARK: Samples

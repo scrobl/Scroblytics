@@ -185,12 +185,15 @@ struct TrendsLoyaltyChart: View {
                                            description: Text("Only \(d.population.count) \(noun) have at least \(minPlays) plays in this period. Lower the minimum, or pick a wider period."))
                         .frame(minHeight: 220)
                 } else {
-                    chart(data, d).frame(height: 420)
-                    if metric == .timeListened, data.pending > 0 {
-                        Label("\(data.pending.formatted()) \(noun) left out — their track lengths are still being looked up, so this fills in as they arrive.", systemImage: "hourglass")
-                            .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 14) {
+                        chart(data, d).frame(height: 420)
+                        if metric == .timeListened, data.pending > 0 {
+                            Label("\(data.pending.formatted()) \(noun) left out — their track lengths are still being looked up, so this fills in as they arrive.", systemImage: "hourglass")
+                                .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                        }
+                        key(data, d)
                     }
-                    key(data, d)
+                    .shareChartArea()
                     footnote(data, d)
                 }
             } else if isLoading {

@@ -35,6 +35,7 @@ struct TrendsVolumeChart: View {
     @State private var volume: TrendsVolume?
     @State private var isLoading = true
     @State private var hovered: TrendsVolume.Point?
+    @Environment(\.shareChartCapture) private var shareCapture
 
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
 
@@ -66,7 +67,7 @@ struct TrendsVolumeChart: View {
             }
 
             if let volume {
-                chart(volume).frame(height: 260)
+                chart(volume).frame(height: 260).shareChartArea()
                 if metric == .timeListened, volume.pending > 0 {
                     Label("\(volume.pending.formatted()) plays are still waiting for a track length and aren’t counted yet.", systemImage: "hourglass")
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -174,5 +175,11 @@ struct TrendsVolumeChart: View {
         guard !Task.isCancelled, let computed else { return }
         volume = computed
         isLoading = false
+        // The same headline the chart shows above itself, for a shared card.
+        let comparedWith = computed.compareRange.map { TrendsDrill.rangeLabel(from: $0.from, to: $0.to) } ?? "previous"
+        shareCapture?.summary = ShareChartSummary(
+            headline: "\(TrendsWeight.format(computed.total, metric: metric)) \(metric == .plays ? "scrobbles" : "listened")",
+            change: computed.changeLabel.map { "\($0) vs \(comparedWith)" }, isUp: computed.changeLabel?.hasPrefix("+") ?? true
+        )
     }
 }

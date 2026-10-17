@@ -54,6 +54,7 @@ struct TrendsTagsChart: View {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(tags.rows) { row in tagRow(row, tags) }
                     }
+                    .shareChartArea()
                     if tags.lookedUpShare < 0.995 {
                         Label("Tags are known for \((tags.lookedUpShare * 100).formatted(.number.precision(.fractionLength(0))))% of this period’s plays so far — the rest are still being looked up, so these totals will grow.", systemImage: "hourglass")
                             .font(AppTypography.compactMetadata).foregroundStyle(.secondary)

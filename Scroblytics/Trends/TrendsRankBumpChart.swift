@@ -21,6 +21,7 @@ struct TrendsRankBumpChart: View {
     @State private var data: TrendsRankBump?
     @State private var isLoading = true
     @State private var hovered: TrendsRankBump.Bucket?
+    @Environment(\.shareChartCapture) private var shareCapture
 
     private var entity: QueryTarget { QueryTarget(rawValue: entityRaw) ?? .artist }
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
@@ -31,7 +32,7 @@ struct TrendsRankBumpChart: View {
         VStack(alignment: .leading, spacing: 14) {
             controls
             if let data, data.buckets.count >= 2 {
-                chart(data).frame(height: CGFloat(max(220, data.topN * 34)))
+                chart(data).frame(height: CGFloat(max(220, data.topN * 34))).shareChartArea()
                 legend(data)
                 Text("Click a \(data.bucketing.label) to see its top \(data.topN) in Query. A gap means it fell out of that \(data.bucketing.label)’s top \(data.topN).")
                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -184,6 +185,16 @@ struct TrendsRankBumpChart: View {
         hovered = nil
         data = computed
         isLoading = false
+        // What the chart ranks and how it is bucketed, which its header says beside the pickers.
+        // The legend names the lines (colour, overall rank, name), so it goes on the card in readable type rather than in the picture.
+        shareCapture?.summary = computed.map { ranked in
+            ShareChartSummary(
+                headline: "Top \(ranked.topN) \(target.rawValue)s", detail: "By \(ranked.bucketing.label) · \(metric == .plays ? "by scrobbles" : "by time listened")",
+                legend: ranked.series.enumerated().map { index, series in
+                    ShareChartSummary.Legend(label: "#\(series.overallRank) " + series.title + (series.subtitle.map { " — \($0)" } ?? ""), color: color(index))
+                }
+            )
+        }
     }
 }
 

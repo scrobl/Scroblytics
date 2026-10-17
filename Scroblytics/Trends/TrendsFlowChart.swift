@@ -64,11 +64,14 @@ struct TrendsFlowChart: View {
                 } else {
                     Text("\(data.sessionCount.formatted()) listening sessions · \(data.totalTransitions.formatted()) hand-offs from one \(noun) to another, with a \(gap >= 60 ? "\(gap / 60) hr" : "\(gap) min") session gap")
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
-                    if let focus, data.nodes.contains(where: { $0.id == focus }) {
-                        neighbourhood(focus, data)
-                    } else {
-                        overview(data)
+                    Group {
+                        if let focus, data.nodes.contains(where: { $0.id == focus }) {
+                            neighbourhood(focus, data)
+                        } else {
+                            overview(data)
+                        }
                     }
+                    .shareChartArea()
                 }
             } else if isLoading {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 260)

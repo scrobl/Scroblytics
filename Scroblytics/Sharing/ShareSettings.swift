@@ -9,9 +9,10 @@ enum ShareSettings {
     static let logoKey = "share.lastfmLogo"
     private static func optionsKey(_ kindID: String) -> String { "share.options.\(kindID)" }
 
-    static func options(for kindID: String, defaults: UserDefaults = .standard) -> ShareOptions {
+    /// What was last chosen for this kind of card, or `fallback` when nothing has been.
+    static func options(for kindID: String, fallback: ShareOptions = ShareOptions(), defaults: UserDefaults = .standard) -> ShareOptions {
         guard let data = defaults.data(forKey: optionsKey(kindID)),
-              let options = try? JSONDecoder().decode(ShareOptions.self, from: data) else { return ShareOptions() }
+              let options = try? JSONDecoder().decode(ShareOptions.self, from: data) else { return fallback }
         return options
     }
 

@@ -97,7 +97,7 @@ private struct SharePopover: View {
         .padding(16)
         .frame(width: 440)
         .task {
-            options = ShareSettings.options(for: card.kindID)
+            options = ShareSettings.options(for: card.kindID, fallback: card.defaultOptions)
             accountName = ShareSettings.accountName(context: modelContext)
             images = await ShareArtwork.load(ShareRenderer.imageURLs(card: card, options: ShareOptions(rowCount: ShareOptions.rowCounts.max() ?? 20)))
             imagesLoaded = true
@@ -259,12 +259,15 @@ private struct SharePopover: View {
                 Text("Share…")
             }
             .disabled(!imagesLoaded)
-            Menu("Copy Text") {
-                Button("Markdown table (for Reddit)") { copyText(ShareText.markdownTable(card, options: options, identity: identity), "Markdown table") }
-                Button("Markdown list") { copyText(ShareText.markdownList(card, options: options, identity: identity), "Markdown list") }
-                Button("Plain text") { copyText(ShareText.plain(card, options: options, identity: identity), "Text") }
+            // A chart is a picture; it has no text form.
+            if card.snapshot == nil {
+                Menu("Copy Text") {
+                    Button("Markdown table (for Reddit)") { copyText(ShareText.markdownTable(card, options: options, identity: identity), "Markdown table") }
+                    Button("Markdown list") { copyText(ShareText.markdownList(card, options: options, identity: identity), "Markdown list") }
+                    Button("Plain text") { copyText(ShareText.plain(card, options: options, identity: identity), "Text") }
+                }
+                .fixedSize()
             }
-            .fixedSize()
         }
     }
 

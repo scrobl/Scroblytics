@@ -29,6 +29,10 @@ struct ShareCard: Sendable, Equatable {
     var defaultValueColumn = 0
     /// The same path as a tree (only a Rabbit Hole path has one); drawn when the person picks the tree layout.
     var tree: ShareTree? = nil
+    /// A picture of a chart taken from the window (a Trends chart); the card is that picture with its title and period around it.
+    var snapshot: ShareSnapshot? = nil
+    /// The chart's headline numbers, printed above its picture.
+    var chartSummary: ShareChartSummary? = nil
     /// Track titles drawn a little smaller, so long ones fit (a path of songs).
     var compactTitles = false
     /// Whether an item with no picture of its own (the library's total) can show a trophy or the Last.fm logo, chosen in the preview.
@@ -248,6 +252,7 @@ extension ShareCard {
     /// The pictures a card with these options draws, for the renderer to load first: a list's visible rows (the first one is also the
     /// background), a profile's one hero picture.
     func pictureURLs(for options: ShareOptions) -> [String?] {
+        if snapshot != nil { return [] }
         if let profile { return [profile.heroImageURL] + profile.highlights.map(\.imageURL) }
         if options.layout == .tree, let tree {
             return tree.steps.prefix(max(1, options.rowCount)).flatMap { [$0.chosen.imageURL] + $0.others.map(\.imageURL) }
@@ -282,6 +287,13 @@ extension ShareCard {
     /// Whether this card is drawn as a tree with these options.
     func drawsTree(for options: ShareOptions) -> Bool { options.layout == .tree && tree != nil }
 
+    /// What the preview starts from before the person has chosen anything for this kind of card: a chart is wider than tall, so wide.
+    var defaultOptions: ShareOptions {
+        var options = ShareOptions()
+        if snapshot != nil { options.size = .wide }
+        return options
+    }
+
     /// Whether any row says why it is there.
     var hasNotes: Bool { rows.contains { $0.note?.isEmpty == false } }
 
@@ -292,5 +304,5 @@ extension ShareCard {
     }
 
     /// Whether the Rows and values options mean anything for this card.
-    var isList: Bool { profile == nil }
+    var isList: Bool { profile == nil && snapshot == nil }
 }

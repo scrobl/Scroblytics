@@ -66,6 +66,7 @@ private struct SharePopover: View {
     @State private var preview: NSImage?
     @State private var accountName: String?
     @State private var status: String?
+    @State private var renderTask: Task<Void, Never>?
 
     private var identity: ShareIdentity {
         ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsFooter, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
@@ -104,11 +105,12 @@ private struct SharePopover: View {
         }
         .onChange(of: options) { _, new in
             ShareSettings.save(new, for: card.kindID)
-            renderPreview()
+            scheduleRender()
         }
-        .onChange(of: showsName) { renderPreview() }
-        .onChange(of: showsFooter) { renderPreview() }
-        .onChange(of: logoRaw) { renderPreview() }
+        .onChange(of: showsName) { scheduleRender() }
+        .onChange(of: showsFooter) { scheduleRender() }
+        .onChange(of: logoRaw) { scheduleRender() }
+        .onDisappear { renderTask?.cancel() }
     }
 
     // MARK: Preview
@@ -128,6 +130,17 @@ private struct SharePopover: View {
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.separator.opacity(0.6), lineWidth: 1) }
+    }
+
+    /// Draws the preview a moment after the last change, so typing a title (one change per key) draws it once, not once per letter.
+    @MainActor
+    private func scheduleRender() {
+        renderTask?.cancel()
+        renderTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            renderPreview()
+        }
     }
 
     @MainActor

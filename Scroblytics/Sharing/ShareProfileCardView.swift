@@ -20,7 +20,7 @@ struct ShareProfileCardView: View {
         ZStack {
             ShareCardBackground(size: size, imageURL: profile.heroImageURL, images: images)
             VStack(alignment: .leading, spacing: 0) {
-                if isWide { wideBody } else { narrowBody }
+                if isMilestone { milestoneBody } else if isWide { wideBody } else { narrowBody }
                 if ShareCardFooter.isShown(identity) {
                     ShareCardFooter(identity: identity).padding(.top, 20)
                 }
@@ -32,6 +32,67 @@ struct ShareProfileCardView: View {
     }
 
     // MARK: Layouts
+
+    /// A card about one figure (a milestone): the picture large, the name under it, the number big, the facts last. The sections share
+    /// the card's height, so a short title leaves even gaps rather than an empty bottom, and a long one still has room.
+    private var isMilestone: Bool { profile.headline != nil }
+
+    @ViewBuilder
+    private var milestoneBody: some View {
+        if isWide {
+            HStack(alignment: .top, spacing: 64) {
+                hero(side: 640)
+                VStack(alignment: .leading, spacing: 0) {
+                    kickerRow
+                    Spacer(minLength: 16)
+                    milestoneTitle(size: 84, alignment: .leading)
+                    Spacer(minLength: 16)
+                    headline(size: 150)
+                    Spacer(minLength: 16)
+                    statGrid(columns: 3, valueSize: 38)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        } else {
+            let square = options.size == .square
+            // A long name and artist need the room the picture would take.
+            let longNames = card.title.count + profile.subtitle.count > 70
+            VStack(spacing: 0) {
+                kickerRow
+                Spacer(minLength: 12)
+                hero(side: square ? (longNames ? 290 : 330) : (longNames ? 460 : 520))
+                Spacer(minLength: 12)
+                milestoneTitle(size: square ? 62 : 72, alignment: .center)
+                Spacer(minLength: 12)
+                headline(size: square ? 112 : 140)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 12)
+                statGrid(columns: 3, valueSize: square ? 42 : 46)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The name and the artist: long ones wrap onto more lines and shrink before they are cut.
+    private func milestoneTitle(size: CGFloat, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 6) {
+            Text(card.title)
+                .font(.system(size: size, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.45)
+                .multilineTextAlignment(alignment == .center ? .center : .leading)
+            if !profile.subtitle.isEmpty {
+                Text(profile.subtitle)
+                    .font(.system(size: size * 0.5, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+                    .multilineTextAlignment(alignment == .center ? .center : .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .center ? .center : .leading)
+    }
 
     private var narrowBody: some View {
         let square = options.size == .square

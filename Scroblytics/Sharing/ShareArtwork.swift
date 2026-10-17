@@ -15,8 +15,13 @@ enum ShareArtwork {
                     do {
                         if url.isFileURL { return (raw, try Data(contentsOf: url)) }
                         try ConnectivityGate.check(host: url.host)
-                        return (raw, try await URLSession.shared.data(from: url).0)
+                        // A slow or unreachable picture must not hold the preview's buttons for a minute: give up on it after a few seconds
+                        // (the card draws its placeholder and the preview says a picture couldn't be loaded).
+                        let data = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 8)).0
+                        ConnectivityHub.reportSuccess()
+                        return (raw, data)
                     } catch {
+                        if !url.isFileURL { ConnectivityHub.report(error, host: url.host, source: "Artwork") }
                         return nil
                     }
                 }

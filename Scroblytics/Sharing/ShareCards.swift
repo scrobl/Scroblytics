@@ -89,8 +89,10 @@ enum ShareCards {
         var stats = [ShareStat(label: "Reached", value: achievedAt.formatted(date: .abbreviated, time: .omitted))]
         if days >= 0 { stats.append(ShareStat(label: "Time to get there", value: MilestoneFormatting.formatElapsedDays(days))) }
         stats.append(ShareStat(label: "First scrobble", value: firstAt.formatted(date: .abbreviated, time: .omitted)))
+        // The library's own total has no name of its own ("1,000 scrobbles" would only repeat the big number).
+        let isTotal = kind == "Total"
         return ShareCard(
-            title: name,
+            title: isTotal ? "Listening total" : name,
             period: "All time",
             measure: artist ?? "",
             rows: [],
@@ -99,7 +101,7 @@ enum ShareCards {
             generatedAt: now,
             kindID: "milestone.\(kind.lowercased())",
             iconChoice: imageURL == nil && kind == "Total",
-            profile: ShareProfile(kind: "\(kind) milestone", subtitle: artist ?? "", heroImageURL: imageURL, headline: "\(milestone.formatted()) plays", headlineTier: milestone, stats: stats, chips: [], trend: [])
+            profile: ShareProfile(kind: "\(kind) milestone", subtitle: artist ?? "", heroImageURL: imageURL, headline: "\(milestone.formatted()) \(isTotal ? "scrobbles" : "plays")", headlineTier: milestone, stats: stats, chips: [], trend: [])
         )
     }
 
@@ -225,7 +227,8 @@ enum ShareCards {
     ) -> ShareCard {
         let titles = columns.map(\.title)
         let defaultColumn = min(max(sortedColumn ?? 0, 0), max(titles.count - 1, 0))
-        let shareRows = rows.enumerated().map { index, row -> ShareRow in
+        // A result can run to tens of thousands of rows; a card shows at most the largest row choice, so that is all it is made from.
+        let shareRows = rows.prefix(ShareOptions.rowCounts.max() ?? 20).enumerated().map { index, row -> ShareRow in
             let values = columns.map { QueryCellText.string(row.row.cells[$0.cacheKey] ?? .missing, column: $0) }
             return ShareRow(
                 rank: index + 1, title: row.entity.name, subtitle: row.subtitle,

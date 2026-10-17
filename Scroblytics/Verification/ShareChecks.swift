@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MachO
 import SwiftData
 import SwiftUI
 
@@ -12,6 +13,10 @@ enum ShareChecks {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         let env = ProcessInfo.processInfo.environment
+        if env["SCROBLYTICS_SHARE_STRESS"] != nil {
+            Task { @MainActor in stress() }
+            return
+        }
         if let folder = env["SCROBLYTICS_SHARE_DUMP"] {
             Task { @MainActor in await dumpRealLibrary(into: folder, container: container) }
             return
@@ -201,6 +206,22 @@ enum ShareChecks {
             let eraCaption = CollageCaption.make(source: .period, entity: .track, metric: .timeListened, period: .decade, rangeLabel: "ignored")
             check("a release-period collage says one favorite per period instead of a range", eraCaption.text(date: when) == "Top Tracks · One favorite per release decade · Ranked by time listened · \(dateText)", eraCaption.text(date: when))
             check("the strip's height is a fixed share of the width", CollageCanvas.heightRatio(grid: .three, footer: .none) == 1 && abs(CollageCanvas.heightRatio(grid: .three, footer: footerDetails) - 1.07) < 0.0001)
+
+            // A result with tens of thousands of rows (a library's every track) makes a card from the first rows only, at once
+            do {
+                let plays = QueryFieldRef("plays")
+                if let column = try? QueryFieldRegistry.standard.resolve(plays, target: .track) {
+                    let bigRows = (0..<60_000).map { i in
+                        QueryDisplayRow(row: QueryRow(entity: QueryEntity(id: QueryEntityID(target: .track, artist: "Artist \(i % 700)", name: "Track \(i)")), cells: [column.cacheKey: .value(.number(Double(60_000 - i)))]), imageURL: nil, subtitle: "Artist \(i % 700)")
+                    }
+                    let started = Date()
+                    let bigCard = ShareCards.queryResult(title: "everything", target: .track, measure: "", rows: bigRows, columns: [column], sortedColumn: 0)
+                    let took = Date().timeIntervalSince(started)
+                    check("a 60,000-row result makes a card of at most 20 rows, quickly (\(String(format: "%.3f", took)) s)", bigCard.rows.count == 20 && bigCard.rows[0].title == "Track 0" && bigCard.rows[19].rank == 20 && took < 0.5)
+                } else {
+                    check("the plays field resolves for tracks", false)
+                }
+            }
 
             // MARK: A Rabbit Hole path
             func rhTrack(_ artist: String, _ name: String, plays: Int, why: String?) -> RabbitHoleTrack {
@@ -712,6 +733,105 @@ enum ShareChecks {
         exit(0)
     }
 
+
+    // MARK: Stress
+
+    /// Resident memory of this process, in MB.
+    private static func residentMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count) }
+        }
+        return result == KERN_SUCCESS ? Double(info.resident_size) / 1_048_576 : 0
+    }
+
+    /// The process's footprint (what Activity Monitor calls Memory), in MB.
+    private static func footprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : 0
+    }
+
+    /// `SCROBLYTICS_SHARE_STRESS=1`: renders hundreds of cards of every kind, size and layout with large pictures, one after another, the way
+    /// a person trying options in the preview would, and reports the time of each and whether memory keeps growing. Exits 0 when the
+    /// slowest render is under a few seconds and memory settles.
+    @MainActor
+    private static func stress() {
+        var failures = 0
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty ? "" : "  [\(detail)]"))
+            if !ok { failures += 1 }
+        }
+        // 600 × 600 pictures, like real cover art, one per card slot.
+        // Real artwork is a decoded picture from a file, not a drawing that is redrawn on use: encode each one and read it back.
+        let pictures: [String: NSImage] = autoreleasepool { Dictionary(uniqueKeysWithValues: (0..<40).compactMap { index -> (String, NSImage)? in
+            let drawn = NSImage(size: NSSize(width: 600, height: 600), flipped: false) { rect in
+                NSColor(hue: CGFloat(index) / 40, saturation: 0.6, brightness: 0.8, alpha: 1).setFill(); rect.fill()
+                NSColor.white.withAlphaComponent(0.3).setFill(); NSBezierPath(ovalIn: rect.insetBy(dx: 100, dy: 100)).fill(); return true
+            }
+            guard let tiff = drawn.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8]),
+                  let loaded = NSImage(data: data) else { return nil }
+            return ("file:///art/\(index).jpg", loaded)
+        }) }
+        let url: @Sendable (Int) -> String = { "file:///art/\($0 % 40).jpg" }
+        let entries = sampleEntries()
+        let topCard = ShareCards.topChart(entries: entries, entity: .album, metric: .scrobbles, periodLabel: "Year to date")
+        let longRows = (1...20).map { i in ShareRow(rank: i, title: "A rather long title number \(i) 日本語 🎵", subtitle: "Artist \(i) & Friends", value: "\(1000 - i)", change: .up(i), imageURL: url(i), values: ["\(1000 - i)", "Oct \(i)", "\(i)%"], note: "you often play it after the one before it (\(i) times)") }
+        var listCard = ShareCard(title: "Down the rabbit hole", period: "", measure: "", rows: longRows, valueLabel: "Plays", hasMovement: false, kindID: "stress.list", valueColumns: ["Plays", "Last played", "Match score"], defaultValueColumn: 0, compactTitles: true)
+        listCard.tree = ShareTree(steps: longRows.map { ShareTree.Step(chosen: ShareTree.Pick(title: $0.title, artist: $0.subtitle ?? "", imageURL: $0.imageURL), others: [ShareTree.Pick(title: "Offer A \($0.rank)", artist: "X", imageURL: url($0.rank + 1)), ShareTree.Pick(title: "Offer B \($0.rank)", artist: "Y", imageURL: url($0.rank + 2))]) })
+        let profile = sampleProfileCard(imageURL: url(1))
+        let month: ShareCard = {
+            func item(_ entity: TopChartsEntity, _ name: String, _ artist: String?) -> TimelineTopItem { TimelineTopItem(entity: entity, name: name, artist: artist, album: nil, playcount: 99, timeListenedSeconds: nil, imageURL: url(name.count), loved: false) }
+            let start = Date(timeIntervalSince1970: 1_759_000_000)
+            return ShareCards.timelineMonth(TimelineMonth(monthStart: start, top: TimelinePeriodTop(artist: item(.artist, "Artist", nil), album: item(.album, "Album", "Artist"), track: item(.track, "Track", "Artist")), weeks: [], totals: TimelineMonthTotals(plays: 4000, artists: 300, albums: 500, tracks: 1200), milestones: (1...12).map { TimelineMilestone(kind: .album, name: "Album number \($0)", artist: "A", milestone: [100, 250, 500, 1000, 2500, 5000, 10000, 25000][$0 % 8], achievedAt: start) }), metric: .scrobbles)
+        }()
+        let identity = ShareIdentity(name: "someone_with_a_long_name", showsFooter: true)
+        var cards: [(String, ShareCard, ShareOptions)] = []
+        for size in ShareSize.allCases {
+            for layout in ShareLayout.allCases {
+                var o = ShareOptions(); o.size = size; o.layout = layout; o.rowCount = 20
+                cards.append(("top", topCard, o)); cards.append(("path", listCard, o))
+            }
+            var o = ShareOptions(); o.size = size
+            cards.append(("page", profile, o)); cards.append(("month", month, o))
+        }
+        let rounds = Int(ProcessInfo.processInfo.environment["SCROBLYTICS_SHARE_STRESS_ROUNDS"] ?? "") ?? 20
+        let before = residentMB()
+        var seconds: [Double] = []
+        var samples: [Double] = []
+        for round in 0..<rounds {
+            for (name, card, options) in cards {
+                // One render per person action in the app, so the autorelease pool drains between them; do the same here.
+                autoreleasepool {
+                    let start = Date()
+                    let png = ShareRenderer.png(card: card, options: options, identity: identity, images: pictures)
+                    seconds.append(Date().timeIntervalSince(start))
+                    if png == nil { check("a render returned nothing", false) }
+                }
+                if round == 0 { print("  first round: \(name) \(options.size.rawValue) \(options.layout.rawValue) -> resident \(Int(residentMB())) MB") }
+            }
+            if round % 4 == 3 { samples.append(residentMB()) }
+        }
+        let footprintBefore = footprintMB()
+        malloc_zone_pressure_relief(nil, 0)
+        print("footprint MB after the renders: \(Int(footprintBefore)), after asking the allocator to give back free pages: \(Int(footprintMB())) (resident \(Int(residentMB())))")
+        let sorted = seconds.sorted()
+        let p95 = sorted[Int(Double(sorted.count) * 0.95)]
+        print("renders: \(seconds.count), median \(String(format: "%.2f", sorted[sorted.count / 2])) s, p95 \(String(format: "%.2f", p95)) s, slowest \(String(format: "%.2f", sorted.last ?? 0)) s")
+        print("resident MB: before \(Int(before)), after rounds 4/8/12/16/20: \(samples.map { Int($0) })")
+        check("\(seconds.count) renders with 600 px pictures all produced images", failures == 0)
+        check("the slowest render is under 3 s", (sorted.last ?? 0) < 3)
+        // After the first rounds the footprint should be flat: the last sample is not far above the middle one.
+        let growth = (samples.last ?? 0) - (samples.dropLast().last ?? 0)
+        check("memory is flat over the last rounds (grew \(Int(growth)) MB)", growth < 60)
+        print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
+        exit(failures == 0 ? 0 : 1)
+    }
+
     // MARK: Samples
 
     private static func sample(_ entry: TopChartEntry, hasCompare: Bool) -> TopChartEntry {
@@ -868,7 +988,9 @@ enum ShareChecks {
                 try? png.write(to: URL(fileURLWithPath: folder).appending(path: "milestones-totals-\(icon.rawValue).png"))
             }
         }
-        for (name, c, images) in [("milestones-list", snapMilestones, [String: NSImage]()), ("milestone-single", snapSingle, [:]), ("month", snapMonth, recapArt)] {
+        let snapLong = ShareCards.milestone(kind: "Track", name: "An Extremely Long Track Title That Goes On And On Across Several Lines 日本語のタイトル", artist: "An Artist With A Very Long Name & Friends Featuring Several Other People", imageURL: "file:///art/Album A.jpg", milestone: 25_000, achievedAt: snapReached, firstAt: snapReached.addingTimeInterval(-86400 * 4000))
+        let snapTotal = ShareCards.milestone(kind: "Total", name: "10,000 scrobbles", artist: nil, imageURL: nil, milestone: 10_000, achievedAt: snapReached, firstAt: snapReached.addingTimeInterval(-86400 * 900))
+        for (name, c, images) in [("milestones-list", snapMilestones, [String: NSImage]()), ("milestone-single", snapSingle, [:]), ("milestone-long", snapLong, recapArt), ("milestone-total", snapTotal, [:]), ("month", snapMonth, recapArt)] {
             for size in ShareSize.allCases {
                 var o = ShareOptions(); o.size = size
                 if let png = ShareRenderer.png(card: c, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: images, scale: 1) {

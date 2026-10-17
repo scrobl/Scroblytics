@@ -206,31 +206,13 @@ struct QueryCellView: View {
         case (.custom(let id), _):
             // Fail loud: an unregistered renderer is visible, not silently flattened to text.
             Label("no renderer “\(id)”", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-        case (.integer, .number(let n)): Text(Int(n).formatted()).monospacedDigit()
-        case (.decimal(let places), .number(let n)): Text(n.formatted(.number.precision(.fractionLength(places)))).monospacedDigit()
-        case (.year, .number(let n)): Text(String(Int(n))).monospacedDigit()
-        case (.runtime, .number(let n)): Text(DurationEngine.formatDuration(Int(n))).monospacedDigit()
-        case (.tempo, .number(let n)): Text(BPMEngine.format(n)).monospacedDigit()
-        case (.listeningTime, .number(let n)): Text(DurationEngine.formatTimeListened(Int(n))).monospacedDigit().lineLimit(1)
-        case (.percent, .number(let n)): Text(n.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit()
-        case (.date, .date(let d)): Text(formattedDate(d))
+        case (.listeningTime, _): Text(QueryCellText.string(value, column: column)).monospacedDigit().lineLimit(1)
+        case (.integer, _), (.decimal, _), (.year, _), (.runtime, _), (.tempo, _), (.percent, _):
+            Text(QueryCellText.string(value, column: column)).monospacedDigit()
+        case (.date, .date): Text(QueryCellText.string(value, column: column))
         case (.boolean, .bool(let b)): Image(systemName: b ? "checkmark" : "minus").foregroundStyle(b ? Color.primary : Color.secondary)
-        case (_, .text(let s)): Text(s).lineLimit(1)
-        case (_, .number(let n)): Text(n.formatted()).monospacedDigit()
-        case (_, .date(let d)): Text(d.formatted(date: .abbreviated, time: .omitted))
-        case (_, .bool(let b)): Text(b ? "Yes" : "No")
-        case (_, .tags(let t)): Text(t.joined(separator: ", ")).lineLimit(1)
-        }
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        switch column.field.id {
-        case "firstPlayed", "lastPlayed":
-            AppDateFormatting.recentPlay.string(from: date)
-        case "releaseDate":
-            AppDateFormatting.releaseDate.string(from: date)
-        default:
-            date.formatted(date: .abbreviated, time: .omitted)
+        case (_, .text), (_, .tags): Text(QueryCellText.string(value, column: column)).lineLimit(1)
+        default: Text(QueryCellText.string(value, column: column)).monospacedDigit()
         }
     }
 

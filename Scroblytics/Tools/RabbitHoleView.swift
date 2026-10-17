@@ -198,6 +198,9 @@ struct RabbitHoleView: View {
                     }
                 }
             }
+            if path.count > 1 {
+                ShareButton(card: { ShareCards.rabbitHole(path: path, tree: options.tree) })
+            }
             Button("Add Track", systemImage: "magnifyingglass") {
                 isSearching = true
             }

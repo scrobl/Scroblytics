@@ -23,10 +23,43 @@ struct ShareCard: Sendable, Equatable {
     var kindID: String
     /// Whether the rows are a ranking, so each shows its number. A list of milestones or months is in time order, not ranked.
     var numbered = true
+    /// A query result's columns (their titles): the image shows one of them, chosen in the preview, and the text copies carry all.
+    var valueColumns: [String] = []
+    /// Which of `valueColumns` the image shows until the person chooses another (the column the query sorts on).
+    var defaultValueColumn = 0
+    /// The same path as a tree (only a Rabbit Hole path has one); drawn when the person picks the tree layout.
+    var tree: ShareTree? = nil
+    /// Track titles drawn a little smaller, so long ones fit (a path of songs).
+    var compactTitles = false
     /// Whether an item with no picture of its own (the library's total) can show a trophy or the Last.fm logo, chosen in the preview.
     var iconChoice = false
     /// Set for a card about one artist, album or track (numbers, rank chips, trend) instead of a ranked list.
     var profile: ShareProfile? = nil
+}
+
+/// A path drawn as a tree: each step is the track that was taken, with the other tracks that were on offer at that step hanging beside it.
+struct ShareTree: Sendable, Equatable {
+    struct Pick: Sendable, Equatable {
+        var title: String
+        var artist: String
+        var imageURL: String?
+    }
+
+    struct Step: Sendable, Equatable {
+        var chosen: Pick
+        /// Offered at this step (or explored) and not taken; the first few.
+        var others: [Pick]
+    }
+
+    var steps: [Step]
+}
+
+/// How a card that can be drawn two ways is laid out.
+enum ShareLayout: String, Codable, CaseIterable, Identifiable, Sendable {
+    case list, tree
+
+    var id: String { rawValue }
+    var label: String { self == .list ? "List" : "Tree" }
 }
 
 /// What a card about a single artist, album or track carries beyond its title: the page's own numbers, rank chips and trend line.
@@ -85,6 +118,10 @@ struct ShareRow: Sendable, Equatable {
     var imageURL: String?
     /// A milestone row: the value is drawn as a coloured pill for the tier, with the date beside it.
     var milestone: ShareMilestone? = nil
+    /// Every value column of a query result, in the order of the card's `valueColumns`; `value` is the one shown on the image by default.
+    var values: [String] = []
+    /// Why this row is here, for a path ("Last.fm: similar to …"): shown after the artist when the person wants it.
+    var note: String? = nil
 }
 
 struct ShareMilestone: Sendable, Equatable {
@@ -150,6 +187,16 @@ struct ShareOptions: Codable, Equatable, Sendable {
     var showMovement = true
     var showDate = true
     var icon = ShareIcon.trophy
+    /// Whether a row's note (why a track was chosen) is shown after its artist, on the image and in the text.
+    var showNotes = true
+    /// List or tree, for a card that has both.
+    var layout = ShareLayout.list
+    /// A title the person typed to replace the card's own (a list card); empty keeps the card's. Not remembered: it belongs to one share.
+    var customTitle = ""
+    /// Which value column of a query card the image shows. Not remembered: the columns differ from one query to the next.
+    var valueColumn: Int? = nil
+
+    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, layout }
 
     init(size: ShareSize = .square, rowCount: Int = 10, showValues: Bool = true, showMovement: Bool = true, showDate: Bool = true, icon: ShareIcon = .trophy) {
         self.size = size
@@ -169,6 +216,8 @@ struct ShareOptions: Codable, Equatable, Sendable {
         showMovement = try c.decodeIfPresent(Bool.self, forKey: .showMovement) ?? true
         showDate = try c.decodeIfPresent(Bool.self, forKey: .showDate) ?? true
         icon = try c.decodeIfPresent(ShareIcon.self, forKey: .icon) ?? .trophy
+        showNotes = try c.decodeIfPresent(Bool.self, forKey: .showNotes) ?? true
+        layout = try c.decodeIfPresent(ShareLayout.self, forKey: .layout) ?? .list
     }
 
     static let rowCounts = [5, 10, 15, 20]
@@ -200,7 +249,46 @@ extension ShareCard {
     /// background), a profile's one hero picture.
     func pictureURLs(for options: ShareOptions) -> [String?] {
         if let profile { return [profile.heroImageURL] + profile.highlights.map(\.imageURL) }
+        if options.layout == .tree, let tree {
+            return tree.steps.prefix(max(1, options.rowCount)).flatMap { [$0.chosen.imageURL] + $0.others.map(\.imageURL) }
+        }
         return visibleRows(for: options).map(\.imageURL)
+    }
+
+    /// The value column the image shows with these options, within the card's columns.
+    func valueColumnIndex(for options: ShareOptions) -> Int {
+        guard !valueColumns.isEmpty else { return 0 }
+        return min(max(options.valueColumn ?? defaultValueColumn, 0), valueColumns.count - 1)
+    }
+
+    /// What a row's value reads as on the image: the chosen column's value for a query card, the row's own value otherwise.
+    func valueText(_ row: ShareRow, options: ShareOptions) -> String {
+        guard !valueColumns.isEmpty else { return row.value }
+        let index = valueColumnIndex(for: options)
+        return row.values.indices.contains(index) ? row.values[index] : "—"
+    }
+
+    /// What the value is called with these options ("Plays", or the chosen column's title).
+    func valueName(for options: ShareOptions) -> String {
+        valueColumns.isEmpty ? valueLabel : valueColumns[valueColumnIndex(for: options)]
+    }
+
+    /// The title the card shows with these options: the person's own when they typed one.
+    func displayTitle(for options: ShareOptions) -> String {
+        let typed = options.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty || !isList ? title : typed
+    }
+
+    /// Whether this card is drawn as a tree with these options.
+    func drawsTree(for options: ShareOptions) -> Bool { options.layout == .tree && tree != nil }
+
+    /// Whether any row says why it is there.
+    var hasNotes: Bool { rows.contains { $0.note?.isEmpty == false } }
+
+    /// The line under a row's name: the artist, then (when notes are on) why it is there.
+    func detailLine(_ row: ShareRow, options: ShareOptions) -> String? {
+        let parts = [row.subtitle, options.showNotes ? row.note : nil].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " — ")
     }
 
     /// Whether the Rows and values options mean anything for this card.

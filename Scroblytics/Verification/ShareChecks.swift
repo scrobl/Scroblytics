@@ -202,6 +202,155 @@ enum ShareChecks {
             check("a release-period collage says one favorite per period instead of a range", eraCaption.text(date: when) == "Top Tracks · One favorite per release decade · Ranked by time listened · \(dateText)", eraCaption.text(date: when))
             check("the strip's height is a fixed share of the width", CollageCanvas.heightRatio(grid: .three, footer: .none) == 1 && abs(CollageCanvas.heightRatio(grid: .three, footer: footerDetails) - 1.07) < 0.0001)
 
+            // MARK: A Rabbit Hole path
+            func rhTrack(_ artist: String, _ name: String, plays: Int, why: String?) -> RabbitHoleTrack {
+                RabbitHoleTrack(artist: artist, track: name, album: "Album X", imageURL: nil, playCount: plays, lastPlayed: Date(timeIntervalSince1970: 1_700_000_000 + Double(plays) * 86_400), matchScore: 80, source: "lastfm", reasons: why.map { [RabbitHoleReason(kind: .similar, text: $0)] })
+            }
+            let rhTracks = [rhTrack("Artist A", "Start *Here*", plays: 40, why: nil), rhTrack("Artist B", "Second", plays: 12, why: "Last.fm: similar to Start"), rhTrack("Artist C", "Third", plays: 3, why: "you often play it after Second (6 times)"), rhTrack("Artist D", "Fourth", plays: 25, why: "shares tags: dream pop")]
+            var rhNodes: [RabbitHoleNode] = []
+            for (index, track) in rhTracks.enumerated() {
+                rhNodes.append(RabbitHoleNode(id: UUID(), track: track, parentID: index == 0 ? nil : rhNodes[index - 1].id, candidates: nil, childIDs: []))
+            }
+            let rhCard = ShareCards.rabbitHole(path: rhNodes)
+            check("a path card lists the tracks in order from the start, numbered", rhCard.rows.map(\.title) == ["Start *Here*", "Second", "Third", "Fourth"] && rhCard.rows.map(\.rank) == [1, 2, 3, 4] && rhCard.numbered && rhCard.period.isEmpty && rhCard.measure.isEmpty && rhCard.kindID == "rabbitHole" && rhCard.compactTitles)
+            check("each row has its artist, its plays and last play, and why it was chosen", rhCard.rows[1].subtitle == "Artist B" && rhCard.rows[1].values == ["12", Date(timeIntervalSince1970: 1_700_000_000 + 12 * 86_400).formatted(date: .abbreviated, time: .omitted), "80%"] && rhCard.rows[1].note == "Last.fm: similar to Start" && rhCard.rows[0].note == nil && rhCard.valueColumns == ["Plays", "Last played", "Match score"] && rhCard.rows[1].values[2] == "80%" && rhCard.rows[0].values[2] == "—" && rhCard.hasNotes)
+            var rhOptions = ShareOptions()
+            check("with notes on the line under a track carries the artist and why; the start has only its artist", rhCard.detailLine(rhCard.rows[2], options: rhOptions) == "Artist C — you often play it after Second (6 times)" && rhCard.detailLine(rhCard.rows[0], options: rhOptions) == "Artist A")
+            rhOptions.showNotes = false
+            check("with notes off, only the artist", rhCard.detailLine(rhCard.rows[2], options: rhOptions) == "Artist C")
+            let rhTable = ShareText.markdownTable(rhCard, options: ShareOptions())
+            check("the table has the artist, both columns and a Why column, escaped", rhTable.contains("| # | Name | Artist | Plays | Last played | Match score | Why |") && rhTable.contains("| 1 | Start \\*Here\\* | Artist A | 40 |") && rhTable.contains("| 3 | Third | Artist C | 3 |") && rhTable.contains("| 80% | Last.fm: similar to Start |") && rhTable.contains("you often play it after Second (6 times) |"), rhTable)
+            check("…and no Why column when notes are off", !ShareText.markdownTable(rhCard, options: rhOptions).contains("Why"))
+            check("the plain list says why after the artist", ShareText.plain(rhCard, options: ShareOptions()).contains("2. Second — Artist B — Last.fm: similar to Start (Plays: 12, Last played:"), ShareText.plain(rhCard, options: ShareOptions()))
+            let noNotesData = Data(#"{"size":"square","rowCount":10,"showValues":true,"showMovement":true,"showDate":true}"#.utf8)
+            check("options saved before the notes switch existed show notes", (try? JSONDecoder().decode(ShareOptions.self, from: noNotesData))?.showNotes == true)
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                let png = ShareRenderer.png(card: rhCard, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("a path card, \(size.label): a PNG at 2x, not blank", image?.pixelsWide == Int(size.points.width) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+            }
+            var rhTitle = ShareOptions(); rhTitle.customTitle = "  My Friday detour  "
+            check("a title the person types replaces the card's, trimmed, in the image and every text form; blank keeps the card's", rhCard.displayTitle(for: rhTitle) == "My Friday detour" && rhCard.displayTitle(for: ShareOptions()) == "Down the rabbit hole" && ShareText.markdownTable(rhCard, options: rhTitle).hasPrefix("**My Friday detour** · ") && ShareText.plain(rhCard, options: rhTitle).hasPrefix("My Friday detour, ") && ShareText.markdownList(rhCard, options: rhTitle).hasPrefix("**My Friday detour**") && ShareRenderer.png(card: rhCard, options: rhTitle, identity: .anonymous, images: [:]) != ShareRenderer.png(card: rhCard, options: ShareOptions(), identity: .anonymous, images: [:]))
+            var rhBlank = ShareOptions(); rhBlank.customTitle = "   "
+            let rhProfile = ShareCard(title: "Page", period: "", measure: "", rows: [], valueLabel: "", hasMovement: false, kindID: "x", profile: ShareProfile(kind: "", subtitle: "", heroImageURL: nil, stats: [], chips: [], trend: []))
+            let blankIsNone = rhCard.displayTitle(for: rhBlank) == "Down the rabbit hole"
+            let profileKeeps = rhProfile.displayTitle(for: rhTitle) == "Page"
+            check("a title of only spaces counts as none, and only list cards take one", blankIsNone && profileKeeps)
+            check("the typed title is not remembered with the options", { let data = try? JSONEncoder().encode(rhTitle); return data.flatMap { try? JSONDecoder().decode(ShareOptions.self, from: $0) }?.customTitle == "" }())
+            var rhMatch = ShareOptions(); rhMatch.valueColumn = 2
+            check("the match score can be the column shown", rhCard.valueText(rhCard.rows[1], options: rhMatch) == "80%" && rhCard.valueName(for: rhMatch) == "Match score")
+            var rhNone = ShareOptions(); rhNone.showValues = false
+            check("None leaves the numbers, the column label and the table's columns out", ShareRenderer.png(card: rhCard, options: rhNone, identity: .anonymous, images: [:]) != ShareRenderer.png(card: rhCard, options: ShareOptions(), identity: .anonymous, images: [:]) && !ShareText.markdownTable(rhCard, options: rhNone).contains("Plays") && !ShareText.markdownTable(rhCard, options: rhNone).contains("Match score") && ShareText.markdownTable(rhCard, options: rhNone).contains("| Why |"))
+            // The same path as a tree: what was offered at each step and not taken hangs beside the step
+            let rhOffer1 = rhTrack("Artist X", "Offer One", plays: 1, why: nil), rhOffer2 = rhTrack("Artist Y", "Offer Two", plays: 2, why: nil), rhOffer3 = rhTrack("Artist Z", "Offer Three", plays: 3, why: nil)
+            var rhTreeNodes = rhNodes
+            rhTreeNodes[0].candidates = [rhOffer1, rhTracks[1], rhOffer2]
+            rhTreeNodes[1].candidates = [rhTracks[2], rhOffer3]
+            let rhExplored = RabbitHoleNode(id: UUID(), track: rhOffer2, parentID: rhTreeNodes[1].id, candidates: nil, childIDs: [])
+            rhTreeNodes[1].childIDs = [rhTreeNodes[2].id, rhExplored.id]
+            var rhTreeDict = Dictionary(uniqueKeysWithValues: rhTreeNodes.map { ($0.id, $0) })
+            rhTreeDict[rhExplored.id] = rhExplored
+            let treeCard = ShareCards.rabbitHole(path: rhTreeNodes, tree: RabbitHoleTree(rootID: rhTreeNodes[0].id, nodes: rhTreeDict, currentID: rhTreeNodes[3].id))
+            let treeSteps = treeCard.tree?.steps ?? []
+            check("the tree has a step per track, in order", treeSteps.map(\.chosen.title) == ["Start *Here*", "Second", "Third", "Fourth"])
+            check("the start has nothing beside it; a later step has what was offered before it and not taken", treeSteps[0].others.isEmpty && treeSteps[1].others.map(\.title) == ["Offer One", "Offer Two"], "\(treeSteps.map { $0.others.map(\.title) })")
+            check("branches explored from the step before count, the taken one never does, and a track isn't listed twice", treeSteps[2].others.map(\.title) == ["Offer Three", "Offer Two"] && treeSteps[3].others.isEmpty, "\(treeSteps.map { $0.others.map(\.title) })")
+            check("a path with no recorded offers still makes a tree, of one track at each step", ShareCards.rabbitHole(path: rhNodes).tree?.steps.allSatisfy { $0.others.isEmpty } == true)
+            var treeOptions = ShareOptions(); treeOptions.layout = .tree
+            check("the tree layout draws a tree only when asked and when there is one", treeCard.drawsTree(for: treeOptions) && !treeCard.drawsTree(for: ShareOptions()) && !ShareCards.milestones(category: "Albums", tierLabel: "", rows: []).drawsTree(for: treeOptions))
+            check("the tree's pictures are the steps' and their offers'", treeCard.pictureURLs(for: treeOptions).count == 4 + 4 && treeCard.pictureURLs(for: ShareOptions()).count == 4)
+            for size in ShareSize.allCases {
+                var o = treeOptions; o.size = size
+                let png = ShareRenderer.png(card: treeCard, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("a tree card, \(size.label): a PNG at 2x, not blank", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                var list = o; list.layout = .list
+                check("a tree card, \(size.label): differs from the list", png != ShareRenderer.png(card: treeCard, options: list, identity: .anonymous, images: [:]))
+            }
+            var treeTitle = treeOptions; treeTitle.customTitle = "Friday detour"
+            check("a typed title shows on the tree as well", ShareRenderer.png(card: treeCard, options: treeTitle, identity: .anonymous, images: [:]) != ShareRenderer.png(card: treeCard, options: treeOptions, identity: .anonymous, images: [:]))
+            var treeFew = treeOptions; treeFew.rowCount = 2
+            check("the Rows choice limits the tree's steps", ShareRenderer.png(card: treeCard, options: treeFew, identity: .anonymous, images: [:]) != ShareRenderer.png(card: treeCard, options: treeOptions, identity: .anonymous, images: [:]))
+            check("the layout is remembered with the options, old saved options read as list", { let data = try? JSONEncoder().encode(treeOptions); return data.flatMap { try? JSONDecoder().decode(ShareOptions.self, from: $0) }?.layout == .tree }() && (try? JSONDecoder().decode(ShareOptions.self, from: Data(#"{"size":"square"}"#.utf8)))?.layout == .list)
+            var rhOff = ShareOptions(); rhOff.showNotes = false
+            check("turning the notes off changes the image", ShareRenderer.png(card: rhCard, options: rhOff, identity: .anonymous, images: [:]) != ShareRenderer.png(card: rhCard, options: ShareOptions(), identity: .anonymous, images: [:]))
+
+            // MARK: Query results
+            let qBase = Date(timeIntervalSince1970: 1_700_000_000)
+            let qLibrary: [(artist: String, album: String, tracks: [(String, Int)])] = [
+                ("Artist A", "Album One", [("one x", 7), ("one y", 5)]), ("Artist A", "Album Two", [("two x", 4)]),
+                ("Artist B", "Album Three", [("three x", 9), ("three y", 6), ("three z", 3)]), ("Artist C", "Album *Four* | 4", [("four x", 1)]),
+            ]
+            var qPlays: [ScrobbleSnapshot] = []
+            var qLast: [String: Date] = [:]
+            var qTime = qBase
+            for album in qLibrary {
+                for (track, count) in album.tracks {
+                    for _ in 0..<count {
+                        qPlays.append(ScrobbleSnapshot(artistName: album.artist, albumName: album.album, trackName: track, imageURL: nil, playedAt: qTime))
+                        qLast[album.album] = qTime
+                        qTime = qTime.addingTimeInterval(3600)
+                    }
+                }
+            }
+            var qSpec = QuerySpec(target: .album)
+            qSpec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+            qSpec.columns = [QueryFieldRef("lastPlayed"), QueryFieldRef("plays")]
+            qSpec.limit = 3
+            let qResult: QueryResult? = (try? qSpec.validate(against: .standard)).map { validated in
+                QueryEngine.evaluate(validated, run: QueryRun(target: .album, asOf: qTime, scrobbles: qPlays, allTimeScrobbles: qPlays, snapshots: QuerySnapshots()))
+            }
+            check("the made-up query runs", qResult != nil && qResult?.rows.count == 3, "\(qResult?.rows.count ?? -1)")
+            if let qResult {
+                let qRows = QueryDisplayRow.make(from: qResult, imageLookup: [:])
+                let sortedIndex = ShareCards.sortedColumnIndex(columns: qResult.columns, sorts: qSpec.sorts, target: .album, registry: .standard)
+                check("the column the query sorts on is the default value", sortedIndex == 1 && qResult.columns[1].field.id == "plays")
+                let qCard = ShareCards.queryResult(title: "my most played albums", target: .album, measure: "3 of 4 match · Sorted by Plays ↓", rows: qRows, columns: qResult.columns, sortedColumn: sortedIndex)
+                // Independent expectation: plays per album, counted straight from the made-up plays.
+                let expected = Dictionary(grouping: qPlays, by: \.albumName).mapValues(\.count).sorted { $0.value > $1.value }.prefix(3)
+                check("the rows are the top three by an independent count, in order, ranked from 1", qCard.rows.map(\.title) == expected.map(\.key) && qCard.rows.map(\.rank) == [1, 2, 3], "\(qCard.rows.map(\.title))")
+                check("the image's value is the plays, each column's value is kept", qCard.rows.map(\.value) == expected.map { $0.value.formatted() } && qCard.rows.allSatisfy { $0.values.count == 2 } && qCard.valueColumns == qResult.columns.map(\.title), "\(qCard.rows.map(\.value))")
+                check("a row's other column is written as the table writes it", qCard.rows[0].values[0] == QueryCellText.date(qLast[qCard.rows[0].title]!, fieldID: "lastPlayed"))
+                check("a query card says what it is, and has a subtitle for the artist", qCard.title == "my most played albums" && qCard.period == "Albums" && qCard.kindID == "query.album" && qCard.rows[0].subtitle == "Artist B" && qCard.numbered)
+                var qOptions = ShareOptions()
+                check("by default the image shows the sorted column, by choice another", qCard.valueText(qCard.rows[0], options: qOptions) == qCard.rows[0].values[1] && { qOptions.valueColumn = 0; return qCard.valueText(qCard.rows[0], options: qOptions) == qCard.rows[0].values[0] && qCard.valueName(for: qOptions) == qCard.valueColumns[0] }())
+                qOptions.valueColumn = 99
+                check("a column that doesn't exist falls back to the last one", qCard.valueColumnIndex(for: qOptions) == 1)
+                qOptions.valueColumn = 0
+                check("the chosen column is not remembered with the options", { let data = try? JSONEncoder().encode(qOptions); return data.flatMap { try? JSONDecoder().decode(ShareOptions.self, from: $0) }?.valueColumn == nil }())
+                var qOther = ShareOptions(); qOther.valueColumn = 0
+                var qSorted = ShareOptions(); qSorted.size = .square; qOther.size = .square
+                check("choosing the other column changes the image", ShareRenderer.png(card: qCard, options: qOther, identity: .anonymous, images: [:]) != ShareRenderer.png(card: qCard, options: qSorted, identity: .anonymous, images: [:]))
+                let qTable = ShareText.markdownTable(qCard, options: ShareOptions())
+                check("the table carries every column", qTable.contains("| # | Name | Artist | \(qCard.valueColumns[0]) | \(qCard.valueColumns[1]) |") && qTable.contains("| 1 | Album Three | Artist B |") && qTable.contains("| \(expected.first!.value.formatted()) |"), qTable)
+                check("the list and plain forms name each column", ShareText.markdownList(qCard, options: ShareOptions()).contains("\(qCard.valueColumns[1]): \(expected.first!.value.formatted())") && ShareText.plain(qCard, options: ShareOptions()).contains("1. Album Three — Artist B (\(qCard.valueColumns[0]): "))
+                check("the title is the first line of every text form", ShareText.markdownTable(qCard, options: ShareOptions()).hasPrefix("**my most played albums** · Albums") && ShareText.plain(qCard, options: ShareOptions()).hasPrefix("my most played albums — Albums"))
+                var qOdd = qCard
+                qOdd.rows[0].title = "Album *Four* | 4"
+                check("names are escaped in a query table", ShareText.markdownTable(qOdd, options: ShareOptions()).contains("Album \\*Four\\* \\| 4"))
+                for size in ShareSize.allCases {
+                    var o = ShareOptions(); o.size = size
+                    let png = ShareRenderer.png(card: qCard, options: o, identity: .anonymous, images: [:])
+                    let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                    check("a query card (a sentence for a title), \(size.label): a PNG at 2x, not blank", image?.pixelsWide == Int(size.points.width) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                }
+                var qNone = qCard
+                qNone.valueColumns = []
+                qNone.rows = qNone.rows.map { var r = $0; r.values = []; return r }
+                check("a result with no columns still renders and shows no value", ShareRenderer.png(card: qNone, options: ShareOptions(), identity: .anonymous, images: [:]) != nil && qNone.valueText(qNone.rows[0], options: ShareOptions()) == qNone.rows[0].value)
+                // The question describes the results only while the query is unchanged
+                let asked = AskedQuestion(text: "my most played albums", spec: qSpec)
+                var edited = qSpec; edited.limit = 5
+                var reordered = qSpec; reordered.columns = [QueryFieldRef("plays"), QueryFieldRef("lastPlayed")]
+                var filtered = qSpec; filtered.target = .track
+                check("the question holds while the query is the same, or only its columns are reordered", asked.text(whenQueryIs: qSpec) == "my most played albums" && asked.text(whenQueryIs: reordered) == "my most played albums")
+                check("…and is dropped once the limit or the target changes", asked.text(whenQueryIs: edited) == nil && asked.text(whenQueryIs: filtered) == nil)
+                var withSort = qSpec; withSort.sorts = [QuerySort(key: .field(QueryFieldRef("lastPlayed")), direction: .descending)]
+                check("…or a sort", asked.text(whenQueryIs: withSort) == nil)
+            }
+            check("an Ask request carries the question, and defaults to none", AskQueryRequest(spec: QuerySpec(target: .album), action: .run, question: "q").question == "q" && AskQueryRequest(spec: QuerySpec(target: .album), action: .run).question == nil)
+
             // MARK: Milestones and Timeline
             let reached = Date(timeIntervalSince1970: 1_700_000_000), firstPlay = Date(timeIntervalSince1970: 1_690_000_000)
             let reachedText = reached.formatted(date: .abbreviated, time: .omitted)
@@ -429,6 +578,72 @@ enum ShareChecks {
                 let seconds = Date().timeIntervalSince(start)
                 if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-page-\(entity.rawValue)-\(size.rawValue).png")) }
                 check("\(entity.displayName) page card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s (\(images.count) of \(urls.compactMap { $0 }.count) pictures)", png != nil && seconds < 3)
+            }
+        }
+        // A Query result: albums by plays over the last year, run through the real engine on the real plays, against plain counts.
+        var realSpec = QuerySpec(target: .album)
+        realSpec.period = QueryPeriod(from: range.from, to: range.to)
+        realSpec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+        realSpec.columns = [QueryFieldRef("lastPlayed"), QueryFieldRef("plays")]
+        realSpec.limit = 10
+        if let validated = try? realSpec.validate(against: .standard) {
+            let all = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+            let realResult = QueryEngine.evaluate(validated, run: QueryRun(target: .album, asOf: range.to, scrobbles: realSpec.countedPlays(all), allTimeScrobbles: all, snapshots: QuerySnapshots()))
+            let realRows = QueryDisplayRow.make(from: realResult, imageLookup: [:])
+            let realCard = ShareCards.queryResult(
+                title: "albums, last 365 days", target: .album, measure: "", rows: realRows, columns: realResult.columns,
+                sortedColumn: ShareCards.sortedColumnIndex(columns: realResult.columns, sorts: realSpec.sorts, target: .album, registry: .standard)
+            )
+            check("the query card has ten rows and shows the plays by default", realCard.rows.count == 10 && realCard.valueName(for: ShareOptions()) == realResult.columns[1].title)
+            let windowPlays = all.filter { $0.playedAt >= range.from && $0.playedAt <= range.to }
+            for row in realCard.rows.prefix(5) {
+                let artist = realRows[row.rank - 1].entity.artist
+                let own = windowPlays.filter { $0.albumName == row.title && TextNormalization.artistIdentityKey($0.artistName) == TextNormalization.artistIdentityKey(artist) }
+                let last = own.map(\.playedAt).max()
+                check("query card #\(row.rank): plays equal an independent count (\(own.count)) and last played is the latest play", row.value == own.count.formatted() && row.values[0] == last.map { QueryCellText.date($0, fieldID: "lastPlayed") }, "\(row.value) / \(row.values[0])")
+            }
+            check("the rows are in falling order of plays", zip(realRows, realRows.dropFirst()).allSatisfy { a, b in
+                (realResult.rows.first { $0.id == a.id }.flatMap { realResult.columns.isEmpty ? nil : $0.cells[realResult.columns[1].cacheKey] }.map { cell -> Double in if case .value(.number(let n)) = cell { n } else { 0 } } ?? 0)
+                    >= (realResult.rows.first { $0.id == b.id }.flatMap { $0.cells[realResult.columns[1].cacheKey] }.map { cell -> Double in if case .value(.number(let n)) = cell { n } else { 0 } } ?? 0)
+            })
+            let urls = realCard.pictureURLs(for: ShareOptions())
+            let images = await ShareArtwork.load(urls)
+            for size in ShareSize.allCases {
+                var options = ShareOptions(); options.size = size
+                let start = Date()
+                let png = ShareRenderer.png(card: realCard, options: options, identity: .anonymous, images: images)
+                let seconds = Date().timeIntervalSince(start)
+                if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-query-\(size.rawValue).png")) }
+                check("the query card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s", png != nil && seconds < 3)
+            }
+        } else {
+            check("the real-library query validates", false)
+        }
+        // A Rabbit Hole path: the library's most played tracks as the steps, against plain counts of the history.
+        do {
+            let all = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+            let byTrack = Dictionary(grouping: all, by: { TextNormalization.lovedKey(artist: $0.artistName, track: $0.trackName) })
+            let top = byTrack.values.sorted { $0.count > $1.count }.prefix(6)
+            var nodes: [RabbitHoleNode] = []
+            for (index, plays) in top.enumerated() {
+                let first = plays[0]
+                let track = RabbitHoleTrack(artist: first.artistName, track: first.trackName, album: first.albumName, imageURL: plays.compactMap(\.imageURL).first, playCount: plays.count, lastPlayed: plays.map(\.playedAt).max(), matchScore: 0, source: "check", reasons: index == 0 ? nil : [RabbitHoleReason(kind: .similar, text: "Last.fm: similar to the step before")])
+                nodes.append(RabbitHoleNode(id: UUID(), track: track, parentID: index == 0 ? nil : nodes[index - 1].id, candidates: nil, childIDs: []))
+            }
+            let card = ShareCards.rabbitHole(path: nodes)
+            check("the path card has six steps", card.rows.count == 6)
+            for (row, plays) in zip(card.rows, top) {
+                let last = plays.map(\.playedAt).max()
+                check("path step \(row.rank): plays equal an independent count (\(plays.count)) and last play the latest", row.value == plays.count.formatted() && row.values[1] == last.map { $0.formatted(date: .abbreviated, time: .omitted) }, "\(row.value) / \(row.values)")
+            }
+            let images = await ShareArtwork.load(card.pictureURLs(for: ShareOptions()))
+            for size in ShareSize.allCases {
+                var options = ShareOptions(); options.size = size
+                let start = Date()
+                let png = ShareRenderer.png(card: card, options: options, identity: .anonymous, images: images)
+                let seconds = Date().timeIntervalSince(start)
+                if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-path-\(size.rawValue).png")) }
+                check("the path card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s", png != nil && seconds < 3)
             }
         }
         // Milestones and Timeline, from the same engines the pages use, against plain counts over the history.
@@ -659,6 +874,58 @@ enum ShareChecks {
                 if let png = ShareRenderer.png(card: c, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: images, scale: 1) {
                     try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(size.rawValue).png"))
                 }
+            }
+        }
+        // Query results: a sentence for a title, a saved-set style title, columns of different kinds.
+        func queryRow(_ name: String, _ artist: String?, _ plays: Int, _ date: String) -> ShareRow {
+            ShareRow(rank: 0, title: name, subtitle: artist, value: "\(plays)", change: .none, imageURL: nil, values: ["\(plays)", date, "\(plays * 3 % 100)%"])
+        }
+        let queryAsk = ShareCard(
+            title: "my most played album from each release year", period: "Albums", measure: "",
+            rows: (1...10).map { i in var r = queryRow("Album \(i)", "Artist \(i)", 400 - i * 23, "Oct \(i), 2025"); r.rank = i; return r },
+            valueLabel: "Plays", hasMovement: false, kindID: "query.album", valueColumns: ["Plays", "Last played", "Skip rate"], defaultValueColumn: 0
+        )
+        var queryDate = ShareOptions(); queryDate.valueColumn = 1
+        for (name, options) in [("query-plays", ShareOptions()), ("query-lastplayed", queryDate)] {
+            for size in ShareSize.allCases {
+                var o = options; o.size = size
+                if let png = ShareRenderer.png(card: queryAsk, options: o, identity: ShareIdentity(name: "someone", showsFooter: false), images: [:], scale: 1) {
+                    try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(size.rawValue).png"))
+                }
+            }
+        }
+        // A Rabbit Hole path.
+        func snapRH(_ artist: String, _ name: String, _ plays: Int, _ why: String?) -> RabbitHoleNode {
+            RabbitHoleNode(id: UUID(), track: RabbitHoleTrack(artist: artist, track: name, album: nil, imageURL: nil, playCount: plays, lastPlayed: Date(timeIntervalSince1970: 1_700_000_000), matchScore: 80, source: "check", reasons: why.map { [RabbitHoleReason(kind: .similar, text: $0)] }), parentID: nil, candidates: nil, childIDs: [])
+        }
+        let snapPath = ShareCards.rabbitHole(path: [
+            snapRH("Artist A", "The Starting Song", 120, nil), snapRH("Artist B", "Next Step Along", 47, "Last.fm: similar to The Starting Song"),
+            snapRH("Artist C", "A Third Track With A Rather Long Title", 9, "you often play it after Next Step Along (6 times)"), snapRH("Artist D", "Fourth", 63, "shares tags: dream pop, slowcore"),
+            snapRH("Artist E", "Fifth", 12, "tempo 118 vs 121"), snapRH("Artist F", "Sixth", 30, "Last.fm: similar to Fifth"),
+        ])
+        for size in ShareSize.allCases {
+            var o = ShareOptions(); o.size = size
+            if let png = ShareRenderer.png(card: snapPath, options: o, identity: ShareIdentity(name: "someone", showsFooter: false), images: [:], scale: 1) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "path-\(size.rawValue).png"))
+            }
+        }
+        let snapTreeNodes: [RabbitHoleNode] = {
+            var nodes = [snapRH("Artist A", "The Starting Song", 120, nil), snapRH("Artist B", "Next Step Along", 47, "Last.fm: similar to The Starting Song"), snapRH("Artist C", "A Third Track With A Rather Long Title", 9, "x"), snapRH("Artist D", "Fourth", 63, "x"), snapRH("Artist E", "Fifth", 12, "x"), snapRH("Artist F", "Sixth", 30, "x")]
+            nodes[0].candidates = [nodes[1].track, snapRH("Artist G", "Offered Not Taken", 5, nil).track, snapRH("Artist H", "Another Offer", 8, nil).track]
+            nodes[1].candidates = [snapRH("Artist I", "A Different Way", 4, nil).track, nodes[2].track, snapRH("Artist J", "Sideways", 2, nil).track]
+            nodes[2].candidates = [snapRH("Artist K", "Not This One", 2, nil).track, nodes[3].track]
+            nodes[4].candidates = [snapRH("Artist L", "Other Fifth", 6, nil).track, nodes[5].track]
+            return nodes.enumerated().map { index, node in
+                var n = node
+                n = RabbitHoleNode(id: node.id, track: node.track, parentID: index == 0 ? nil : nodes[index - 1].id, candidates: node.candidates, childIDs: [])
+                return n
+            }
+        }()
+        let snapTree = ShareCards.rabbitHole(path: snapTreeNodes)
+        for size in ShareSize.allCases {
+            var o = ShareOptions(); o.size = size; o.layout = .tree
+            if let png = ShareRenderer.png(card: snapTree, options: o, identity: ShareIdentity(name: "someone", showsFooter: false), images: [:], scale: 1) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "path-tree-\(size.rawValue).png"))
             }
         }
         // The collage with its caption: what and when, the name and the tag.

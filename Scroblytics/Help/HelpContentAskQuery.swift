@@ -18,6 +18,7 @@ extension HelpContent {
                     "Ask checks what a model wrote before it runs: a cap the model chose is kept only when your sentence says something about it (per, each, every, different…), blanks a model filled in (a date range on a name, “compared with 0 earlier”) are ignored, and “by <an artist in your library>” always becomes an Artist filter, which the explanation lists.",
                     "“Find 25 songs similar to X” is sent to [Similar Sounds](help://tool-similar-sounds) (Last.fm lookups), not turned into filters. The on-device engine can’t do these.",
                 ]),
+                .paragraph("Once Ask’s query has run, **Share** in the results header makes an image of the answer with your question as its title ([Sharing](help://screen-sharing)). It stops being the title as soon as you change a filter, sort or limit."),
                 .paragraph("The results grid shows the fields your request sorts on, filters on or groups by (for example **Release year** when you ask for one album from each release year), then Plays and Last played to round it out. Artist and album are already shown under each name."),
                 .paragraph("The example sentence shown in the empty box is chosen from things Ask can actually do, and changes each time you open it; press **Tab** or **Try it** to use it. The box clears after a query runs."),
                 .heading("Engines and privacy"),
@@ -51,6 +52,7 @@ extension HelpContent {
                     "The row **limit** is applied after sorting and after the caps (Scope › **At most N per artist / per album / per release year**, all of which can be used together). Per artist isn’t available when finding artists; per album applies only to tracks, and a track with no album is never capped by album; per release year applies to albums and tracks, and anything whose release year is missing, or still being looked up, is never capped by year (the year is the Release year field’s own value).",
                     "Number fields have units: Duration is typed in minutes, Time listened in hours, and percentage-style fields as fractions (0.25 is 25%).",
                 ]),
+                .paragraph("**Share** (in the results header) makes an image of the results as listed, in the order shown and as many rows as you choose (up to 20), and text copies with every column. The image shows one column, the one the query sorts on unless you pick another in the preview; its title is the saved set’s name or a description of the filters (or your question, for an Ask query). It can be made only when the results have finished loading; a value still being looked up shows as “…” ([Sharing](help://screen-sharing))."),
                 .paragraph("Choosing which columns to show, and in what order, is separate from the conditions. A column can carry its own date range to show two periods side by side; see [Periods and date scopes](help://query-periods)."),
             ]
         ),

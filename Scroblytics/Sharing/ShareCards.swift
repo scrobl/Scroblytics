@@ -173,6 +173,90 @@ enum ShareCards {
         )
     }
 
+    /// A Rabbit Hole path, track by track from where it started: each with its artist and, when the person wants it, why it was chosen.
+    /// The image shows plays, the last play or the match score; the text copies carry them all.
+    static func rabbitHole(path: [RabbitHoleNode], tree: RabbitHoleTree? = nil, now: Date = Date()) -> ShareCard {
+        let rows = path.enumerated().map { index, node -> ShareRow in
+            let track = node.track
+            let plays = track.playCount.formatted()
+            let last = track.lastPlayed.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—"
+            // The track it started from wasn't suggested by anything, so it has no match.
+            let match = node.parentID == nil || track.matchScore <= 0 ? "—" : "\(track.matchScore)%"
+            return ShareRow(
+                rank: index + 1, title: track.track, subtitle: track.artist, value: plays, change: .none, imageURL: track.imageURL,
+                values: [plays, last, match], note: track.reasons?.first?.text
+            )
+        }
+        // The tree: at each step, what was offered by the step before and not taken (and branches explored from it), the first two.
+        func pick(_ track: RabbitHoleTrack) -> ShareTree.Pick { ShareTree.Pick(title: track.track, artist: track.artist, imageURL: track.imageURL) }
+        let steps = path.enumerated().map { index, node -> ShareTree.Step in
+            guard index > 0 else { return ShareTree.Step(chosen: pick(node.track), others: []) }
+            let parent = path[index - 1]
+            var others: [RabbitHoleTrack] = parent.candidates ?? []
+            for childID in parent.childIDs { if let child = tree?.nodes[childID], child.id != node.id { others.append(child.track) } }
+            var seen: Set<String> = [node.track.id]
+            let unique = others.filter { seen.insert($0.id).inserted }
+            return ShareTree.Step(chosen: pick(node.track), others: Array(unique.prefix(2)).map(pick))
+        }
+        return ShareCard(
+            title: "Down the rabbit hole",
+            period: "",
+            measure: "",
+            rows: rows,
+            valueLabel: "Plays",
+            hasMovement: false,
+            generatedAt: now,
+            kindID: "rabbitHole",
+            valueColumns: ["Plays", "Last played", "Match score"],
+            defaultValueColumn: 0,
+            tree: ShareTree(steps: steps),
+            compactTitles: true
+        )
+    }
+
+    /// A Query result: its rows as the table lists them, each with every column's value as the table writes it. The image shows one of the
+    /// columns (the first the query sorts on unless the person picks another), the text copies carry them all.
+    /// - Parameters:
+    ///   - title: the question put to Ask, a saved set's name, or a description of the filters.
+    ///   - measure: how much of the result this is and how it is ordered.
+    static func queryResult(
+        title: String, target: QueryTarget, measure: String, rows: [QueryDisplayRow], columns: [ResolvedField], sortedColumn: Int?,
+        now: Date = Date()
+    ) -> ShareCard {
+        let titles = columns.map(\.title)
+        let defaultColumn = min(max(sortedColumn ?? 0, 0), max(titles.count - 1, 0))
+        let shareRows = rows.enumerated().map { index, row -> ShareRow in
+            let values = columns.map { QueryCellText.string(row.row.cells[$0.cacheKey] ?? .missing, column: $0) }
+            return ShareRow(
+                rank: index + 1, title: row.entity.name, subtitle: row.subtitle,
+                value: values.indices.contains(defaultColumn) ? values[defaultColumn] : "",
+                change: .none, imageURL: row.imageURL, values: values
+            )
+        }
+        return ShareCard(
+            title: title,
+            period: target.rawValue.capitalized + "s",
+            measure: measure,
+            rows: shareRows,
+            valueLabel: titles.indices.contains(defaultColumn) ? titles[defaultColumn] : "Value",
+            hasMovement: false,
+            generatedAt: now,
+            kindID: "query.\(target.rawValue)",
+            valueColumns: titles,
+            defaultValueColumn: defaultColumn
+        )
+    }
+
+    /// The index of the first of `columns` that the query sorts on, which is the value its image shows by default.
+    static func sortedColumnIndex(columns: [ResolvedField], sorts: [QuerySort], target: QueryTarget, registry: QueryFieldRegistry) -> Int? {
+        for sort in sorts {
+            guard case .field(let ref) = sort.key, let key = try? registry.resolve(ref, target: target).cacheKey,
+                  let index = columns.firstIndex(where: { $0.cacheKey == key }) else { continue }
+            return index
+        }
+        return nil
+    }
+
     /// Top Charts compares the chart over the same start with the same chart as it stood N days ago, so movement is "since" that day:
     /// "since Oct 10, 2026". (Another screen whose comparison is a different window words its own.)
     static func movementSince(_ compare: DateRange) -> String {

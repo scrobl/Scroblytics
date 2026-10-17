@@ -93,12 +93,71 @@ struct ShareCardView: View {
     let images: [String: NSImage]
 
     var body: some View {
-        if card.profile?.highlights.isEmpty == false {
+        if card.drawsTree(for: options) {
+            ShareTreeCardView(card: card, options: options, identity: identity, images: images)
+        } else if card.profile?.highlights.isEmpty == false {
             ShareRecapCardView(card: card, options: options, identity: identity, images: images)
         } else if card.profile != nil {
             ShareProfileCardView(card: card, options: options, identity: identity, images: images)
         } else {
             ShareTopListCardView(card: card, options: options, identity: identity, images: images)
+        }
+    }
+}
+
+/// The top of a list card: the kind and date line, the title (the person's own when they typed one), the measure, and the movement note.
+struct ShareListHeader: View {
+    let card: ShareCard
+    let options: ShareOptions
+
+    private var gold: Color { ShareCardStyle.gold }
+    private var showsMovementCaption: Bool { options.showMovement && card.hasMovement }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                if !card.period.isEmpty {
+                    Text(card.period.uppercased())
+                        .font(.system(size: 26, weight: .bold))
+                        .tracking(3)
+                        .foregroundStyle(gold)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 16)
+                if options.showDate {
+                    Text(card.generatedAt.formatted(date: .abbreviated, time: .omitted))
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+            }
+            // A sentence (a question put to Ask) is longer than "Top Albums": smaller, on up to two lines.
+            let shownTitle = card.displayTitle(for: options)
+            let longTitle = shownTitle.count > 24
+            Text(shownTitle)
+                .font(.system(size: longTitle ? 56 : 76, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(longTitle ? 2 : 1)
+                .minimumScaleFactor(0.5)
+            if !card.measure.isEmpty {
+                Text(card.measure)
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            if showsMovementCaption, let note = card.movementNote {
+                HStack(spacing: 8) {
+                    Text("▲▼")
+                        .font(.system(size: 22, weight: .bold))
+                    Text("Movement \(note)")
+                        .font(.system(size: 24, weight: .medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+                .foregroundStyle(Color.white.opacity(0.5))
+                .padding(.top, 2)
+            }
         }
     }
 }
@@ -140,52 +199,9 @@ struct ShareTopListCardView: View {
         ShareCardBackground(size: size, imageURL: rows.first?.imageURL, images: images)
     }
 
-    // MARK: Header
+    private var header: some View { ShareListHeader(card: card, options: options) }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(card.period.uppercased())
-                    .font(.system(size: 26, weight: .bold))
-                    .tracking(3)
-                    .foregroundStyle(gold)
-                    .lineLimit(1)
-                Spacer(minLength: 16)
-                if options.showDate {
-                    Text(card.generatedAt.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.62))
-                        .lineLimit(1)
-                }
-            }
-            Text(card.title)
-                .font(.system(size: 76, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-            if !card.measure.isEmpty {
-                Text(card.measure)
-                    .font(.system(size: 32, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.68))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-            }
-            if showsMovementCaption, let note = card.movementNote {
-                HStack(spacing: 8) {
-                    Text("▲▼")
-                        .font(.system(size: 22, weight: .bold))
-                    Text("Movement \(note)")
-                        .font(.system(size: 24, weight: .medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                }
-                .foregroundStyle(Color.white.opacity(0.5))
-                .padding(.top, 2)
-            }
-        }
-    }
-
-    private var showsMovementCaption: Bool { options.showMovement && card.hasMovement }
+    private var showsColumnLabel: Bool { !card.valueColumns.isEmpty && options.showValues }
 
     // MARK: Rows
 
@@ -194,10 +210,23 @@ struct ShareTopListCardView: View {
             let perColumn = max(1, Int((Double(rows.count) / Double(columns)).rounded(.up)))
             let gap: CGFloat = columns > 1 ? 56 : 0
             let columnWidth = (proxy.size.width - gap * CGFloat(columns - 1)) / CGFloat(columns)
-            let rowHeight = min(proxy.size.height / CGFloat(perColumn), 190)
+            // A query card says which column its numbers are, since "377" alone doesn't.
+            let labelHeight: CGFloat = showsColumnLabel ? 36 : 0
+            let rowHeight = min((proxy.size.height - labelHeight) / CGFloat(perColumn), 190)
             HStack(alignment: .top, spacing: gap) {
                 ForEach(0..<columns, id: \.self) { column in
                     VStack(spacing: 0) {
+                        if showsColumnLabel {
+                            HStack {
+                                Spacer(minLength: 0)
+                                Text(card.valueName(for: options).uppercased())
+                                    .font(.system(size: 22, weight: .bold))
+                                    .tracking(2)
+                                    .foregroundStyle(gold)
+                                    .lineLimit(1)
+                            }
+                            .frame(height: labelHeight)
+                        }
                         ForEach(Array(rows.enumerated()).filter { $0.offset / perColumn == column }, id: \.offset) { _, row in
                             rowView(row, height: rowHeight, width: columnWidth)
                         }
@@ -212,7 +241,7 @@ struct ShareTopListCardView: View {
     @ViewBuilder
     private func rowView(_ row: ShareRow, height: CGFloat, width: CGFloat) -> some View {
         let art = height - 14
-        let titleSize = min(max(height * 0.33, 20), 40)
+        let titleSize = min(max(height * 0.33, 20), 40) * (card.compactTitles ? 0.84 : 1)
         HStack(spacing: height * 0.16) {
             if card.numbered {
                 Text("\(row.rank)")
@@ -228,11 +257,13 @@ struct ShareTopListCardView: View {
                     .font(.system(size: titleSize, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                if let subtitle = row.subtitle, !subtitle.isEmpty {
+                if let subtitle = card.detailLine(row, options: options) {
+                    // A line that carries why a track was chosen is longer than an artist's name: smaller, on up to two lines.
+                    let withNote = options.showNotes && row.note != nil
                     Text(subtitle)
-                        .font(.system(size: titleSize * 0.72, weight: .regular))
+                        .font(.system(size: titleSize * (withNote ? 0.56 : 0.72), weight: .regular))
                         .foregroundStyle(Color.white.opacity(0.62))
-                        .lineLimit(1)
+                        .lineLimit(withNote ? 2 : 1)
                 }
             }
             Spacer(minLength: 8)
@@ -241,7 +272,7 @@ struct ShareTopListCardView: View {
                 if let milestone = row.milestone {
                     milestonePill(milestone, size: titleSize)
                 } else {
-                    Text(row.value)
+                    Text(card.valueText(row, options: options))
                         .font(.system(size: titleSize * 0.8, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(Color.white.opacity(0.85))
                         .lineLimit(1)

@@ -206,9 +206,10 @@ struct QueryView: View {
 
     /// Hands an interpreted Ask query to the builder — from here it is an ordinary query set: it runs,
     /// shows in the results table, can be edited in the builder and saved like any other.
-    private func loadAsked(_ spec: QuerySpec) {
+    private func loadAsked(_ spec: QuerySpec, question: String? = nil) {
         model.loadedSetID = nil
         model.spec = spec
+        model.rememberQuestion(question, for: spec)
     }
 
     private func save(as name: String, updating existing: SavedConditionSet?) {
@@ -275,8 +276,8 @@ struct QueryView: View {
                 ask: ask,
                 registry: model.registry,
                 context: askContext,
-                onRun: { applyAsked($0, showSettings: false) },
-                onEdit: { applyAsked($0, showSettings: true) },
+                onRun: { applyAsked($0, showSettings: false, question: ask.pendingQuestion) },
+                onEdit: { applyAsked($0, showSettings: true, question: ask.pendingQuestion) },
                 onSave: saveAsked
             )
         }
@@ -292,8 +293,8 @@ struct QueryView: View {
         )
     }
 
-    private func applyAsked(_ spec: QuerySpec, showSettings: Bool) {
-        loadAsked(spec)
+    private func applyAsked(_ spec: QuerySpec, showSettings: Bool, question: String? = nil) {
+        loadAsked(spec, question: question)
         if showSettings { showsSettings = true }
         showingAsk = false
     }
@@ -313,9 +314,9 @@ struct QueryView: View {
         if let cameFrom = request.cameFrom { navigation.predecessor = cameFrom }
         switch request.action {
         case .run:
-            applyAsked(request.spec, showSettings: false)
+            applyAsked(request.spec, showSettings: false, question: request.question)
         case .edit:
-            applyAsked(request.spec, showSettings: true)
+            applyAsked(request.spec, showSettings: true, question: request.question)
         case .save:
             saveAsked(request.spec)
         }
@@ -887,6 +888,8 @@ struct QueryView: View {
             }
             if model.isRunning { ProgressView().controlSize(.small) }
             Spacer()
+            ShareButton(card: { makeShareCard() }, isEnabled: canShare)
+                .controlSize(.small)
             if model.spec.target == .track, !model.displayRows.isEmpty {
                 Button(allQueryTracksFlagged ? "All Flagged" : "Flag All", systemImage: "flag") {
                     flagAllQueryTracks()
@@ -942,6 +945,26 @@ struct QueryView: View {
         .sheet(item: $tagSheet) { payload in
             TagTracksSheet(tracks: payload.tracks, modelContainer: modelContainer, navigation: navigation)
         }
+    }
+
+    // MARK: - Sharing
+
+    private var canShare: Bool {
+        model.result != nil && model.validationError == nil && !model.isRunning && !model.displayRows.isEmpty
+    }
+
+    /// The results as they are listed: titled with the question put to Ask while the query still is what it asked for, otherwise the
+    /// saved set's name, otherwise a description of the filters.
+    private func makeShareCard() -> ShareCard? {
+        guard canShare, let result = model.result else { return nil }
+        let chips = AskChips.describe(model.spec, registry: model.registry)
+        let filters = chips.filter { $0.kind == .condition || $0.kind == .alternative }.map(\.text)
+        let title = model.currentQuestion ?? loadedSet?.name
+            ?? (filters.isEmpty ? "All \(model.spec.target.rawValue)s" : filters.joined(separator: " · "))
+        return ShareCards.queryResult(
+            title: title, target: model.spec.target, measure: "", rows: model.displayRows, columns: result.columns,
+            sortedColumn: ShareCards.sortedColumnIndex(columns: result.columns, sorts: model.spec.sorts, target: model.spec.target, registry: model.registry)
+        )
     }
 
     private var queryPlaylistTracks: [AppleMusicPlaylistTrack] {

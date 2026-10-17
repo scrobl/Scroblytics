@@ -169,6 +169,17 @@ private struct SharePopover: View {
                     Spacer()
                 }
             }
+            if card.tree != nil {
+                Picker("Layout", selection: $options.layout) {
+                    ForEach(ShareLayout.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            if card.isList {
+                TextField("Title", text: $options.customTitle, prompt: Text(card.title))
+                    .textFieldStyle(.roundedBorder)
+            }
             if card.iconChoice {
                 HStack {
                     Text("Picture for the total")
@@ -180,8 +191,31 @@ private struct SharePopover: View {
                     .fixedSize()
                 }
             }
-            if card.isList {
-                Toggle("Show \(card.valueLabel.lowercased())", isOn: $options.showValues)
+            if card.isList && !card.drawsTree(for: options) {
+                if card.valueColumns.isEmpty {
+                    Toggle("Show \(card.valueLabel.lowercased())", isOn: $options.showValues)
+                } else {
+                    // Which column the image shows, or none of them.
+                    HStack {
+                        Text("Show")
+                        Picker("Show", selection: Binding(
+                            get: { options.showValues ? card.valueColumnIndex(for: options) : -1 },
+                            set: { choice in
+                                options.showValues = choice >= 0
+                                if choice >= 0 { options.valueColumn = choice }
+                            }
+                        )) {
+                            ForEach(Array(card.valueColumns.enumerated()), id: \.offset) { Text($1).tag($0) }
+                            Divider()
+                            Text("None").tag(-1)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+            }
+            if card.hasNotes && !card.drawsTree(for: options) {
+                Toggle("Show why each track was chosen", isOn: $options.showNotes)
             }
             Toggle("Show today’s date", isOn: $options.showDate)
             if card.hasMovement {

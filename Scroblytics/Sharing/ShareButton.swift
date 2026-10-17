@@ -154,8 +154,9 @@ private struct SharePopover: View {
     /// 5, 10, 15 and 20 where the card has that many rows, and all of them when it has fewer.
     private var rowChoices: [Int] {
         let available = card.rows.count
-        var choices = ShareOptions.rowCounts.filter { $0 <= available }
-        if available <= (ShareOptions.rowCounts.max() ?? 20), !choices.contains(available) { choices.append(available) }
+        let most = min(ShareOptions.rowCounts.max() ?? 20, options.size.maxRows)
+        var choices = ShareOptions.rowCounts.filter { $0 <= available && $0 <= most }
+        if available <= most, !choices.contains(available) { choices.append(available) }
         return choices.isEmpty ? [max(available, 1)] : choices.sorted()
     }
 

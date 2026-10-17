@@ -81,6 +81,68 @@ enum ShareCards {
         )
     }
 
+    /// The Overview's recap of the chosen period: the page's own totals as tiles, then its top artist, album and track. `compare` carries the
+    /// Overview's comparison (the same range ended earlier) when it has one that means something: never for All time, whose "previous"
+    /// would be nearly the same history, so All time says since when instead.
+    struct OverviewRecapInput {
+        var totals: OverviewTotals
+        var metric: TopChartsMetric
+        /// Time listened over the period; nil while it is still being worked out (the card waits for it).
+        var timeListenedSeconds: Int?
+        var periodLabel: String
+        var isAllTime: Bool
+        /// What the comparison is against ("30 days ago", "Mar 3, 2026"); nil when no comparison is chosen.
+        var compareLabel: String?
+        var firstScrobble: Date?
+        var currentStreak: Int?
+    }
+
+    static func overviewRecap(_ input: OverviewRecapInput, now: Date = Date()) -> ShareCard? {
+        let totals = input.totals
+        if input.metric == .timeListened, input.timeListenedSeconds == nil { return nil }
+        var stats: [ShareStat] = []
+        if input.metric == .timeListened {
+            stats.append(ShareStat(label: "Time Listened", value: DurationEngine.formatTimeListened(input.timeListenedSeconds ?? 0)))
+        } else {
+            stats.append(ShareStat(label: "Scrobbles", value: totals.scrobbles.formatted()))
+        }
+        stats += [
+            ShareStat(label: "Artists", value: totals.artists.formatted()),
+            ShareStat(label: "Albums", value: totals.albums.formatted()),
+            ShareStat(label: "Tracks", value: totals.tracks.formatted()),
+        ]
+        if input.isAllTime {
+            if let first = input.firstScrobble {
+                stats.append(ShareStat(label: "Scrobbling since", value: first.formatted(date: .abbreviated, time: .omitted)))
+            }
+        } else if input.metric == .scrobbles, let label = input.compareLabel, let previous = totals.compare?.scrobbles {
+            // The same figure the page's badge shows: how far scrobbles are from what they were at the comparison date.
+            if previous == 0 {
+                if totals.scrobbles > 0 { stats.append(ShareStat(label: "Vs \(label)", value: "New")) }
+            } else if let pct = OverviewTotalsEngine.percentChange(current: totals.scrobbles, previous: previous) {
+                stats.append(ShareStat(label: "Vs \(label)", value: (pct > 0 ? "+" : "") + "\(pct)%"))
+            }
+        }
+        stats.append(ShareStat(label: "New artists", value: totals.newArtists.formatted()))
+        stats.append(ShareStat(label: "Per day", value: String(format: "%.1f", totals.perDay)))
+        if let streak = input.currentStreak, streak > 0 { stats.append(ShareStat(label: "Current streak", value: streak == 1 ? "1 day" : "\(streak) days")) }
+
+        func value(_ entry: OverviewTopEntry) -> String {
+            input.metric == .timeListened
+                ? DurationEngine.formatTimeListened(entry.timeListenedSeconds ?? 0)
+                : "\(entry.playcount.formatted()) \(entry.playcount == 1 ? "play" : "plays")"
+        }
+        var highlights: [ShareHighlight] = []
+        if let top = totals.topArtist { highlights.append(ShareHighlight(role: "Top Artist", title: top.name, subtitle: nil, value: value(top), imageURL: top.imageURL)) }
+        if let top = totals.topAlbum { highlights.append(ShareHighlight(role: "Top Album", title: top.name, subtitle: top.artist, value: value(top), imageURL: top.imageURL)) }
+        if let top = totals.topTrack { highlights.append(ShareHighlight(role: "Top Track", title: top.name, subtitle: top.artist, value: value(top), imageURL: top.imageURL)) }
+        return ShareCard(
+            title: input.periodLabel, period: "", measure: "", rows: [], valueLabel: input.metric == .timeListened ? "Time" : "Plays",
+            hasMovement: false, generatedAt: now, kindID: "overview.recap",
+            profile: ShareProfile(kind: "Listening recap", subtitle: "", heroImageURL: nil, stats: stats, chips: [], highlights: highlights, trend: [])
+        )
+    }
+
     /// One milestone reached by an artist, album or track (or by the whole library, with no name or picture of its own).
     static func milestone(
         kind: String, name: String, artist: String?, imageURL: String?, milestone: Int, achievedAt: Date, firstAt: Date, now: Date = Date()

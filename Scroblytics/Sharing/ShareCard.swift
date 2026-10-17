@@ -165,6 +165,8 @@ enum ShareSize: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     /// Columns of rows on the card: a wide card splits its list in two.
     var columns: Int { self == .wide ? 2 : 1 }
+    /// The most rows of a list that stay readable: a square card has less height than a portrait one, and a wide one splits its list in two.
+    var maxRows: Int { self == .square ? 15 : 20 }
     /// How many stat tiles a profile card has room for.
     var statLimit: Int {
         switch self {
@@ -241,7 +243,7 @@ struct ShareIdentity: Equatable, Sendable {
 extension ShareCard {
     /// The rows a card shows for these options: the first `rowCount`, never more than exist.
     func visibleRows(for options: ShareOptions) -> [ShareRow] {
-        Array(rows.prefix(max(1, options.rowCount)))
+        Array(rows.prefix(max(1, min(options.rowCount, options.size.maxRows))))
     }
 
     /// The stat tiles a profile card shows at this size.

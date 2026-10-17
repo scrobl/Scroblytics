@@ -260,7 +260,7 @@ struct ShareTrendLine: View {
 }
 
 
-/// The numbers as tiles, `columns` to a row; a short last row keeps its tiles the same width as the rest.
+/// The numbers as tiles, `columns` to a row; a short last row spreads its tiles across the whole width.
 struct ShareStatGrid: View {
     let stats: [ShareStat]
     let columns: Int
@@ -271,8 +271,8 @@ struct ShareStatGrid: View {
         VStack(spacing: 14) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 14) {
+                    // A short last row spreads its tiles across the full width rather than leaving a gap.
                     ForEach(Array(row.enumerated()), id: \.offset) { _, stat in tile(stat) }
-                    ForEach(0..<(columns - row.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 0) }
                 }
             }
         }

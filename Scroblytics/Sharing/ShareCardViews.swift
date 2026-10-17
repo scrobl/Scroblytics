@@ -243,11 +243,18 @@ struct ShareTopListCardView: View {
     @ViewBuilder
     private func rowView(_ row: ShareRow, height: CGFloat, width: CGFloat) -> some View {
         let art = height - 14
-        let titleSize = min(max(height * 0.33, 20), 40) * (card.compactTitles ? 0.84 : 1)
+        // The text must fit the row: the title and the second line (up to two lines when it carries why a track was chosen) are sized so
+        // that together they are shorter than the row, however many rows share the card.
+        let hasNote = options.showNotes && row.note != nil
+        let secondLine = card.detailLine(row, options: options) != nil
+        let subtitleFactor: CGFloat = hasNote ? 0.56 : 0.72
+        let subtitleLines: CGFloat = hasNote ? 2 : 1
+        let fit = (height - 6) / (1.25 + (secondLine ? 1.25 * subtitleFactor * subtitleLines : 0))
+        let titleSize = max(min(max(height * 0.33, 20), 40, fit) * (card.compactTitles ? 0.84 : 1), 9)
         HStack(spacing: height * 0.16) {
             if card.numbered {
                 Text("\(row.rank)")
-                    .font(.system(size: min(max(height * 0.40, 22), 48), weight: .heavy, design: .rounded))
+                    .font(.system(size: min(max(height * 0.40, 14), 48), weight: .heavy, design: .rounded))
                     .foregroundStyle(row.rank == 1 ? gold : Color.white.opacity(0.8))
                     .frame(width: height * 0.62, alignment: .center)
                     .minimumScaleFactor(0.5)
@@ -261,11 +268,10 @@ struct ShareTopListCardView: View {
                     .lineLimit(1)
                 if let subtitle = card.detailLine(row, options: options) {
                     // A line that carries why a track was chosen is longer than an artist's name: smaller, on up to two lines.
-                    let withNote = options.showNotes && row.note != nil
                     Text(subtitle)
-                        .font(.system(size: titleSize * (withNote ? 0.56 : 0.72), weight: .regular))
+                        .font(.system(size: titleSize * subtitleFactor, weight: .regular))
                         .foregroundStyle(Color.white.opacity(0.62))
-                        .lineLimit(withNote ? 2 : 1)
+                        .lineLimit(hasNote ? 2 : 1)
                 }
             }
             Spacer(minLength: 8)

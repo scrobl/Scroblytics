@@ -145,6 +145,18 @@ enum ShareChecks {
             check("the four marks draw four different cards", logoCircle != nil && Set([logoCircle, logoWordmark, logoBadge, logoNone]).count == 4)
             check("the wordmark keeps its proportions", abs(LastfmMark.wordmarkAspect - 352.0 / 96.0) < 0.001 && (NSImage(named: "LastfmWordmark").map { abs($0.size.width / $0.size.height - LastfmMark.wordmarkAspect) < 0.01 } ?? false))
 
+            // A square card can't hold twenty rows readably: it shows at most fifteen, however many were asked for
+            var twenty = ShareOptions(); twenty.rowCount = 20
+            var squareTwenty = twenty; squareTwenty.size = .square
+            var portraitTwenty = twenty; portraitTwenty.size = .portrait
+            let manyRows = ShareCard(title: "T", period: "P", measure: "", rows: (1...20).map { ShareRow(rank: $0, title: "Track \($0)", subtitle: "Artist · Album", value: "1", change: .none, imageURL: nil) }, valueLabel: "Plays", hasMovement: false, kindID: "x")
+            check("a square list shows at most 15 rows, a portrait or wide one 20", manyRows.visibleRows(for: squareTwenty).count == 15 && manyRows.visibleRows(for: portraitTwenty).count == 20 && ShareSize.wide.maxRows == 20)
+            for size in ShareSize.allCases {
+                var o = twenty; o.size = size
+                let png = ShareRenderer.png(card: manyRows, options: o, identity: .anonymous, images: [:])
+                check("twenty long rows, \(size.label): render", png != nil)
+            }
+
             // MARK: Images
             check("the three sizes in points", ShareSize.square.points == CGSize(width: 1080, height: 1080) && ShareSize.portrait.points == CGSize(width: 1080, height: 1350) && ShareSize.wide.points == CGSize(width: 1920, height: 1080))
             for size in ShareSize.allCases {
@@ -402,6 +414,51 @@ enum ShareChecks {
             check("the chart's headline numbers are printed above its picture; down is drawn differently from up; a plain detail line works", ShareRenderer.png(card: withSummary, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: chartCard, options: ShareOptions(), identity: .anonymous, images: [:]) && ShareRenderer.png(card: withSummary, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: withDown, options: ShareOptions(), identity: .anonymous, images: [:]) && ShareRenderer.png(card: withDetail, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: chartCard, options: ShareOptions(), identity: .anonymous, images: [:]))
             var dateOff = ShareOptions(); dateOff.showDate = false
             check("the date can be left off a chart card", ShareRenderer.png(card: chartCard, options: dateOff, identity: .anonymous, images: [:]) != ShareRenderer.png(card: chartCard, options: ShareOptions(), identity: .anonymous, images: [:]))
+
+            // MARK: The Overview recap
+            func ovTop(_ name: String, _ artist: String?, plays: Int, seconds: Int? = nil) -> OverviewTopEntry {
+                OverviewTopEntry(name: name, artist: artist, album: nil, playcount: plays, imageURL: "file:///art/\(name).jpg", loved: false, timeListenedSeconds: seconds)
+            }
+            let ovTotals = OverviewTotals(
+                scrobbles: 1200, artists: 80, albums: 150, tracks: 700, trackKeys: [], perDay: 3.3333, newArtists: 12,
+                compare: OverviewCompare(scrobbles: 1000, artists: 70, albums: 140, tracks: 650),
+                topArtist: ovTop("Artist A", nil, plays: 90, seconds: 36_000), topAlbum: ovTop("Album A", "Artist A", plays: 40, seconds: 14_000), topTrack: ovTop("Song A", "Artist B", plays: 1, seconds: 200)
+            )
+            func ovInput(metric: TopChartsMetric = .scrobbles, seconds: Int? = nil, allTime: Bool = false, compareLabel: String? = "30 days ago", totals: OverviewTotals = ovTotals, streak: Int? = 5) -> ShareCards.OverviewRecapInput {
+                ShareCards.OverviewRecapInput(totals: totals, metric: metric, timeListenedSeconds: seconds, periodLabel: allTime ? "All time" : "Year to date", isAllTime: allTime, compareLabel: compareLabel, firstScrobble: Date(timeIntervalSince1970: 1_600_000_000), currentStreak: streak)
+            }
+            let ovCard = ShareCards.overviewRecap(ovInput())!
+            let ovLabels = ovCard.profile?.stats.map(\.label) ?? []
+            check("the recap says its period, and its figures are the page's", ovCard.title == "Year to date" && ovCard.kindID == "overview.recap" && ovCard.profile?.kind == "Listening recap" && ovLabels.prefix(4) == ["Scrobbles", "Artists", "Albums", "Tracks"] && ovCard.profile?.stats[0].value == 1200.formatted() && ovCard.profile?.stats[1].value == "80" && ovCard.profile?.stats[3].value == "700", "\(ovLabels)")
+            check("the comparison is the page's own percentage (+20% on 1000 → 1200), named for what it is against", ovLabels[4] == "Vs 30 days ago" && ovCard.profile?.stats[4].value == "+20%", "\(ovLabels)")
+            check("then new artists, per day and the streak", Array(ovLabels.dropFirst(5)) == ["New artists", "Per day", "Current streak"] && ovCard.profile?.stats[6].value == "3.3" && ovCard.profile?.stats[7].value == "5 days")
+            check("the three top picks, with artists and plays", ovCard.profile?.highlights.map(\.role) == ["Top Artist", "Top Album", "Top Track"] && ovCard.profile?.highlights.map(\.value) == ["90 plays", "40 plays", "1 play"] && ovCard.profile?.highlights[1].subtitle == "Artist A" && ovCard.profile?.highlights[0].subtitle == nil)
+            let ovAll = ShareCards.overviewRecap(ovInput(allTime: true, compareLabel: nil))!
+            check("All time has no comparison; it says since when instead", !(ovAll.profile?.stats.map(\.label) ?? []).contains { $0.hasPrefix("Vs ") } && ovAll.profile?.stats[4].label == "Scrobbling since" && ovAll.profile?.stats[4].value == Date(timeIntervalSince1970: 1_600_000_000).formatted(date: .abbreviated, time: .omitted))
+            let ovAllWithCompare = ShareCards.overviewRecap(ovInput(allTime: true))!
+            check("…even if a comparison happens to be set", !(ovAllWithCompare.profile?.stats.map(\.label) ?? []).contains { $0.hasPrefix("Vs ") })
+            let ovNoCompare = ShareCards.overviewRecap(ovInput(compareLabel: nil))!
+            check("with no comparison chosen the tile is left out, not shown empty", !(ovNoCompare.profile?.stats.map(\.label) ?? []).contains { $0.hasPrefix("Vs ") } && ovNoCompare.profile?.stats.count == 7)
+            let ovShort = OverviewTotals(scrobbles: 1200, artists: 80, albums: 150, tracks: 700, trackKeys: [], perDay: 3, newArtists: 1, compare: nil, topArtist: nil, topAlbum: nil, topTrack: nil)
+            check("a period too short to compare leaves it out, and no tops means no picks", !(ShareCards.overviewRecap(ovInput(totals: ovShort))!.profile?.stats.map(\.label) ?? []).contains { $0.hasPrefix("Vs ") } && ShareCards.overviewRecap(ovInput(totals: ovShort))!.profile?.highlights.isEmpty == true)
+            let ovZero = OverviewTotals(scrobbles: 50, artists: 5, albums: 5, tracks: 5, trackKeys: [], perDay: 1, newArtists: 5, compare: OverviewCompare(scrobbles: 0, artists: 0, albums: 0, tracks: 0), topArtist: nil, topAlbum: nil, topTrack: nil)
+            check("growth from nothing says New, as the page's badge does", ShareCards.overviewRecap(ovInput(totals: ovZero))!.profile?.stats[4].value == "New")
+            let ovDown = OverviewTotals(scrobbles: 800, artists: 80, albums: 150, tracks: 700, trackKeys: [], perDay: 3, newArtists: 1, compare: OverviewCompare(scrobbles: 1000, artists: 70, albums: 140, tracks: 650), topArtist: nil, topAlbum: nil, topTrack: nil)
+            check("a fall is written with its minus", ShareCards.overviewRecap(ovInput(totals: ovDown))!.profile?.stats[4].value == "-20%")
+            check("by time listened the first tile and the picks are times, and there is no scrobbles comparison (the page has none)", {
+                let card = ShareCards.overviewRecap(ovInput(metric: .timeListened, seconds: 7_200))!
+                let labels = card.profile?.stats.map(\.label) ?? []
+                return labels[0] == "Time Listened" && card.profile?.stats[0].value == DurationEngine.formatTimeListened(7_200) && !labels.contains { $0.hasPrefix("Vs ") } && card.profile?.highlights[0].value == DurationEngine.formatTimeListened(36_000)
+            }())
+            check("while the time is still being worked out there is no card yet", ShareCards.overviewRecap(ovInput(metric: .timeListened, seconds: nil)) == nil)
+            check("no streak, no tile", !(ShareCards.overviewRecap(ovInput(streak: 0))!.profile?.stats.map(\.label) ?? []).contains("Current streak"))
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                let png = ShareRenderer.png(card: ovCard, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("the recap, \(size.label): a PNG at 2x, not blank", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                check("the recap, \(size.label): shows only as many tiles as fit", ovCard.visibleStats(for: o).count == min(8, size.statLimit))
+            }
 
             // MARK: Milestones and Timeline
             let reached = Date(timeIntervalSince1970: 1_700_000_000), firstPlay = Date(timeIntervalSince1970: 1_690_000_000)
@@ -696,6 +753,38 @@ enum ShareChecks {
                 let seconds = Date().timeIntervalSince(start)
                 if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-path-\(size.rawValue).png")) }
                 check("the path card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s", png != nil && seconds < 3)
+            }
+        }
+        // The Overview recap, from the page's own totals engine against plain counts over the history.
+        do {
+            let all = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+            let compareRange = OverviewTotalsEngine.endingDaysAgo(range, days: 30)
+            let totals = OverviewTotalsEngine.fetch(scrobbles: all, range: range, compareRange: compareRange)
+            let card = ShareCards.overviewRecap(ShareCards.OverviewRecapInput(totals: totals, metric: .scrobbles, timeListenedSeconds: nil, periodLabel: "Last 365 days", isAllTime: false, compareLabel: "30 days ago", firstScrobble: all.first?.playedAt, currentStreak: nil))
+            let windowPlays = all.filter { $0.playedAt >= range.from && $0.playedAt <= range.to }
+            let before = all.filter { play in compareRange.map { play.playedAt >= $0.from && play.playedAt <= $0.to } ?? false }
+            let stats = Dictionary(uniqueKeysWithValues: (card?.profile?.stats ?? []).map { ($0.label, $0.value) })
+            check("recap: scrobbles equal an independent count (\(windowPlays.count))", stats["Scrobbles"] == windowPlays.count.formatted(), "\(stats["Scrobbles"] ?? "none")")
+            check("recap: artists, albums and tracks are the distinct counts", stats["Artists"] == Set(windowPlays.map(\.artistName)).count.formatted() && stats["Albums"] == Set(windowPlays.filter { !$0.albumName.isEmpty }.map { $0.artistName + "\u{0}" + $0.albumName }).count.formatted() && stats["Tracks"] == Set(windowPlays.map { $0.artistName + "\u{0}" + $0.trackName }).count.formatted(), "\(stats)")
+            if !before.isEmpty {
+                let pct = Int((Double(windowPlays.count - before.count) / Double(before.count) * 100).rounded())
+                check("recap: the comparison equals an independent percentage (\(pct)%)", stats["Vs 30 days ago"] == (pct > 0 ? "+" : "") + "\(pct)%", "\(stats["Vs 30 days ago"] ?? "none")")
+            }
+            if let top = card?.profile?.highlights.first {
+                let counts = Dictionary(grouping: windowPlays, by: \.artistName).mapValues(\.count)
+                check("recap: the top artist is the most played, with its plays (\(counts.values.max() ?? 0))", top.value == "\((counts.values.max() ?? 0).formatted()) plays" && counts[top.title] == counts.values.max(), "\(top.title) \(top.value)")
+            }
+            let allTotals = OverviewTotalsEngine.fetch(scrobbles: all, range: DateRange(from: all.first?.playedAt ?? range.from, to: Date()), compareRange: nil)
+            let allCard = ShareCards.overviewRecap(ShareCards.OverviewRecapInput(totals: allTotals, metric: .scrobbles, timeListenedSeconds: nil, periodLabel: "All time", isAllTime: true, compareLabel: nil, firstScrobble: all.first?.playedAt, currentStreak: nil))
+            check("recap, all time: every scrobble, and since the first one", allCard?.profile?.stats.first?.value == all.count.formatted() && allCard?.profile?.stats.contains { $0.label == "Scrobbling since" } == true)
+            let images = await ShareArtwork.load(card?.pictureURLs(for: ShareOptions()) ?? [])
+            for size in ShareSize.allCases {
+                var options = ShareOptions(); options.size = size
+                let start = Date()
+                let png = card.flatMap { ShareRenderer.png(card: $0, options: options, identity: .anonymous, images: images) }
+                let seconds = Date().timeIntervalSince(start)
+                if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-recap-\(size.rawValue).png")) }
+                check("recap, \(size.label): rendered in \(String(format: "%.2f", seconds)) s", png != nil && seconds < 3)
             }
         }
         // Milestones and Timeline, from the same engines the pages use, against plain counts over the history.
@@ -1171,6 +1260,28 @@ enum ShareChecks {
             var o = ShareOptions(); o.size = size; o.layout = .tree
             if let png = ShareRenderer.png(card: snapTree, options: o, identity: ShareIdentity(name: "someone", showsFooter: false), images: [:], scale: 1) {
                 try? png.write(to: URL(fileURLWithPath: folder).appending(path: "path-tree-\(size.rawValue).png"))
+            }
+        }
+        // A mock of an Overview "Listening recap" (made-up numbers), drawn with the existing recap layout.
+        let mockRecap = ShareCard(
+            title: "Year to date", period: "", measure: "", rows: [], valueLabel: "Plays", hasMovement: false, kindID: "overview.recap",
+            profile: ShareProfile(
+                kind: "Listening recap", subtitle: "", heroImageURL: nil,
+                stats: [ShareStat(label: "Scrobbles", value: "12,345"), ShareStat(label: "Artists", value: "612"), ShareStat(label: "Albums", value: "1,043"), ShareStat(label: "Tracks", value: "3,870"),
+                        ShareStat(label: "vs Jan 1, 2025 – Oct 17, 2025", value: "+8.4%"), ShareStat(label: "New artists", value: "87"), ShareStat(label: "Per day", value: "42.1"), ShareStat(label: "Current streak", value: "23 days")],
+                chips: [],
+                highlights: [
+                    ShareHighlight(role: "Top Artist", title: "Artist A", subtitle: nil, value: "931 plays", imageURL: "file:///art/Artist A.jpg"),
+                    ShareHighlight(role: "Top Album", title: "Album A", subtitle: "Artist A", value: "236 plays", imageURL: "file:///art/Album A.jpg"),
+                    ShareHighlight(role: "Top Track", title: "A Song With A Rather Long Title", subtitle: "Artist B", value: "47 plays", imageURL: "file:///art/Song With A Rather Long Title.jpg"),
+                ],
+                trend: []
+            )
+        )
+        for size in ShareSize.allCases {
+            var o = ShareOptions(); o.size = size
+            if let png = ShareRenderer.png(card: mockRecap, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: recapArt, scale: 1) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "mock-overview-recap-\(size.rawValue).png"))
             }
         }
         // The collage with its caption: what and when, the name and the tag.

@@ -175,6 +175,7 @@ struct ScroblyticsApp: App {
         OverviewChecks.runHeadlessIfRequested()
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
         EditionChecks.runHeadlessIfRequested(container: modelContainer)
+        ShareChecks.runHeadlessIfRequested(container: modelContainer)
         DetailSnapshots.runHeadlessIfRequested(container: modelContainer)
         DetailDump.runHeadlessIfRequested(container: modelContainer)
         PerfChecks.runHeadlessIfRequested(container: modelContainer)
@@ -441,6 +442,37 @@ enum SettingsTab: String {
     static let storageKey = "settings.selectedTab"
 }
 
+/// Settings › General › Sharing: what a shared card says about you, by default nothing.
+struct SharingSettingsSection: View {
+    @AppStorage(ShareSettings.showsNameKey) private var showsName = false
+    @AppStorage(ShareSettings.showsFooterKey) private var showsFooter = false
+    @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
+
+    var body: some View {
+        Section("Sharing") {
+            Toggle("Show my Last.fm name on shared cards", isOn: $showsName)
+            Picker("Last.fm logo", selection: $logoRaw) {
+                ForEach(LastfmLogoStyle.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            HStack(spacing: 8) {
+                Text("Preview").font(AppTypography.supporting).foregroundStyle(.secondary)
+                if (LastfmLogoStyle(rawValue: logoRaw) ?? .circle) != .none {
+                    LastfmMark(size: 26, style: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
+                }
+                Text("your_name").font(AppTypography.supporting)
+            }
+            Text("The logo goes in front of your name on shared cards, and marks the Now Playing bar.")
+                .font(AppTypography.supporting)
+                .foregroundStyle(.secondary)
+            Toggle("Show “Scroblytics” on shared cards", isOn: $showsFooter)
+            Text("Both are off until you turn them on. The Share button makes the card on this Mac; nothing is sent anywhere unless you paste it or choose a target in the Share menu.")
+                .font(AppTypography.supporting)
+                .foregroundStyle(.secondary)
+            HelpLinkButton(articleID: "screen-sharing", title: "About Sharing")
+        }
+    }
+}
+
 /// Settings › General › Privacy: where the privacy policy is, and the Help article on what leaves the Mac.
 struct PrivacySettingsSection: View {
     var body: some View {
@@ -485,6 +517,7 @@ private struct AppearanceSettingsView: View {
                 HelpLinkButton(articleID: "offline-mode", title: "What Offline mode does")
             }
 
+            SharingSettingsSection()
             PrivacySettingsSection()
             SupportSettingsSection()
 

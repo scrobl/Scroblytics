@@ -25,6 +25,7 @@ struct TrendsHeatmapChart: View {
     }
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
     @State private var heatmap: TrendsHeatmap?
+    @Environment(\.shareChartCapture) private var shareCapture
     @State private var isLoading = true
     @State private var hovered: Slot?
 
@@ -56,10 +57,13 @@ struct TrendsHeatmapChart: View {
                 .pickerStyle(.segmented).labelsHidden()
             }
             if let heatmap {
-                grid(title: heatmap.compareCounts == nil ? nil : "This period", counts: heatmap.counts, range: heatmap.range, index: 0)
-                if let compare = heatmap.compareCounts, let compareRange = heatmap.compareRange {
-                    grid(title: "Previous period · " + TrendsDrill.rangeLabel(from: compareRange.from, to: compareRange.to), counts: compare, range: compareRange, index: 1)
+                VStack(alignment: .leading, spacing: 14) {
+                    grid(title: heatmap.compareCounts == nil ? nil : "This period", counts: heatmap.counts, range: heatmap.range, index: 0)
+                    if let compare = heatmap.compareCounts, let compareRange = heatmap.compareRange {
+                        grid(title: "Previous period · " + TrendsDrill.rangeLabel(from: compareRange.from, to: compareRange.to), counts: compare, range: compareRange, index: 1)
+                    }
                 }
+                .shareChartArea()
                 if metric == .timeListened, heatmap.pending > 0 {
                     Label("\(heatmap.pending.formatted()) plays are still waiting for a track length and aren’t counted yet.", systemImage: "hourglass")
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -170,5 +174,12 @@ struct TrendsHeatmapChart: View {
         guard !Task.isCancelled, let computed else { return }
         heatmap = computed
         isLoading = false
+        // The busiest hour, as the chart's own header says it, for a shared card.
+        shareCapture?.summary = computed.peak.map {
+            ShareChartSummary(
+                headline: "Busiest: \(QueryPlayFilter.dayNames[$0.day]) \(QueryPlayFilter.hourLabel($0.hour))",
+                change: nil, detail: "\(TrendsWeight.format($0.count, metric: metric)) \(metric == .plays ? "scrobbles" : "listened")"
+            )
+        }
     }
 }

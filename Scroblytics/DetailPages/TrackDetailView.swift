@@ -21,6 +21,11 @@ struct TrackDetailView: View {
         (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).range()
     }
 
+    /// The period the page is showing, as its picker words it; shared cards say it.
+    private var periodLabel: String {
+        (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).label
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -45,7 +50,8 @@ struct TrackDetailView: View {
                         onEditReleaseDate: { showingReleaseDateEdit = true },
                         onEditDuration: { showingDurationEdit = true },
                         onEditTempo: { showingBPMEdit = true }
-                    )
+                    ),
+                    sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
                         communityTags: model.communityTags, yourTags: model.yourTags, entity: .track,

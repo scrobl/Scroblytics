@@ -32,8 +32,8 @@ enum AskPrompt {
         for a number of results ("top 25", "the 10 most played", "just one").
         - A diversity cap keeps at most N results that share something: "perArtist" (the same artist), "perAlbum" (the same album; tracks \
         only) and "perReleaseYear" (the same year of release; albums and tracks). "2 songs per artist" → perArtist 2. "the top song from \
-        each album", "one track per album" → perAlbum 1 (each / every / one per means 1). "one album from each release year" → \
-        perReleaseYear 1. A cap is fully supported, so NEVER put it in "unsupported". With "top" or "most played", also sort by plays \
+        each album", "one track per album" → perAlbum 1 (each / every / one per means 1). "one album from each release year", \
+        "top album by release year" (a singular "top / best / most played" thing, then "by release year") → perReleaseYear 1. A cap is fully supported, so NEVER put it in "unsupported". With "top" or "most played", also sort by plays \
         descending, and leave "limit" null unless the request also asks for a total ("top 10 songs, 1 per artist" → limit 10, perArtist 1). \
         All three caps are null when the request names none. "each year" about when something was played is a period, not a cap.
         - Say each thing once. Do not add conditions the request didn't ask for. Do not add a "plays greater than 0" condition.

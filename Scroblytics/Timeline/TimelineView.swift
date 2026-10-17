@@ -273,8 +273,12 @@ private struct TimelineMonthPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(month.monthStart.formatted(.dateTime.month(.wide).year()))
-                .font(AppTypography.entityTitle)
+            HStack(alignment: .firstTextBaseline) {
+                Text(month.monthStart.formatted(.dateTime.month(.wide).year()))
+                    .font(AppTypography.entityTitle)
+                Spacer()
+                ShareButton(card: { ShareCards.timelineMonth(month, metric: metric) })
+            }
             TimelineMonthTotalsBar(
                 totals: month.totals,
                 milestones: month.milestones,

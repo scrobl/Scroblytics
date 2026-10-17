@@ -34,6 +34,13 @@ struct CollageGeneratorView: View {
     @State private var errorMessage: String?
     @State private var hasLoadedOptions = false
     @State private var zoom = 1.0
+    @State private var accountName: String?
+    /// The caption under the collage (what it shows and when) and the two identity lines. Kept in the app's preferences, not in the
+    /// saved tool options, so options saved by earlier versions still load. The two identity switches are the Share popover's.
+    @AppStorage("collage.showsDetails") private var showsDetails = false
+    @AppStorage(ShareSettings.showsNameKey) private var showsName = false
+    @AppStorage(ShareSettings.showsFooterKey) private var showsTag = false
+    @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
 
     private var entity: TopChartsEntity {
         TopChartsEntity(rawValue: options.entityRawValue) ?? .album
@@ -41,6 +48,21 @@ struct CollageGeneratorView: View {
 
     private var metric: TopChartsMetric {
         TopChartsMetric(rawValue: options.metricRawValue) ?? .scrobbles
+    }
+
+    /// What the caption under the collage says, from the current choices.
+    private var footer: CollageFooter {
+        CollageFooter(
+            details: showsDetails ? CollageCaption.make(
+                source: options.source, entity: entity, metric: metric, period: options.period, rangeLabel: rangeLabel
+            ).text(date: Date()) : nil,
+            identity: ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsTag, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
+        )
+    }
+
+    private var rangeLabel: String {
+        if options.rangeID == "custom" { return ShareCards.rangeLabel(selectedRange) }
+        return rangeOptions.first { $0.id == options.rangeID }?.label ?? ShareCards.rangeLabel(selectedRange)
     }
 
     private var selectedRange: DateRange {
@@ -78,11 +100,19 @@ struct CollageGeneratorView: View {
                     showTitles: $options.showTitles,
                     showStats: $options.showStats,
                     showPeriod: $options.showPeriod,
+                    showsDetails: $showsDetails,
+                    showsName: $showsName,
+                    showsTag: $showsTag,
+                    accountName: accountName,
                     periodAvailable: options.source == .period,
                     zoom: $zoom,
                     canExport: !items.isEmpty && !isLoading && !isExporting,
                     isExporting: isExporting,
-                    onExport: export
+                    onExport: export,
+                    onCopy: copyImage,
+                    shareImage: ShareCardImage(render: { [items, images, grid = options.grid, metric, titles = options.showTitles, stats = options.showStats, period = options.showPeriod, footer] in
+                        Self.renderPNG(items: items, images: images, grid: grid, metric: metric, showTitles: titles, showStats: stats, showPeriod: period, footer: footer)
+                    })
                 )
 
                 content
@@ -91,6 +121,7 @@ struct CollageGeneratorView: View {
         }
         .navigationTitle("Collage Generator")
         .task {
+            accountName = ShareSettings.accountName(context: modelContext)
             let oldest = try? await TopChartsEngine.fetchOldestScrobbleDate(container: modelContainer)
             rangeOptions = DateRangePresets.build(oldestScrobbleDate: oldest)
             options = ToolFilterSettingsStore.load(
@@ -147,9 +178,7 @@ struct CollageGeneratorView: View {
                     let baseWidth = min(proxy.size.width, 960)
                     let collageWidth = baseWidth * zoom
                     let dimensions = options.grid.dimensions
-                    let collageHeight = collageWidth
-                        * CGFloat(dimensions.rows)
-                        / CGFloat(dimensions.columns)
+                    let collageHeight = collageWidth * CollageCanvas.heightRatio(grid: options.grid, footer: footer)
                     CollageCanvas(
                         items: items,
                         images: images,
@@ -158,15 +187,13 @@ struct CollageGeneratorView: View {
                         showTitles: options.showTitles,
                         showStats: options.showStats,
                         showPeriod: options.showPeriod,
+                        footer: footer,
                         onSelect: open
                     )
                     .frame(width: collageWidth, height: collageHeight)
                     .position(x: proxy.size.width / 2, y: 12 + collageHeight / 2)
                 }
-                .aspectRatio(
-                    CGFloat(options.grid.dimensions.columns) / CGFloat(options.grid.dimensions.rows),
-                    contentMode: .fit
-                )
+                .aspectRatio(1 / CollageCanvas.heightRatio(grid: options.grid, footer: footer), contentMode: .fit)
                 .frame(minHeight: 300)
                 .clipped()
                 .background(Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
@@ -261,25 +288,23 @@ struct CollageGeneratorView: View {
         })
     }
 
+    /// The collage as PNG data at full size (3600 px wide, or tall for the widescreen grid).
     @MainActor
-    private func export() {
-        isExporting = true
-        let dimensions = options.grid.dimensions
-        let size: CGSize
-        if dimensions.columns == dimensions.rows {
-            size = CGSize(width: 3600, height: 3600)
-        } else {
-            size = CGSize(width: 3600, height: 3600 * CGFloat(dimensions.rows) / CGFloat(dimensions.columns))
-        }
+    static func renderPNG(
+        items: [CollageItem], images: [String: NSImage], grid: CollageGrid, metric: TopChartsMetric,
+        showTitles: Bool, showStats: Bool, showPeriod: Bool, footer: CollageFooter = .none
+    ) -> Data? {
+        let size = CGSize(width: 3600, height: 3600 * CollageCanvas.heightRatio(grid: grid, footer: footer))
 
         let canvas = CollageCanvas(
             items: items,
             images: images,
-            grid: options.grid,
+            grid: grid,
             metric: metric,
-            showTitles: options.showTitles,
-            showStats: options.showStats,
-            showPeriod: options.showPeriod,
+            showTitles: showTitles,
+            showStats: showStats,
+            showPeriod: showPeriod,
+            footer: footer,
             onSelect: nil
         )
         .frame(width: size.width, height: size.height)
@@ -290,8 +315,22 @@ struct CollageGeneratorView: View {
 
         guard let image = renderer.nsImage,
               let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let data = bitmap.representation(using: .png, properties: [:]) else {
+              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    @MainActor
+    private func currentPNG() -> Data? {
+        Self.renderPNG(
+            items: items, images: images, grid: options.grid, metric: metric,
+            showTitles: options.showTitles, showStats: options.showStats, showPeriod: options.showPeriod, footer: footer
+        )
+    }
+
+    @MainActor
+    private func export() {
+        isExporting = true
+        guard let data = currentPNG() else {
             errorMessage = "The collage could not be rendered."
             isExporting = false
             return
@@ -309,6 +348,21 @@ struct CollageGeneratorView: View {
             }
         }
         isExporting = false
+    }
+
+    /// Puts the collage on the clipboard, to paste into a post or a message.
+    @MainActor
+    private func copyImage() {
+        isExporting = true
+        defer { isExporting = false }
+        guard let data = currentPNG() else {
+            errorMessage = "The collage could not be rendered."
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setData(data, forType: .png)
+        if let image = NSImage(data: data) { pasteboard.writeObjects([image]) }
     }
 
     private func open(_ item: CollageItem) {
@@ -403,11 +457,17 @@ private struct CollageDisplayControls: View {
     @Binding var showTitles: Bool
     @Binding var showStats: Bool
     @Binding var showPeriod: Bool
+    @Binding var showsDetails: Bool
+    @Binding var showsName: Bool
+    @Binding var showsTag: Bool
+    let accountName: String?
     let periodAvailable: Bool
     @Binding var zoom: Double
     let canExport: Bool
     let isExporting: Bool
     let onExport: () -> Void
+    let onCopy: () -> Void
+    let shareImage: ShareCardImage
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -425,6 +485,13 @@ private struct CollageDisplayControls: View {
         Toggle("Stats", isOn: $showStats)
         Toggle("Period labels", isOn: $showPeriod)
             .disabled(!periodAvailable)
+        Toggle("What and when", isOn: $showsDetails)
+            .help("A caption under the collage: what it shows, the period and today’s date")
+        Toggle("My Last.fm name", isOn: $showsName)
+            .disabled(accountName == nil)
+            .help(accountName.map { "Adds “\($0)” under the collage" } ?? "No Last.fm account is saved")
+        Toggle("Scroblytics", isOn: $showsTag)
+            .help("Adds “Scroblytics” under the collage")
         HStack {
             Image(systemName: "minus.magnifyingglass")
             Slider(value: $zoom, in: 0.5...2, step: 0.1)
@@ -442,10 +509,19 @@ private struct CollageDisplayControls: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(!canExport)
+        Button(action: onCopy) {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+        .disabled(!canExport)
+        .help("Copy the collage to paste into a post or message")
+        ShareLink(item: shareImage, preview: SharePreview("Scroblytics Collage")) {
+            Label("Share…", systemImage: "square.and.arrow.up")
+        }
+        .disabled(!canExport)
     }
 }
 
-private struct CollageCanvas: View {
+struct CollageCanvas: View {
     let items: [CollageItem]
     let images: [String: NSImage]
     let grid: CollageGrid
@@ -453,17 +529,29 @@ private struct CollageCanvas: View {
     let showTitles: Bool
     let showStats: Bool
     let showPeriod: Bool
+    var footer: CollageFooter = .none
     let onSelect: ((CollageItem) -> Void)?
+
+    /// The caption strip's height as a fraction of the collage's width.
+    static let footerFraction: CGFloat = 0.07
+
+    /// Height over width of the whole collage: the grid, plus the caption strip when there is one.
+    static func heightRatio(grid: CollageGrid, footer: CollageFooter) -> CGFloat {
+        let dimensions = grid.dimensions
+        return CGFloat(dimensions.rows) / CGFloat(dimensions.columns) + (footer.isEmpty ? 0 : footerFraction)
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let dimensions = grid.dimensions
-            let availableTileWidth = proxy.size.width / CGFloat(dimensions.columns)
-            let availableTileHeight = proxy.size.height / CGFloat(dimensions.rows)
+            let footerHeight = footer.isEmpty ? 0 : proxy.size.width * Self.footerFraction
+            let area = CGSize(width: proxy.size.width, height: proxy.size.height - footerHeight)
+            let availableTileWidth = area.width / CGFloat(dimensions.columns)
+            let availableTileHeight = area.height / CGFloat(dimensions.rows)
             let gap = max(1, min(availableTileWidth, availableTileHeight) * 0.02)
             let tileSize = min(
-                (proxy.size.width - gap * CGFloat(dimensions.columns - 1)) / CGFloat(dimensions.columns),
-                (proxy.size.height - gap * CGFloat(dimensions.rows - 1)) / CGFloat(dimensions.rows)
+                (area.width - gap * CGFloat(dimensions.columns - 1)) / CGFloat(dimensions.columns),
+                (area.height - gap * CGFloat(dimensions.rows - 1)) / CGFloat(dimensions.rows)
             )
             LazyVGrid(
                 columns: Array(repeating: GridItem(.fixed(tileSize), spacing: gap), count: dimensions.columns),
@@ -485,7 +573,12 @@ private struct CollageCanvas: View {
                 width: tileSize * CGFloat(dimensions.columns) + gap * CGFloat(dimensions.columns - 1),
                 height: tileSize * CGFloat(dimensions.rows) + gap * CGFloat(dimensions.rows - 1)
             )
-            .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            .position(x: area.width / 2, y: area.height / 2)
+            if !footer.isEmpty {
+                CollageFooterView(footer: footer, width: proxy.size.width)
+                    .frame(width: proxy.size.width, height: footerHeight)
+                    .position(x: proxy.size.width / 2, y: area.height + footerHeight / 2)
+            }
         }
         .background(Color.black)
         .accessibilityElement(children: .contain)
@@ -590,5 +683,76 @@ private struct CollageTile: View {
             .padding(.horizontal, 6 * typographyScale)
             .padding(.vertical, 4 * typographyScale)
             .background(.black.opacity(0.72), in: Capsule())
+    }
+}
+
+
+/// The line under a collage: what it shows and when, and the person's name and the app's name, each only when chosen.
+struct CollageFooter: Equatable {
+    var details: String?
+    var identity: ShareIdentity
+
+    static let none = CollageFooter(details: nil, identity: .anonymous)
+
+    var isEmpty: Bool { details == nil && !ShareCardFooter.isShown(identity) }
+}
+
+/// What a collage shows, in words: "Top Albums · Last 365 days · Ranked by scrobbles · Oct 17, 2026".
+struct CollageCaption: Equatable {
+    var title: String
+    var period: String
+    var measure: String
+
+    static func make(source: CollageSource, entity: TopChartsEntity, metric: TopChartsMetric, period: CollagePeriod, rangeLabel: String) -> CollageCaption {
+        let measure = metric == .scrobbles ? "Ranked by scrobbles" : "Ranked by time listened"
+        switch source {
+        case .top:
+            return CollageCaption(title: "Top \(entity.displayName)", period: rangeLabel, measure: measure)
+        case .period:
+            return CollageCaption(title: "Top \(entity.displayName)", period: "One favorite per release \(period.rawValue)", measure: measure)
+        }
+    }
+
+    func text(date: Date) -> String {
+        [title, period, measure, date.formatted(date: .abbreviated, time: .omitted)].joined(separator: " · ")
+    }
+}
+
+private struct CollageFooterView: View {
+    let footer: CollageFooter
+    /// The collage's width, which everything here scales with (the same strip at 960 pt on screen and 3600 px saved).
+    let width: CGFloat
+
+    var body: some View {
+        let font = width * 0.022
+        HStack(spacing: font) {
+            if let details = footer.details {
+                Text(details)
+                    .font(.system(size: font, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.78))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
+            Spacer(minLength: 0)
+            if let name = footer.identity.name, !name.isEmpty {
+                HStack(spacing: font * 0.45) {
+                    LastfmMark(size: font * 1.25, style: footer.identity.logo)
+                    Text(name)
+                        .font(.system(size: font, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .lineLimit(1)
+                }
+            }
+            if footer.identity.showsFooter {
+                Text("Scroblytics")
+                    .font(.system(size: font, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, font * 1.2)
+        .frame(maxHeight: .infinity)
+        .background(Color(white: 0.06))
+        .environment(\.colorScheme, .dark)
     }
 }

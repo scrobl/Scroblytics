@@ -21,6 +21,8 @@ comfortable with that. The same information is available inside the app under **
   such as matching albums, auditing loved tracks, finding gaps and exporting playlists. That information is not sent anywhere.
   The app changes Music only when you ask it to: *Create Apple Music Playlist* (which creates a playlist, or adds tracks to one
   you pick, from tracks already in your library) and the Loved Status Audit's *Remove from Favorites…* (after you confirm).
+- **Shared images and text.** The Share button makes an image or text on your Mac. It contains your name only if you turn that
+  on, nothing is sent anywhere by the app, and what you copy, save or send from the Share menu is your choice.
 - **Backups and exports** you create are files you choose the location of. They contain your listening history and are not
   encrypted, so store them as carefully as you would any personal file. They never contain your keys.
 

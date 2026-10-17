@@ -362,6 +362,24 @@ struct OverviewView: View {
         (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).range()
     }
 
+    /// A recap of the period on screen, from the totals the page holds. Nil until they have loaded (and, by time listened, until the
+    /// track lengths have).
+    private func makeRecapCard() -> ShareCard? {
+        guard let totals else { return nil }
+        let option = rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]
+        let isAllTime = option.id == "alltime"
+        var compareLabel: String?
+        if !isAllTime, settings.resolveCompareRange(for: currentRange) != nil {
+            compareLabel = settings.compareMode == .custom
+                ? settings.compareCustomDate.map { $0.formatted(date: .abbreviated, time: .omitted) }
+                : settings.compareMode.label
+        }
+        return ShareCards.overviewRecap(ShareCards.OverviewRecapInput(
+            totals: totals, metric: overviewMetric, timeListenedSeconds: timeListenedSeconds, periodLabel: option.label, isAllTime: isAllTime,
+            compareLabel: compareLabel, firstScrobble: oldestScrobbleDate, currentStreak: streakResult?.currentStreak
+        ))
+    }
+
     private var similarSoundSeeds: [SimilarSeed] {
         var seen = Set<String>()
         return reverbPicks.compactMap { row in
@@ -396,6 +414,10 @@ struct OverviewView: View {
                             rangeOptions: rangeOptions,
                             currentRange: currentRange
                         )
+                        .overlay(alignment: .topTrailing) {
+                            ShareButton(card: { makeRecapCard() }, isEnabled: makeRecapCard() != nil)
+                                .padding(.top, 6)
+                        }
                         if let errorMessage {
                             Text(errorMessage).foregroundStyle(.secondary)
                         }

@@ -29,6 +29,7 @@ struct TrendsLongTailChart: View {
         return LongTailMetric.available(for: entity).contains(m) ? m : .plays
     }
     private var noun: String { entity.rawValue + "s" }
+    @Environment(\.shareChartCapture) private var shareCapture
 
     private struct ComputeKey: Equatable { let entity: QueryTarget; let metric: LongTailMetric; let inputs: Inputs }
 
@@ -36,8 +37,11 @@ struct TrendsLongTailChart: View {
         VStack(alignment: .leading, spacing: 14) {
             controls
             if let data, let stats = data.stats {
-                statRow(stats, data: data)
-                chart(data).frame(height: 240)
+                VStack(alignment: .leading, spacing: 14) {
+                    statRow(stats, data: data)
+                    chart(data).frame(height: 240)
+                }
+                .shareChartArea()
                 if let conc = data.concentration(topPercent: topPercent) { concentrationLine(data, conc) }
                 if data.pending > 0 { pendingNote(data) }
                 Text("Click a bar to see the \(noun) in that range.").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -56,6 +60,7 @@ struct TrendsLongTailChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(entity: entity, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .onChange(of: topPercent) { publishSummary(data) }
     }
 
     private var controls: some View {
@@ -167,5 +172,16 @@ struct TrendsLongTailChart: View {
         guard !Task.isCancelled, let computed else { return }
         data = computed
         isLoading = false
+        publishSummary(computed)
+    }
+
+    /// The sentence under the chart ("The top 10% of your tracks (5) account for 15.4% of plays"), for a shared card; it follows the
+    /// percentage chosen, so it is published again when that changes.
+    private func publishSummary(_ data: TrendsLongTail?) {
+        guard let data, let conc = data.concentration(topPercent: topPercent) else { shareCapture?.summary = nil; return }
+        shareCapture?.summary = ShareChartSummary(
+            headline: "The top \(topPercent)% of your \(noun) (\(conc.topCount.formatted()))",
+            detail: "account for \(conc.share.formatted(.number.precision(.fractionLength(0...1))))% of \(data.concentrationMetric == .timeListened ? "time listened" : "plays")"
+        )
     }
 }

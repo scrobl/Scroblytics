@@ -23,6 +23,7 @@ struct TrendsDiscoveryChart: View {
     @State private var discovery: TrendsDiscovery?
     @State private var isLoading = true
     @State private var hovered: TrendsDiscovery.Point?
+    @Environment(\.shareChartCapture) private var shareCapture
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
 
     private func changeText(_ discovery: TrendsDiscovery) -> (text: String, positive: Bool)? {
@@ -55,7 +56,7 @@ struct TrendsDiscoveryChart: View {
                 if discovery != nil { legend }
             }
             if let discovery {
-                chart(discovery).frame(height: 220)
+                chart(discovery).frame(height: 220).shareChartArea()
                 if metric == .timeListened, discovery.pending > 0 {
                     Label("\(discovery.pending.formatted()) plays are still waiting for a track length and aren’t counted yet.", systemImage: "hourglass")
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -159,5 +160,19 @@ struct TrendsDiscoveryChart: View {
         guard !Task.isCancelled, let computed else { return }
         discovery = computed
         isLoading = false
+        // The same headline and key the chart shows above itself, for a shared card.
+        let detail = metric == .plays
+            ? "\(computed.newTotal.formatted()) new tracks · \(computed.repeatTotal.formatted()) repeat plays"
+            : "\(TrendsWeight.format(computed.newTotal, metric: .timeListened)) on something new · \(TrendsWeight.format(computed.repeatTotal, metric: .timeListened)) on repeats"
+        let change = changeText(computed)
+        var legend = [
+            ShareChartSummary.Legend(label: "New", color: .green),
+            ShareChartSummary.Legend(label: "Repeat", color: Color.gray.opacity(0.7)),
+        ]
+        if inputs.compareRange != nil { legend.append(ShareChartSummary.Legend(label: "Previous period (% new)", color: .purple, isLine: true)) }
+        shareCapture?.summary = ShareChartSummary(
+            headline: "\(computed.newPercent.formatted(.number.precision(.fractionLength(1))))% new", change: change?.text, isUp: change?.positive ?? true,
+            detail: detail, legend: legend
+        )
     }
 }

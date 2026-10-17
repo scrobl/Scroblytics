@@ -74,6 +74,7 @@ extension HelpContent {
             summary: "Follow recommendations from your own library, step by step.",
             blocks: [
                 .paragraph("Pick a starting track. At each step you choose one of **3 recommended tracks** from your library, never repeating tracks already on your path. Only tracks you have played are ever suggested. **Back One Step**, **New Suggestions**, **Take Steps for Me…**, **Add Track** and **Start Over** control the path. **Filters** and **Style**, above the path, are closed to save room and show a summary of what is set; click either to change it. Only the current path is exported to an Apple Music playlist."),
+                .paragraph("Once the path has two tracks, **Share** (beside Export) makes an image or text of it: the tracks in order with their artists, why each was chosen (turn **Show why each track was chosen** off to leave that out), and their plays or last play ([Sharing](help://screen-sharing)). It can be a list or a **tree** (choose Layout in the preview): the tracks you took down a line, with the other tracks that were on offer at each step, dimmed, hanging beside it. Show lets the list display plays, last play, the match score or nothing, and you can type your own title. Branches you went back from aren’t shown, only the first two other tracks offered at each step."),
                 .heading("Where the suggestions come from"),
                 .paragraph("Each step gathers candidates from several places, merges them, and then picks three. The reason for each suggestion is shown under **Why these three** and on the card."),
                 .bullets([
@@ -181,7 +182,7 @@ extension HelpContent {
             title: "Collage Generator",
             summary: "Make a PNG collage of your top artwork.",
             blocks: [
-                .paragraph("Choose a layout (3×3 up to 16×9), a source — **Top items** for a listening period, or **One per release period** (week, month, year or decade) — the content (artists, albums or tracks) and the Metric. Toggle titles, stats and period labels, zoom, then **Save PNG**. It shows how many tiles have artwork. Release-period collages bucket by release date (UTC); only music with a known release date is included."),
+                .paragraph("Choose a layout (3×3 up to 16×9), a source — **Top items** for a listening period, or **One per release period** (week, month, year or decade) — the content (artists, albums or tracks) and the Metric. Toggle titles, stats and period labels, zoom, then **Save PNG**, **Copy Image** (to paste into a post or message) or **Share…** (the macOS Share menu). Three more switches add a strip under the collage: **What and when** (what it shows, the period, how it is ranked and today’s date), **My Last.fm name** and **Scroblytics**. The last two are off until you turn them on and are the same switches as in the Share preview and Settings › General › Sharing. It shows how many tiles have artwork. Release-period collages bucket by release date (UTC); only music with a known release date is included."),
             ]
         ),
     ])

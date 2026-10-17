@@ -10,6 +10,7 @@ struct NowPlayingShelf: View {
     /// The artwork every other screen shows for this track (your own image, a saved or inherited album image), falling back to what
     /// Last.fm reported for the play, which can be another edition's cover.
     @State private var resolvedImageURL: String?
+    @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
 
     var body: some View {
         HStack(spacing: 8) {
@@ -56,9 +57,7 @@ struct NowPlayingShelf: View {
 
                     Spacer(minLength: 12)
 
-                    Image(systemName: "lastfm")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
+                    LastfmMark(size: 22, style: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
                         .accessibilityHidden(true)
 
                     Image(systemName: "chevron.right")

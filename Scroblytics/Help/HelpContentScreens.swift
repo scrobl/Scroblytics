@@ -7,7 +7,7 @@ extension HelpContent {
             title: "Overview",
             summary: "What each card shows and which ones follow the date range.",
             blocks: [
-                .paragraph("Overview is a dashboard. The **Period**, **Compare** and **Metric** controls at the top (see [Date range, comparison and Metric](help://concepts-metric-compare)) drive the cards marked “range” below; the others always look at fixed windows or all of your history. Press ⌘R to recompute it from local data."),
+                .paragraph("Overview is a dashboard. The **Period**, **Compare** and **Metric** controls at the top (see [Date range, comparison and Metric](help://concepts-metric-compare)) drive the cards marked “range” below; the others always look at fixed windows or all of your history. Press ⌘R to recompute it from local data. The **Share** button at the top right makes a recap card of the period and totals shown ([Sharing](help://screen-sharing))."),
                 .table(headers: ["Card", "Follows the range?", "What it shows"], rows: [
                     ["**Milestone / Album turned over banners**", "No", "Dismissible notices from the last sync(s): [milestones](help://metrics-milestones) crossed and albums that completed a [turnover cycle](help://metrics-turnover)."],
                     ["**Almost there**", "No", "Up to 6 artists, albums or tracks exactly one play from a milestone, soonest expected first, in three columns and two rows. A narrower window shows the first 4 (two columns) or 2 (one column), never a third row."],
@@ -41,7 +41,27 @@ extension HelpContent {
                     "**Create Apple Music Playlist** exports the chart’s tracks that are in your Music library.",
                     "**Chart race** animates cumulative rankings across the range.",
                     "List or grid layout is a toggle.",
+                    "**Share** makes an image or text of the chart as it is on screen ([Sharing](help://screen-sharing)).",
                 ]),
+            ]
+        ),
+        HelpArticle(
+            id: "screen-sharing",
+            title: "Sharing",
+            summary: "The Share button: an image or text of what you are looking at, for friends or a Reddit post.",
+            blocks: [
+                .paragraph("A **Share** button appears where something worth showing is: on [Top Charts](help://screen-top-charts), and on the header of an artist, album or track page ([how](help://screen-detail-pages)), on [Milestones](help://screen-milestones) on each month of the [Timeline](help://screen-timeline), on the results of a [Query or Ask](help://query-basics), on a [Rabbit Hole](help://tool-rabbit-hole) path, on each chart of [Trends](help://screen-trends), and on [Overview](help://screen-overview), where **Share** (top right) makes a listening recap of the period shown. The [Collage Generator](help://tool-collage) has **Copy Image** and **Share…** beside Save PNG. More screens will follow. The button opens a preview of a card made from exactly what is on screen, with options that suit that card (size, how many rows, whether to show plays and movement) and four ways to send it on."),
+                .bullets([
+                    "**Copy Image** puts the card on the clipboard. Paste it into a Reddit post, a message or a document.",
+                    "**Save PNG…** saves it as a file (twice the card’s size, so it stays sharp when shrunk).",
+                    "**Share…** opens the macOS Share menu (Messages, Mail, AirDrop, Notes and so on).",
+                    "**Copy Text** copies the same list as a Markdown table (Reddit shows it as a table), a Markdown list, or plain text.",
+                ]),
+                .paragraph("A chart makes a ranked list. An artist, album or track page makes a profile card: the picture and name, the page’s own numbers as tiles (the plays or time in the page’s period, first and last scrobble, play frequency, and the page’s facts such as release date and turnover), the yearly rank and milestone badges, and the trend line. The card says the period the page is showing. The text forms give the same numbers as a table or list."),
+                .paragraph("A list that isn’t a ranking (the milestones you reached) has no row numbers, and shows each milestone as a coloured pill like the Milestones page. The library’s own total milestones have no picture, so the preview lets you choose a trophy or the Last.fm logo for them. A month of the Timeline makes a recap card: its name, totals, its top artist, album and track with their pictures, and the milestones reached that month. One achieved milestone makes a card with the number reached, the date and how long it took. The Overview recap has the period as its title, the totals the page shows (scrobbles, or time listened when that is the Metric, then artists, albums and tracks), the change in scrobbles against the comparison you chose (left out when none applies, and for **All time**, which has nothing to compare with, it says when you started scrobbling instead), new artists, scrobbles per day, your current streak, and your top artist, album and track; how many tiles show depends on the card’s size. When the Metric is time listened the card waits until the track lengths are known. A Trends chart makes a card that is a picture of the chart as it is drawn on screen (with its title, the period and, where the chart compares, what it is compared with), so it shows exactly what you see, including the Metric you chose. Volume over time prints its headline above the picture (the scrobbles or time listened, and the change against the comparison period, in green or red) When you listen prints the busiest hour, Discovery prints the share of plays that were new with its key, Rankings and Eras print their legends (which colour is which artist, album, track or decade) in readable type, and Long tail prints its “top 10% account for …” sentence; it has no text copy, and it starts wide because charts are wider than tall. A query’s results make a list card with one value column (the one it is sorted on, or the one you pick in the preview) and all the columns in the text copies."),
+                .paragraph("Cards are square, portrait or wide. The card uses the pictures saved on this Mac; with [Offline mode](help://offline-mode) on, a picture that isn’t saved is left out and the preview says so."),
+                .heading("What a card says about you"),
+                .paragraph("Nothing by default: no Last.fm name and no “Scroblytics” credit. Turn on **Show my Last.fm name** (from your saved account) or **Show “Scroblytics” on the card** in the preview, or under Settings › General › Sharing; your choice is remembered. In front of your name goes the Last.fm logo (the red circle) by default; Settings › General › Sharing also offers the “last.fm” wordmark, a simple badge, or no mark at all, and the same choice marks the Now Playing bar. A card is made on your Mac. Nothing is sent anywhere unless you paste it or pick a target in the Share menu, and no Reddit or other account is used."),
             ]
         ),
         HelpArticle(
@@ -65,6 +85,7 @@ extension HelpContent {
                     HelpDefinition(term: "Milestones", detail: "Upcoming and achieved play-count [milestones](help://metrics-milestones) for this item."),
                     HelpDefinition(term: "Release date and duration", detail: "The pencil opens an editor. A release date accepts `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; a duration accepts `m:ss` or `h:mm:ss`, with an Apple Music prefill. “Reset to Detected” removes your override. A track’s own release date applies to that song only, not its album."),
                     HelpDefinition(term: "Tempo", detail: "A track’s tempo in BPM, with its time signature and key when GetSongBPM knew them; hover for where it came from. The pencil opens an editor with ÷ 2 and × 2 buttons for a tempo a detector reported at half or double speed. “Reset to Detected” removes your correction. See [Tempo](help://tempo-lookup)."),
+                    HelpDefinition(term: "Share", detail: "The share icon beside the name makes a card of the page (see [Sharing](help://screen-sharing)): the picture, the numbers in the tiles, the badges and the trend, for the period chosen above. It is disabled until the numbers have loaded."),
                     HelpDefinition(term: "Tags", detail: "Community tags (from Last.fm, read-only) and Your tags. Adding or removing yours needs [Track Actions](help://track-actions) and changes your public Last.fm profile."),
                     HelpDefinition(term: "Album turnover", detail: "Cycles completed, rate and tracks still unheard ([how](help://metrics-turnover)). They show as tiles (**Tracks**, **Turnover**, **Full cycles** and **This cycle**, such as “8 of 11”), and the per-track checklist is the **Cycle** column of the track table."),
                     HelpDefinition(term: "Track table", detail: "An album’s whole tracklist in order, with each track’s plays in the chosen period and when it was last played. The **Cycle** column shows whether the track counts toward the current listen-through, which is all-time, not limited to the period. A track with no plays in the period is dimmed and shows 0, but it still opens its own page (which shows its plays for whatever period you choose). Plays that match no title on the tracklist are listed under “Other tracks played”. **All tracks**, **Played in period** and **Not heard this cycle** filter it. With no Last.fm account, no tracklist or no match, it is just the tracks you played, with no Cycle column. The playlist export includes only tracks you played. **Length** is the track’s saved length (your correction, else the lookup); a track whose length isn’t known shows a dash. A narrow window drops “Last played” first, then “Length”."),
@@ -78,7 +99,7 @@ extension HelpContent {
             title: "Timeline",
             summary: "Your top artist, album and track for every month and week.",
             blocks: [
-                .paragraph("Newest month first. Each month shows totals (plays, artists, albums, tracks), any milestone badges reached that month, and the top artist, album and track; its weeks (starting on your chosen week-start day) are nested beneath. The only control is the Metric. It ignores the date range."),
+                .paragraph("Newest month first. Each month shows totals (plays, artists, albums, tracks), any milestone badges reached that month, and the top artist, album and track; its weeks (starting on your chosen week-start day) are nested beneath. The only control is the Metric. It ignores the date range. Each month has a **Share** button that makes a recap card of it ([Sharing](help://screen-sharing))."),
                 .paragraph("A period’s winner is the highest value; ties go to whichever was first played in that period, then to artist name. Artist spellings are combined; albums are identified by exact artist and album name."),
             ]
         ),
@@ -87,7 +108,7 @@ extension HelpContent {
             title: "Trends",
             summary: "Charts about how your listening changes and is distributed.",
             blocks: [
-                .paragraph("Trends has its own Period and **Compare with** control (see [Date range, comparison and Metric](help://concepts-metric-compare)) and four groups, chosen with **Show**. Each chart has its own Metric switch, and clicking part of a chart opens Query pre-filled. Query’s breadcrumb and Back button return to the Trends screen that opened it."),
+                .paragraph("Trends has its own Period and **Compare with** control (see [Date range, comparison and Metric](help://concepts-metric-compare)) and four groups, chosen with **Show**. Each chart has its own Metric switch, and clicking part of a chart opens Query pre-filled. Query’s breadcrumb and Back button return to the Trends screen that opened it. Each chart has a **Share** button beside its title that makes a card of the chart as drawn ([Sharing](help://screen-sharing)); a chart that shows only a “not enough data” message has nothing to share."),
                 .table(headers: ["Group", "Charts"], rows: [
                     ["**Listening**", "Volume over time; When you listen (weekday × hour heatmap); Discovery (new vs repeat plays) — [Discovery](help://metrics-distribution)"],
                     ["**Taste & eras**", "Eras (share by release decade); Taste (top tags) — [Eras and Taste](help://metrics-trends-other)"],
@@ -101,7 +122,7 @@ extension HelpContent {
             title: "Milestones",
             summary: "Upcoming and achieved play-count milestones.",
             blocks: [
-                .paragraph("Pick Total, Artists, Albums or Tracks, then filter by tier (100 up to 10K, and a combined 25K+ chip). **Upcoming** shows progress to the next threshold, “N to go” and an estimated date based on your last 30 days (up to 60 per category); **Achieved** shows when each threshold was crossed. It covers all of your history and ignores the date range. Definitions: [Milestones](help://metrics-milestones)."),
+                .paragraph("Pick Total, Artists, Albums or Tracks, then filter by tier (100 up to 10K, and a combined 25K+ chip). **Upcoming** shows progress to the next threshold, “N to go” and an estimated date based on your last 30 days (up to 60 per category); **Achieved** shows when each threshold was crossed. It covers all of your history and ignores the date range. Definitions: [Milestones](help://metrics-milestones). **Share** (top right) makes a list card of the achieved milestones for the category and tier you are looking at; the share icon on an achieved card makes a card for that one milestone ([Sharing](help://screen-sharing))."),
             ]
         ),
         HelpArticle(
@@ -111,7 +132,7 @@ extension HelpContent {
             blocks: [
                 .bullets([
                     "**Search Library… (⌘F or the toolbar magnifier)** searches artists, albums and tracks across your whole history, ranking exact matches first and then by all-time plays. Choosing a result opens it in Library.",
-                    "**Now Playing** shows your current Last.fm track in a shelf at the bottom while one is playing, with a Hide button. **View › Show Now Playing** hides or shows it. The app checks about every 15 seconds while a window is active, backing off up to 2 minutes after failures. Hiding the shelf also stops the checking, and showing it again resumes it. [Offline mode](help://offline-mode) stops it too. The playing track is never saved as a scrobble.",
+                    "**Now Playing** shows your current Last.fm track in a shelf at the bottom while one is playing, with a Hide button; the Last.fm mark at its right end is the one chosen in Settings › General › Sharing. **View › Show Now Playing** hides or shows it. The app checks about every 15 seconds while a window is active, backing off up to 2 minutes after failures. Hiding the shelf also stops the checking, and showing it again resumes it. [Offline mode](help://offline-mode) stops it too. The playing track is never saved as a scrobble.",
                     "**Back to Overview** appears in the toolbar after you jump from an Overview card, to return you to it.",
                 ]),
             ]

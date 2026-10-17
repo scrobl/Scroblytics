@@ -46,6 +46,14 @@ struct TrendsView: View {
     @State private var trailingRefreshTask: Task<Void, Never>?
 
     private var rangeOptions: [DateRangeOption] { DateRangePresets.build(oldestScrobbleDate: oldestScrobbleDate) }
+    /// What a chart's shared card says it covers.
+    private var shareInfo: TrendsShareInfo {
+        let range = currentRange
+        let period = (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).label
+        let compare = trends.resolve(for: range).map { "Compared with " + TrendsDrill.rangeLabel(from: $0.from, to: $0.to) }
+        return TrendsShareInfo(period: period, compare: compare)
+    }
+
     private var currentRange: DateRange { (rangeOptions.first { $0.id == settings.selectedRangeId } ?? rangeOptions[0]).range() }
 
     var body: some View {
@@ -110,17 +118,17 @@ struct TrendsView: View {
                         }
                     } else {
                         if group == .listening, let volumeInputs {
-                            TrendsSection(title: "Volume over time", subtitle: "How much you listened, and when") {
+                            TrendsSection(title: "Volume over time", subtitle: "How much you listened, and when", comparison: true) {
                                 TrendsVolumeChart(inputs: volumeInputs, openQuery: openQuery)
                             }
                         }
                         if group == .listening, let heatmapInputs {
-                            TrendsSection(title: "When you listen", subtitle: "Scrobbles by day of the week and hour of the day, in your local time") {
+                            TrendsSection(title: "When you listen", subtitle: "Scrobbles by day of the week and hour of the day, in your local time", comparison: true) {
                                 TrendsHeatmapChart(inputs: heatmapInputs, openQuery: openQuery)
                             }
                         }
                         if group == .listening, let discoveryInputs {
-                            TrendsSection(title: "Discovery", subtitle: "How much of what you play is new to you") {
+                            TrendsSection(title: "Discovery", subtitle: "How much of what you play is new to you", comparison: true) {
                                 TrendsDiscoveryChart(inputs: discoveryInputs, openQuery: openQuery)
                             }
                         }
@@ -135,22 +143,22 @@ struct TrendsView: View {
                             }
                         }
                         if group == .sequence, let flowInputs {
-                            TrendsSection(title: "Listening flow", subtitle: "What you tend to play right after what, within one sitting") {
+                            TrendsSection(title: "Listening flow", subtitle: "What you tend to play right after what, within one sitting", comparison: true) {
                                 TrendsFlowChart(inputs: flowInputs, openArtist: { navigation.goToArtist(ArtistIdentity(name: $0)) }, openQuery: openQuery)
                             }
                         }
                         if group == .habits, let loyaltyInputs {
-                            TrendsSection(title: "Loyalty", subtitle: "Which things you keep coming back to, and which were a passing phase") {
+                            TrendsSection(title: "Loyalty", subtitle: "Which things you keep coming back to, and which were a passing phase", comparison: true) {
                                 TrendsLoyaltyChart(inputs: loyaltyInputs, openQuery: openQuery, openEntity: openEntity)
                             }
                         }
                         if group == .taste, let decadeInputs {
-                            TrendsSection(title: "Eras", subtitle: "Which decades your listening comes from") {
+                            TrendsSection(title: "Eras", subtitle: "Which decades your listening comes from", comparison: true) {
                                 TrendsDecadeRiverChart(inputs: decadeInputs, openQuery: openQuery)
                             }
                         }
                         if group == .taste, let tagsInputs {
-                            TrendsSection(title: "Taste", subtitle: "The genres and tags your listening falls under") {
+                            TrendsSection(title: "Taste", subtitle: "The genres and tags your listening falls under", comparison: true) {
                                 TrendsTagsChart(inputs: tagsInputs, openQuery: openQuery)
                             }
                         }
@@ -168,6 +176,7 @@ struct TrendsView: View {
         .onChange(of: overviewFocus) {
             applyOverviewFocus()
         }
+        .environment(\.trendsShareInfo, shareInfo)
         .onChange(of: settings.selectedRangeId) { requestReload() }
         .onChange(of: groupRaw) { requestReload() }
         .onChange(of: trends.compareMode) { requestReload() }
@@ -304,17 +313,58 @@ struct TrendsView: View {
 
 /// A titled group of related charts.
 struct TrendsSection<Content: View>: View {
-    let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
+    let title: String
+    let subtitle: String
+    /// Whether the chart shows a comparison period when one is chosen (so its card says what it is compared with).
+    var comparison = false
     @ViewBuilder let content: Content
+
+    @Environment(\.trendsShareInfo) private var shareInfo
+    /// Where the chart inside registers the part of itself a shared card shows.
+    @State private var capture = ShareChartCapture()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(AppTypography.sectionTitle)
-                Text(subtitle).font(AppTypography.metadata).foregroundStyle(.secondary)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(AppTypography.sectionTitle)
+                    Text(subtitle).font(AppTypography.metadata).foregroundStyle(.secondary)
+                }
+                Spacer()
+                ShareButton(card: { makeShareCard() }, isEnabled: capture.hasChart)
+                    .controlSize(.small)
             }
             content
+                .environment(\.shareChartCapture, capture)
         }
+    }
+
+    /// A card of the chart as it is drawn now, with the period (and what it is compared with) it covers.
+    private func makeShareCard() -> ShareCard? {
+        guard let image = capture.image() else { return nil }
+        // A chart that states its own comparison with the number carries it there; otherwise the card names what it is compared with.
+        let summary = capture.summary
+        let measure = summary?.change != nil ? "" : (comparison ? (shareInfo.compare ?? "") : "")
+        return ShareCard(
+            title: title, period: shareInfo.period, measure: measure, rows: [], valueLabel: "", hasMovement: false,
+            kindID: "trends." + title.lowercased().replacingOccurrences(of: " ", with: "-"), snapshot: ShareSnapshot(image: image), chartSummary: summary
+        )
+    }
+}
+
+/// The period Trends is showing and what it is compared with, for the card a chart's Share button makes.
+struct TrendsShareInfo: Equatable {
+    var period = ""
+    var compare: String?
+}
+
+private struct TrendsShareInfoKey: EnvironmentKey {
+    static let defaultValue = TrendsShareInfo()
+}
+
+extension EnvironmentValues {
+    var trendsShareInfo: TrendsShareInfo {
+        get { self[TrendsShareInfoKey.self] }
+        set { self[TrendsShareInfoKey.self] = newValue }
     }
 }

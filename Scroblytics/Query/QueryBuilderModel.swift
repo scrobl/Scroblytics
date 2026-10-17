@@ -38,6 +38,20 @@ struct QueryDisplayRow: Identifiable, Sendable {
     }
 }
 
+/// A sentence put to Ask and the query it became. It describes the results only while the query is unchanged: once a filter, sort or
+/// limit is edited it no longer says what is on screen. (Reordering the columns doesn't change what was asked.)
+struct AskedQuestion: Equatable, Sendable {
+    let text: String
+    let spec: QuerySpec
+
+    func text(whenQueryIs current: QuerySpec) -> String? {
+        var a = spec, b = current
+        a.columns = []
+        b.columns = []
+        return a == b ? text : nil
+    }
+}
+
 /// One autocomplete suggestion in the tag picker: a tag and how many cached items carry it.
 struct QueryTagSuggestion: Identifiable, Hashable, Sendable {
     let tag: String
@@ -73,6 +87,17 @@ final class QueryBuilderModel {
     private(set) var lastRunSeconds: Double?
     /// One-shot notes ("Removed 2 conditions that don't apply to albums").
     private(set) var notice: String?
+    /// The sentence put to Ask that produced the query now on screen, with the query as it was then.
+    private(set) var asked: AskedQuestion?
+
+    /// Remembers the question behind `spec` (nil forgets it). Call after the spec is loaded.
+    func rememberQuestion(_ question: String?, for spec: QuerySpec) {
+        asked = question.map { AskedQuestion(text: $0, spec: spec) }
+    }
+
+    /// The question, while the query still is what it asked for.
+    var currentQuestion: String? { asked?.text(whenQueryIs: spec) }
+
     /// The saved set currently loaded, if any (Save updates it in place).
     var loadedSetID: UUID?
     private(set) var oldestScrobbleDate: Date?

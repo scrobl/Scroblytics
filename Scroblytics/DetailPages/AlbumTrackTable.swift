@@ -31,7 +31,7 @@ struct AlbumTrackTable: View {
 
     /// Column widths. The plays and last-played columns grow with the window, and "Last played" is the first to go in a narrow one.
     private enum Column {
-        static let position: CGFloat = 28
+        static let position: CGFloat = 36
     }
 
     private static let showsLastPlayedFrom: CGFloat = 640
@@ -226,6 +226,7 @@ struct AlbumTrackTable: View {
         return HStack(spacing: 10) {
             Text(row.position.map(String.init) ?? "·")
                 .font(AppTypography.tableRank).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.7)
                 .frame(width: Column.position, alignment: .trailing)
             // The loved, flagged and "not in your library" marks belong to the track, not to its plays, so a dimmed row shows them too
             // (under the names its page opens with, which are the names a flag or love is saved under).

@@ -16,6 +16,8 @@ struct AskQueryRequest: Identifiable, Sendable {
     /// A name to default the Save As sheet to, if the user saves this — e.g. a Tool's own name
     /// ("Most Recent, Most Often (from Tool)"). Never saves anything by itself.
     var suggestedName: String?
+    /// The sentence the person asked, when Ask made this query; a shared card of its results uses it as the title.
+    var question: String?
 }
 
 /// The Ask box's state: what was typed, whether the model is working, and — once it answers — the
@@ -55,6 +57,11 @@ final class AskModel {
     /// Whether the engine chosen in Settings › Ask can answer right now (re-read each time: the choice can change).
     var availability: AskAvailability { AskEngines.availability() }
     private var task: Task<Void, Never>?
+
+    /// The question behind the answer waiting for confirmation (read when it is run, before the box is cleared).
+    var pendingQuestion: String? {
+        if case .review(let review) = state { review.request } else { nil }
+    }
 
     var isBusy: Bool { if case .translating = state { true } else { false } }
 

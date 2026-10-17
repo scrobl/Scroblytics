@@ -423,7 +423,7 @@ struct ContentView: View {
     private func routeAsked(_ spec: QuerySpec, action: AskQueryRequest.Action) {
         showingAsk = false
         selectedTab = .tools
-        askQueryRequest = AskQueryRequest(spec: spec, action: action)
+        askQueryRequest = AskQueryRequest(spec: spec, action: action, question: ask.pendingQuestion)
     }
 
     @MainActor

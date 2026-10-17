@@ -88,7 +88,8 @@ struct TopChartsView: View {
                     showsChartRace: $showsChartRace,
                     showsPlaylistExport: !entries.isEmpty,
                     playlistName: defaultPlaylistName,
-                    playlistTracks: makePlaylistTracks
+                    playlistTracks: makePlaylistTracks,
+                    shareCard: makeShareCard
                 )
                 Divider()
                 PartialDataNoteBar()
@@ -193,6 +194,13 @@ struct TopChartsView: View {
         case .album: "Top Albums Tracks (\(dates))"
         case .track: "Top Tracks (\(dates))"
         }
+    }
+
+    /// What the Share button turns into an image: the chart as it is on screen.
+    private func makeShareCard() -> ShareCard? {
+        guard !entries.isEmpty else { return nil }
+        let periodLabel = rangeOptions.first { $0.id == settings.selectedRangeId }?.label ?? "Last 30 days"
+        return ShareCards.topChart(entries: entries, entity: entity, metric: displayedMetric, periodLabel: periodLabel, compareRange: compareRange)
     }
 
     private func makePlaylistTracks() async throws -> [AppleMusicPlaylistTrack] {
@@ -417,6 +425,7 @@ private struct TopChartsHeader: View {
     let showsPlaylistExport: Bool
     let playlistName: String
     let playlistTracks: @MainActor () async throws -> [AppleMusicPlaylistTrack]
+    let shareCard: @MainActor () -> ShareCard?
 
     var body: some View {
         PageSettingsHeader("Top Charts") {
@@ -454,6 +463,10 @@ private struct TopChartsHeader: View {
                             defaultPlaylistName: playlistName,
                             tracks: playlistTracks
                         )
+                    }
+
+                    if !showsChartRace {
+                        ShareButton(card: shareCard, isEnabled: showsPlaylistExport)
                     }
 
                     if !showsChartRace {

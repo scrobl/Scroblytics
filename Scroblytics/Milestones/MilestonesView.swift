@@ -81,8 +81,14 @@ struct MilestonesView: View {
         )) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Milestones")
-                        .font(AppTypography.pageTitle)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Milestones")
+                            .font(AppTypography.pageTitle)
+                        Spacer()
+                        if let card = shareListCard() {
+                            ShareButton(card: { card })
+                        }
+                    }
                     content
                 }
                 .padding(24)
@@ -125,6 +131,32 @@ struct MilestonesView: View {
         } else {
             ProgressView().frame(maxWidth: .infinity, minHeight: 200)
         }
+    }
+
+    // MARK: - Sharing
+
+    /// The achieved milestones the page lists for the chosen category and tier, as a card; nil when there are none.
+    private func shareListCard() -> ShareCard? {
+        guard let result, result.total.current > 0 else { return nil }
+        let rows: [ShareCards.MilestoneRow]
+        if category == .total {
+            rows = result.total.achieved.filter { tierFilter.matches($0.milestone) }.map {
+                ShareCards.MilestoneRow(name: "\($0.milestone.formatted()) scrobbles", artist: nil, imageURL: nil, milestone: $0.milestone, achievedAt: $0.achievedAt)
+            }
+        } else {
+            rows = entityCategory(result).achieved.filter { tierFilter.matches($0.milestone) }.map {
+                ShareCards.MilestoneRow(name: $0.name, artist: entity == .artist ? nil : $0.artist, imageURL: $0.imageURL, milestone: $0.milestone, achievedAt: $0.achievedAt)
+            }
+        }
+        guard !rows.isEmpty else { return nil }
+        return ShareCards.milestones(category: category.label, tierLabel: tierFilter == .all ? "" : "\(tierFilter.label) milestones", rows: rows)
+    }
+
+    private func shareCard(for item: MilestoneAchieved) -> ShareCard {
+        ShareCards.milestone(
+            kind: entity.rawValue.capitalized, name: item.name, artist: entity == .artist ? nil : item.artist, imageURL: item.imageURL,
+            milestone: item.milestone, achievedAt: item.achievedAt, firstAt: item.firstAt
+        )
     }
 
     // MARK: - Tier filter
@@ -213,6 +245,14 @@ struct MilestonesView: View {
                 LazyVGrid(columns: Self.gridColumns, alignment: .leading, spacing: 16) {
                     ForEach(achieved, id: \.milestone) { m in
                         TotalAchievedCard(milestone: m.milestone, achievedAt: m.achievedAt, firstAt: m.firstAt)
+                            .overlay(alignment: .bottomTrailing) {
+                                ShareButton(
+                                    title: "\(m.milestone.formatted()) scrobbles", iconOnly: true,
+                                    card: { ShareCards.milestone(kind: "Total", name: "\(m.milestone.formatted()) scrobbles", artist: nil, imageURL: nil, milestone: m.milestone, achievedAt: m.achievedAt, firstAt: m.firstAt) }
+                                )
+                                .buttonStyle(.borderless)
+                                .padding(10)
+                            }
                     }
                 }
             }
@@ -236,6 +276,11 @@ struct MilestonesView: View {
                     ForEach(achieved) { item in
                         MilestoneEntityLink(entity: entity, name: item.name, artist: item.artist, album: item.album, imageURL: item.imageURL) {
                             AchievedMilestoneCard(item: item, entity: entity)
+                        }
+                        .overlay(alignment: .bottomTrailing) {
+                            ShareButton(title: item.name, iconOnly: true, card: { shareCard(for: item) })
+                                .buttonStyle(.borderless)
+                                .padding(10)
                         }
                     }
                 }
@@ -435,6 +480,9 @@ private func achievedLine(achievedAt: Date, firstAt: Date) -> String {
     return "Achieved \(achievedAt.formatted(date: .abbreviated, time: .omitted))\(span)"
 }
 
+/// How much taller an achieved card is than its content, so the share icon in its corner has room.
+private let achievedCardExtraHeight: CGFloat = 18
+
 private struct MilestoneCardBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -493,6 +541,8 @@ private struct AchievedMilestoneCard: View {
             Spacer(minLength: 0)
             MilestoneTrophyBadge(milestone: item.milestone)
         }
+        // Room under the content for the share icon that sits in the card's corner.
+        .padding(.bottom, achievedCardExtraHeight)
         .modifier(MilestoneCardBackground())
     }
 }
@@ -556,6 +606,7 @@ private struct TotalAchievedCard: View {
             }
             Spacer(minLength: 0)
         }
+        .padding(.bottom, achievedCardExtraHeight)
         .modifier(MilestoneCardBackground())
     }
 }

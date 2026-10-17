@@ -20,6 +20,7 @@ struct TrendsDecadeRiverChart: View {
     @AppStorage("trends.decadeRiver.view") private var viewRaw = ViewMode.river.rawValue
     @AppStorage("trends.decadeRiver.metric") private var metricRaw = TrendsMetric.plays.rawValue
     @State private var data: TrendsDecadeRiver?
+    @Environment(\.shareChartCapture) private var shareCapture
     @State private var isLoading = true
     @State private var hovered: (grid: Int, point: TrendsDecadeRiver.Point)?
 
@@ -56,23 +57,27 @@ struct TrendsDecadeRiverChart: View {
             }
             if let data, viewMode == .grid, data.points.count >= 2, !data.presentDecades.isEmpty {
                 TrendsTimeTravelGrid(data: data, openQuery: openQuery)
+                    .shareChartArea()
                 notes(data)
             } else if let data, data.points.count >= 2, !data.presentDecades.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    if data.comparePoints != nil { Text("This period").font(AppTypography.metadata.weight(.semibold)).foregroundStyle(.secondary) }
-                    river(data.points, data: data, grid: 0).frame(height: data.comparePoints != nil ? 200 : 260)
-                }
-                if let compare = data.comparePoints, let compareRange = data.compareRange {
+                VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Previous period · " + TrendsDrill.rangeLabel(from: compareRange.from, to: compareRange.to))
-                            .font(AppTypography.metadata.weight(.semibold)).foregroundStyle(.secondary)
-                        if compare.contains(where: { $0.total > 0 }) {
-                            river(compare, data: data, grid: 1).frame(height: 200)
-                        } else {
-                            Text("No listening with a known release date in the previous period.").font(AppTypography.metadata).foregroundStyle(.secondary)
+                        if data.comparePoints != nil { Text("This period").font(AppTypography.metadata.weight(.semibold)).foregroundStyle(.secondary) }
+                        river(data.points, data: data, grid: 0).frame(height: data.comparePoints != nil ? 200 : 260)
+                    }
+                    if let compare = data.comparePoints, let compareRange = data.compareRange {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Previous period · " + TrendsDrill.rangeLabel(from: compareRange.from, to: compareRange.to))
+                                .font(AppTypography.metadata.weight(.semibold)).foregroundStyle(.secondary)
+                            if compare.contains(where: { $0.total > 0 }) {
+                                river(compare, data: data, grid: 1).frame(height: 200)
+                            } else {
+                                Text("No listening with a known release date in the previous period.").font(AppTypography.metadata).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
+                .shareChartArea()
                 legend(data)
                 notes(data)
                 Text("Click a band to see what you played from that decade in that \(data.bucketing.label).")
@@ -205,5 +210,12 @@ struct TrendsDecadeRiverChart: View {
         guard !Task.isCancelled, let computed else { return }
         data = computed
         isLoading = false
+        // The decades' colours, as the legend under the chart gives them, in readable type on a shared card.
+        shareCapture?.summary = computed.map { eras in
+            ShareChartSummary(
+                headline: "Eras", detail: "By \(eras.bucketing.label) · \(metric == .plays ? "by scrobbles" : "by time listened")",
+                legend: eras.presentDecades.map { ShareChartSummary.Legend(label: TrendsDecadeRiver.decades[$0], color: Self.colors[$0]) }
+            )
+        }
     }
 }

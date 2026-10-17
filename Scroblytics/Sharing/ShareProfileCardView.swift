@@ -1,0 +1,369 @@
+import AppKit
+import SwiftUI
+
+/// The card for one artist, album or track: its picture, name, the page's numbers as tiles, rank-by-year and milestone chips, and the
+/// trend line. Same dark design as the list card; everything it draws is handed in.
+struct ShareProfileCardView: View {
+    let card: ShareCard
+    let options: ShareOptions
+    let identity: ShareIdentity
+    let images: [String: NSImage]
+
+    private var profile: ShareProfile { card.profile ?? ShareProfile(kind: "", subtitle: "", heroImageURL: nil, stats: [], chips: [], trend: []) }
+    private var size: CGSize { options.size.points }
+    private var isWide: Bool { options.size == .wide }
+    private let margin: CGFloat = 64
+    private var gold: Color { ShareCardStyle.gold }
+    private var stats: [ShareStat] { card.visibleStats(for: options) }
+
+    var body: some View {
+        ZStack {
+            ShareCardBackground(size: size, imageURL: profile.heroImageURL, images: images)
+            VStack(alignment: .leading, spacing: 0) {
+                if isMilestone { milestoneBody } else if isWide { wideBody } else { narrowBody }
+                if ShareCardFooter.isShown(identity) {
+                    ShareCardFooter(identity: identity).padding(.top, 20)
+                }
+            }
+            .padding(margin)
+        }
+        .frame(width: size.width, height: size.height)
+        .environment(\.colorScheme, .dark)
+    }
+
+    // MARK: Layouts
+
+    /// A card about one figure (a milestone): the picture large, the name under it, the number big, the facts last. The sections share
+    /// the card's height, so a short title leaves even gaps rather than an empty bottom, and a long one still has room.
+    private var isMilestone: Bool { profile.headline != nil }
+
+    @ViewBuilder
+    private var milestoneBody: some View {
+        if isWide {
+            HStack(alignment: .top, spacing: 64) {
+                hero(side: 640)
+                VStack(alignment: .leading, spacing: 0) {
+                    kickerRow
+                    Spacer(minLength: 16)
+                    milestoneTitle(size: 84, alignment: .leading)
+                    Spacer(minLength: 16)
+                    headline(size: 150)
+                    Spacer(minLength: 16)
+                    statGrid(columns: 3, valueSize: 38)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        } else {
+            let square = options.size == .square
+            // A long name and artist need the room the picture would take.
+            let longNames = card.title.count + profile.subtitle.count > 70
+            VStack(spacing: 0) {
+                kickerRow
+                Spacer(minLength: 12)
+                hero(side: square ? (longNames ? 290 : 330) : (longNames ? 460 : 520))
+                Spacer(minLength: 12)
+                milestoneTitle(size: square ? 62 : 72, alignment: .center)
+                Spacer(minLength: 12)
+                headline(size: square ? 112 : 140)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 12)
+                statGrid(columns: 3, valueSize: square ? 42 : 46)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The name and the artist: long ones wrap onto more lines and shrink before they are cut.
+    private func milestoneTitle(size: CGFloat, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 6) {
+            Text(card.title)
+                .font(.system(size: size, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.45)
+                .multilineTextAlignment(alignment == .center ? .center : .leading)
+            if !profile.subtitle.isEmpty {
+                Text(profile.subtitle)
+                    .font(.system(size: size * 0.5, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+                    .multilineTextAlignment(alignment == .center ? .center : .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .center ? .center : .leading)
+    }
+
+    private var narrowBody: some View {
+        let square = options.size == .square
+        return VStack(alignment: .leading, spacing: square ? 26 : 32) {
+            kickerRow
+            HStack(alignment: .center, spacing: 36) {
+                hero(side: square ? 250 : 320)
+                titleBlock(titleSize: square ? 62 : 66)
+            }
+            headline(size: square ? 120 : 140)
+            statGrid(columns: 3, valueSize: square ? 40 : 44)
+            chips
+            trend(min: square ? 110 : 190, max: square ? 170 : 420)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var wideBody: some View {
+        HStack(alignment: .top, spacing: 64) {
+            VStack(alignment: .leading, spacing: 0) {
+                hero(side: 640)
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 30) {
+                kickerRow
+                titleBlock(titleSize: 84)
+                headline(size: 150)
+                statGrid(columns: 4, valueSize: 40)
+                chips
+                trend(min: 170, max: 360)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    // MARK: Pieces
+
+    private var kickerRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("\(profile.kind) · \(card.period)".uppercased())
+                .font(.system(size: 26, weight: .bold))
+                .tracking(3)
+                .foregroundStyle(gold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Spacer(minLength: 16)
+            if options.showDate {
+                Text(card.generatedAt.formatted(date: .abbreviated, time: .omitted))
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.62))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func headline(size: CGFloat) -> some View {
+        if let text = profile.headline {
+            HStack(spacing: size * 0.22) {
+                Image(systemName: "trophy.fill").font(.system(size: size * 0.6))
+                Text(text)
+                    .font(.system(size: size, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.4)
+            }
+            .foregroundStyle(profile.headlineTier.map(ShareCardStyle.milestoneColor) ?? gold)
+        }
+    }
+
+    private func titleBlock(titleSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(card.title)
+                .font(.system(size: titleSize, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.5)
+            if !profile.subtitle.isEmpty {
+                Text(profile.subtitle)
+                    .font(.system(size: titleSize * 0.46, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func hero(side: CGFloat) -> some View {
+        Group {
+            if let url = profile.heroImageURL, let image = images[url] {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else if card.iconChoice {
+                SharePlaceholderIcon(icon: options.icon, side: side)
+            } else {
+                ZStack {
+                    Color.white.opacity(0.10)
+                    Image(systemName: profile.kind == "Artist" ? "person.fill" : "music.note")
+                        .font(.system(size: side * 0.34))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                }
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: side * 0.06, style: .continuous))
+        .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+    }
+
+    private func statGrid(columns: Int, valueSize: CGFloat) -> some View {
+        ShareStatGrid(stats: stats, columns: columns, valueSize: valueSize)
+    }
+
+    private var chips: some View { ShareChipFlow(chips: profile.chips, maxRows: options.size == .square ? 2 : 3) }
+
+    @ViewBuilder
+    private func trend(min: CGFloat, max: CGFloat) -> some View {
+        if profile.trend.count >= 2 {
+            ShareTrendLine(values: profile.trend)
+                .frame(minHeight: min, maxHeight: max)
+        }
+    }
+}
+
+/// A filled line of plays over the period, drawn by hand (no chart framework) so it renders the same everywhere.
+struct ShareTrendLine: View {
+    let values: [Int]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let points = Self.points(values, in: proxy.size)
+            ZStack {
+                Path { path in
+                    guard let first = points.first, let last = points.last else { return }
+                    path.move(to: CGPoint(x: first.x, y: proxy.size.height))
+                    points.forEach { path.addLine(to: $0) }
+                    path.addLine(to: CGPoint(x: last.x, y: proxy.size.height))
+                    path.closeSubpath()
+                }
+                .fill(LinearGradient(colors: [ShareCardStyle.gold.opacity(0.38), ShareCardStyle.gold.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                Path { path in
+                    guard let first = points.first else { return }
+                    path.move(to: first)
+                    points.dropFirst().forEach { path.addLine(to: $0) }
+                }
+                .stroke(ShareCardStyle.gold, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
+
+    /// The line's points: oldest at the left edge, the busiest bucket at the top.
+    static func points(_ values: [Int], in size: CGSize) -> [CGPoint] {
+        guard values.count >= 2 else { return [] }
+        let peak = Double(max(values.max() ?? 1, 1))
+        let inset: CGFloat = 4
+        let height = max(size.height - inset * 2, 1)
+        return values.enumerated().map { index, value in
+            CGPoint(
+                x: size.width * CGFloat(index) / CGFloat(values.count - 1),
+                y: inset + height * (1 - CGFloat(Double(max(value, 0)) / peak))
+            )
+        }
+    }
+}
+
+
+/// The numbers as tiles, `columns` to a row; a short last row spreads its tiles across the whole width.
+struct ShareStatGrid: View {
+    let stats: [ShareStat]
+    let columns: Int
+    let valueSize: CGFloat
+
+    var body: some View {
+        let rows = stride(from: 0, to: stats.count, by: columns).map { Array(stats[$0..<min($0 + columns, stats.count)]) }
+        VStack(spacing: 14) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 14) {
+                    // A short last row spreads its tiles across the full width rather than leaving a gap.
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, stat in tile(stat) }
+                }
+            }
+        }
+    }
+
+    private func tile(_ stat: ShareStat) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(stat.label.uppercased())
+                .font(.system(size: 18, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle(Color.white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(stat.value)
+                .font(.system(size: valueSize, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.45)
+                .frame(height: valueSize * 1.25, alignment: .leading)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+/// Rank and milestone badges, wrapping, at most `maxRows` rows (the card has only so much room, and a long-listened artist can have many
+/// badges). Each badge is one line of a fixed height, so the cut falls between rows, never through one.
+struct ShareChipFlow: View {
+    let chips: [ShareChip]
+    var maxRows = 3
+
+    static let chipHeight: CGFloat = 47
+    static let spacing: CGFloat = 12
+
+    var body: some View {
+        if !chips.isEmpty {
+            TagFlowLayout(spacing: Self.spacing) {
+                ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                    if let tier = chip.tier {
+                        milestoneChip(chip, tier: tier)
+                    } else {
+                        rankChip(chip)
+                    }
+                }
+            }
+            .frame(maxHeight: CGFloat(maxRows) * Self.chipHeight + CGFloat(maxRows - 1) * Self.spacing, alignment: .topLeading)
+            .clipped()
+        }
+    }
+
+    /// A yearly rank, as the pages draw it: a purple medal.
+    private func rankChip(_ chip: ShareChip) -> some View {
+        let tint = Color(red: 0.55, green: 0.38, blue: 0.90)
+        return HStack(spacing: 8) {
+            Image(systemName: "medal.fill").font(.system(size: 22, weight: .semibold))
+            Text(chip.text)
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+                .frame(maxWidth: 520, alignment: .leading)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: Self.chipHeight)
+        .fixedSize(horizontal: true, vertical: false)
+        .foregroundStyle(Color(red: 0.78, green: 0.62, blue: 1.0))
+        .background(tint.opacity(0.20), in: Capsule())
+    }
+
+    /// A milestone, as the pages draw it: a trophy and the tier's number in the tier's colour, what it was for beside it, and a gold ring for
+    /// the prestige tiers.
+    private func milestoneChip(_ chip: ShareChip, tier: Int) -> some View {
+        let color = ShareCardStyle.milestoneColor(tier)
+        return HStack(spacing: 8) {
+            Image(systemName: "trophy.fill").font(.system(size: 22, weight: .semibold))
+            Text(MilestoneFormatting.formatMilestone(tier))
+                .font(.system(size: 26, weight: .bold, design: .rounded).monospacedDigit())
+            if let detail = chip.detail, !detail.isEmpty {
+                Text("· \(detail)")
+                    .font(.system(size: 24, weight: .medium, design: .rounded))
+                    .opacity(0.75)
+                    .lineLimit(1)
+                    .frame(maxWidth: 440, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 18)
+        .frame(height: Self.chipHeight)
+        .fixedSize(horizontal: true, vertical: false)
+        .foregroundStyle(color)
+        .background(color.opacity(0.22), in: Capsule())
+        .overlay(Capsule().stroke(MilestoneFormatting.isPrestigeMilestone(tier) ? ShareCardStyle.gold : .clear, lineWidth: 2))
+    }
+}

@@ -462,8 +462,15 @@ enum AskPatterns {
         let perAlbum = explicit("album") ?? (each("album") ? 1 : nil)
         // Only the explicit wording: "release year", "year of release" ("each year" alone stays the model's call).
         let releaseYear = #"(?:(?:release|released)\s+year|year\s+of\s+release)"#
-        let perYear = explicit(releaseYear) ?? (matches(text, #"\b(?:each|every)\s+\#(releaseYear)s?\b"#) ? 1 : nil)
+        let perYear = explicit(releaseYear) ?? (matches(text, #"\b(?:each|every)\s+\#(releaseYear)s?\b"#) || topOneByReleaseYear(text) ? 1 : nil)
         return (perArtist, perAlbum, perYear)
+    }
+
+    /// "Top album by release year", "best track of each release year": a singular superlative followed by "by / for / of / in (each) release year"
+    /// asks for the best one of every year. The plural ("top albums by release year") could just as well mean sorted by year, so it is
+    /// left to the model.
+    static func topOneByReleaseYear(_ lowered: String) -> Bool {
+        matches(lowered, #"\b(?:top|best|favou?rite|most[- ]played|#1)\s+(?:album|track|song|tune)\s+(?:by|for|of|in|from)\s+(?:(?:each|every)\s+)?(?:release|released)\s+year\b"#)
     }
 
     /// "my most played song", "the top album": a singular superlative asks for the one.
@@ -486,6 +493,7 @@ enum AskPatterns {
     static func mentionsDiversity(_ request: String) -> Bool {
         let text = request.lowercased().replacingOccurrences(of: "’", with: "'")
         return matches(text, #"\b(?:per|each|every|distinct|different|unique|apiece)\b|\bat most\b|\bno more than\b|\bone (?:from|of each)\b|\bonly one\b|\bone track from\b"#)
+            || topOneByReleaseYear(text)
     }
 
     /// An artist the request names after "by" ("songs by X"), matched against the library's real artist names; nil when it

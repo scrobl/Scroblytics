@@ -56,9 +56,7 @@ struct NowPlayingShelf: View {
 
                     Spacer(minLength: 12)
 
-                    Image(systemName: "lastfm")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
+                    LastfmMark(size: 22, isRed: false)
                         .accessibilityHidden(true)
 
                     Image(systemName: "chevron.right")

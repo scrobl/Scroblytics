@@ -193,6 +193,7 @@ struct ContentView: View {
                 #if DEBUG
                 TestProfileStrip()
                 TestProfilesLaunchTrigger()
+                tourDriver
                 #endif
                 if isSyncing || targetedSyncActivity != nil {
                     SyncProgressBanner(
@@ -617,6 +618,81 @@ struct ContentView: View {
             if let track = result.track { libraryNavigation.goToTrack(track) }
         }
     }
+
+    #if DEBUG
+    /// The self-driving tour for the macOS 15 test (`Tour`); nothing here exists in a release build.
+    private var tourDriver: some View {
+        Color.clear.frame(height: 0).task {
+            guard let minutes = Tour.minutes else { return }
+            await runTour(minutes: minutes)
+        }
+    }
+
+    private func runTour(minutes: Double) async {
+        Tour.log("TOUR start, \(minutes) minutes")
+        let monitor = Tour.StallMonitor()
+        monitor.start()
+        func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
+        // The most played artist, album and track in the copy, to open.
+        let history = (try? await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)) ?? []
+        var albums: [String: (artist: String, album: String, track: String, count: Int)] = [:]
+        for play in history where !play.albumName.isEmpty && !play.trackName.isEmpty {
+            let key = play.artistName + "\u{0}" + play.albumName
+            let current = albums[key] ?? (play.artistName, play.albumName, play.trackName, 0)
+            albums[key] = (current.artist, current.album, current.track, current.count + 1)
+        }
+        guard let top = albums.values.max(by: { $0.count < $1.count }) else { Tour.log("TOUR no albums in the copy"); exit(3) }
+        Tour.log("TOUR plays \(history.count), opening the busiest album's artist, album and track")
+        let deadline = Date().addingTimeInterval(minutes * 60)
+        var round = 0
+        let tabs: [(String, Tab)] = [("overview", .overview), ("library", .library), ("topCharts", .topCharts), ("trends", .trends), ("milestones", .milestones), ("timeline", .timeline), ("tools", .tools)]
+        while Date() < deadline {
+            round += 1
+            for (name, tab) in tabs {
+                monitor.phase = "round \(round): \(name) tab"
+                selectedTab = tab
+                await pause(5)
+            }
+            monitor.phase = "round \(round): open artist, album, track in Library"
+            selectedTab = .library
+            await pause(2)
+            libraryNavigation.goToArtist(ArtistIdentity(name: top.artist)); await pause(5)
+            libraryNavigation.goToAlbum(AlbumIdentity(artist: top.artist, name: top.album)); await pause(6)
+            libraryNavigation.goToTrack(TrackIdentity(artist: top.artist, name: top.track, album: top.album)); await pause(5)
+            for visit in 1...3 {
+                monitor.phase = "round \(round): leave Library stack (\(visit))"
+                selectedTab = .overview; await pause(4)
+                monitor.phase = "round \(round): return to Library stack (\(visit))"
+                selectedTab = .library; await pause(5)
+            }
+            libraryNavigation.path = NavigationPath()
+            for kind in [ToolDescriptor.Kind.rabbitHole, .missingData, .albumTurnovers, .multiAlbumTracks, .similarSounds] {
+                monitor.phase = "round \(round): open tool \(kind)"
+                overviewToolRequest = nil
+                await pause(0.5)
+                overviewToolRequest = kind
+                selectedTab = .tools
+                await pause(10)
+                monitor.phase = "round \(round): leave tool \(kind)"
+                selectedTab = .overview; await pause(3)
+                monitor.phase = "round \(round): return to tool \(kind)"
+                selectedTab = .tools; await pause(6)
+            }
+            overviewToolRequest = nil
+            monitor.phase = "round \(round): overview, idle"
+            selectedTab = .overview
+            await pause(20)
+        }
+        monitor.stop()
+        let result = monitor.snapshot
+        for (phase, ms) in result.worst.sorted(by: { $0.value > $1.value }).prefix(12) {
+            Tour.log("TOUR worst main-thread delay \(String(format: "%.0f", ms)) ms in \(phase)")
+        }
+        Tour.log("TOUR stalls of 500 ms or more: \(result.stalls.count)" + (result.stalls.isEmpty ? "" : "; longest \(String(format: "%.0f", result.stalls.map(\.ms).max() ?? 0)) ms"))
+        Tour.log("TOUR done after \(round) round(s)")
+        exit(0)
+    }
+    #endif
 
     private func openNowPlaying(_ track: NowPlayingTrack) {
         selectedTab = .library

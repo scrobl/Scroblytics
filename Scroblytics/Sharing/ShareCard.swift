@@ -21,6 +21,10 @@ struct ShareCard: Sendable, Equatable {
     var generatedAt = Date()
     /// Stable per kind of card; the remembered options are stored under it.
     var kindID: String
+    /// Whether the rows are a ranking, so each shows its number. A list of milestones or months is in time order, not ranked.
+    var numbered = true
+    /// Whether an item with no picture of its own (the library's total) can show a trophy or the Last.fm logo, chosen in the preview.
+    var iconChoice = false
     /// Set for a card about one artist, album or track (numbers, rank chips, trend) instead of a ranked list.
     var profile: ShareProfile? = nil
 }
@@ -32,11 +36,28 @@ struct ShareProfile: Sendable, Equatable {
     /// The artist (and album) under the title; empty on an artist page.
     var subtitle: String
     var heroImageURL: String?
+    /// One big line under the title, for a card that is about a single figure ("1,000 plays" for a milestone).
+    var headline: String? = nil
+    /// When the headline is a milestone: its tier, for the colour.
+    var headlineTier: Int? = nil
     /// The headline numbers and the page's facts, as tiles.
     var stats: [ShareStat]
     var chips: [ShareChip]
+    /// The picks a recap card is about (a month's top artist, album and track). When there are any, the card is a recap: no single hero
+    /// picture, the picks in its place.
+    var highlights: [ShareHighlight] = []
     /// Plays per bucket over the period, oldest first; fewer than two points draws no line.
     var trend: [Int]
+}
+
+struct ShareHighlight: Sendable, Equatable {
+    /// "Top Artist", "Top Album", "Top Track".
+    var role: String
+    var title: String
+    var subtitle: String?
+    /// "123 plays" or "3d 4h 12m".
+    var value: String
+    var imageURL: String?
 }
 
 struct ShareStat: Sendable, Equatable {
@@ -48,6 +69,9 @@ struct ShareChip: Sendable, Equatable {
     enum Kind: Sendable, Equatable { case rank, milestone }
     var kind: Kind
     var text: String
+    /// A milestone chip: its tier (100, 250, 1000…), which picks the colour as the app draws it, and what follows the number.
+    var tier: Int? = nil
+    var detail: String? = nil
 }
 
 struct ShareRow: Sendable, Equatable {
@@ -59,6 +83,15 @@ struct ShareRow: Sendable, Equatable {
     var value: String
     var change: ShareChange
     var imageURL: String?
+    /// A milestone row: the value is drawn as a coloured pill for the tier, with the date beside it.
+    var milestone: ShareMilestone? = nil
+}
+
+struct ShareMilestone: Sendable, Equatable {
+    /// 100, 250, 1000… (picks the pill's colour).
+    var tier: Int
+    /// When it was reached, as shown.
+    var date: String
 }
 
 enum ShareChange: Sendable, Equatable {
@@ -101,6 +134,14 @@ enum ShareSize: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// The picture for an item that has none of its own (the library's total): a trophy or the Last.fm logo.
+enum ShareIcon: String, Codable, CaseIterable, Identifiable, Sendable {
+    case trophy, lastfm
+
+    var id: String { rawValue }
+    var label: String { self == .trophy ? "Trophy" : "Last.fm" }
+}
+
 /// What the person chose on the popover. Remembered per kind of card (`ShareSettings`).
 struct ShareOptions: Codable, Equatable, Sendable {
     var size = ShareSize.square
@@ -108,6 +149,27 @@ struct ShareOptions: Codable, Equatable, Sendable {
     var showValues = true
     var showMovement = true
     var showDate = true
+    var icon = ShareIcon.trophy
+
+    init(size: ShareSize = .square, rowCount: Int = 10, showValues: Bool = true, showMovement: Bool = true, showDate: Bool = true, icon: ShareIcon = .trophy) {
+        self.size = size
+        self.rowCount = rowCount
+        self.showValues = showValues
+        self.showMovement = showMovement
+        self.showDate = showDate
+        self.icon = icon
+    }
+
+    /// Options remembered by earlier versions lack newer keys; each missing one takes its default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        size = try c.decodeIfPresent(ShareSize.self, forKey: .size) ?? .square
+        rowCount = try c.decodeIfPresent(Int.self, forKey: .rowCount) ?? 10
+        showValues = try c.decodeIfPresent(Bool.self, forKey: .showValues) ?? true
+        showMovement = try c.decodeIfPresent(Bool.self, forKey: .showMovement) ?? true
+        showDate = try c.decodeIfPresent(Bool.self, forKey: .showDate) ?? true
+        icon = try c.decodeIfPresent(ShareIcon.self, forKey: .icon) ?? .trophy
+    }
 
     static let rowCounts = [5, 10, 15, 20]
 }
@@ -137,7 +199,7 @@ extension ShareCard {
     /// The pictures a card with these options draws, for the renderer to load first: a list's visible rows (the first one is also the
     /// background), a profile's one hero picture.
     func pictureURLs(for options: ShareOptions) -> [String?] {
-        if let profile { return [profile.heroImageURL] }
+        if let profile { return [profile.heroImageURL] + profile.highlights.map(\.imageURL) }
         return visibleRows(for: options).map(\.imageURL)
     }
 

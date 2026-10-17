@@ -50,7 +50,8 @@ enum ShareCards {
         }
         var chips = yearlyTopRanks.map { ShareChip(kind: .rank, text: "#\($0.rank) of \($0.year)") }
         for milestone in stats.milestones.achieved.sorted(by: { $0.milestone > $1.milestone }).prefix(3) {
-            chips.append(ShareChip(kind: .milestone, text: "\(MilestoneFormatting.formatMilestone(milestone.milestone)) plays · \(milestone.achievedAt.formatted(date: .abbreviated, time: .omitted))"))
+            let date = milestone.achievedAt.formatted(date: .abbreviated, time: .omitted)
+            chips.append(ShareChip(kind: .milestone, text: "\(MilestoneFormatting.formatMilestone(milestone.milestone)) plays · \(date)", tier: milestone.milestone, detail: date))
         }
         let kind: String
         let subtitle: String
@@ -76,6 +77,98 @@ enum ShareCards {
             kindID: "page.\(entity.rawValue)",
             profile: ShareProfile(
                 kind: kind, subtitle: subtitle, heroImageURL: imageURL, stats: tiles, chips: chips, trend: stats.trend.map(\.count)
+            )
+        )
+    }
+
+    /// One milestone reached by an artist, album or track (or by the whole library, with no name or picture of its own).
+    static func milestone(
+        kind: String, name: String, artist: String?, imageURL: String?, milestone: Int, achievedAt: Date, firstAt: Date, now: Date = Date()
+    ) -> ShareCard {
+        let days = achievedAt.timeIntervalSince(firstAt) / 86400
+        var stats = [ShareStat(label: "Reached", value: achievedAt.formatted(date: .abbreviated, time: .omitted))]
+        if days >= 0 { stats.append(ShareStat(label: "Time to get there", value: MilestoneFormatting.formatElapsedDays(days))) }
+        stats.append(ShareStat(label: "First scrobble", value: firstAt.formatted(date: .abbreviated, time: .omitted)))
+        return ShareCard(
+            title: name,
+            period: "All time",
+            measure: artist ?? "",
+            rows: [],
+            valueLabel: "Plays",
+            hasMovement: false,
+            generatedAt: now,
+            kindID: "milestone.\(kind.lowercased())",
+            iconChoice: imageURL == nil && kind == "Total",
+            profile: ShareProfile(kind: "\(kind) milestone", subtitle: artist ?? "", heroImageURL: imageURL, headline: "\(milestone.formatted()) plays", headlineTier: milestone, stats: stats, chips: [], trend: [])
+        )
+    }
+
+    /// A Milestones page's achieved list, in the order shown (nothing is ranked, so no row numbers). `tierLabel` names the page's tier
+    /// filter, and is empty when no tier is chosen (every milestone), so the card doesn't claim a filter that isn't there.
+    struct MilestoneRow: Sendable {
+        var name: String
+        var artist: String?
+        var imageURL: String?
+        var milestone: Int
+        var achievedAt: Date
+    }
+
+    static func milestones(category: String, tierLabel: String, rows: [MilestoneRow], now: Date = Date()) -> ShareCard {
+        ShareCard(
+            title: "Milestones reached",
+            period: category,
+            measure: tierLabel,
+            rows: rows.enumerated().map { index, row in
+                ShareRow(
+                    rank: index + 1, title: row.name, subtitle: row.artist,
+                    value: "\(MilestoneFormatting.formatMilestone(row.milestone)) · \(row.achievedAt.formatted(date: .abbreviated, time: .omitted))",
+                    change: .none, imageURL: row.imageURL,
+                    milestone: ShareMilestone(tier: row.milestone, date: row.achievedAt.formatted(date: .abbreviated, time: .omitted))
+                )
+            },
+            valueLabel: "Milestone",
+            hasMovement: false,
+            generatedAt: now,
+            kindID: "milestones.\(category.lowercased())",
+            numbered: false,
+            iconChoice: category == "Total"
+        )
+    }
+
+    /// A Timeline month: its totals, its top artist, album and track, and the milestones reached.
+    static func timelineMonth(_ month: TimelineMonth, metric: TopChartsMetric, now: Date = Date()) -> ShareCard {
+        func pick(_ role: String, _ item: TimelineTopItem?) -> ShareHighlight? {
+            guard let item else { return nil }
+            let value = metric == .timeListened
+                ? DurationEngine.formatTimeListened(item.timeListenedSeconds ?? 0)
+                : "\(item.playcount.formatted()) \(item.playcount == 1 ? "play" : "plays")"
+            return ShareHighlight(role: role, title: item.name, subtitle: item.artist, value: value, imageURL: item.imageURL)
+        }
+        let highlights = [pick("Top Artist", month.top.artist), pick("Top Album", month.top.album), pick("Top Track", month.top.track)].compactMap { $0 }
+        let totals = month.totals
+        let chips = month.milestones
+            .sorted { $0.kind != $1.kind ? $0.kind.rawValue < $1.kind.rawValue : $0.milestone > $1.milestone }
+            .prefix(8)
+            .map { item -> ShareChip in
+                let what = item.kind == .total ? "Total" : item.name
+                return ShareChip(kind: .milestone, text: "\(MilestoneFormatting.formatMilestone(item.milestone)) · \(what)", tier: item.milestone, detail: what)
+            }
+        return ShareCard(
+            title: month.monthStart.formatted(.dateTime.month(.wide).year()),
+            period: "Month",
+            measure: "",
+            rows: [],
+            valueLabel: metric == .timeListened ? "Time" : "Plays",
+            hasMovement: false,
+            generatedAt: now,
+            kindID: "timeline.month",
+            profile: ShareProfile(
+                kind: "Timeline", subtitle: "", heroImageURL: nil,
+                stats: [
+                    ShareStat(label: "Plays", value: totals.plays.formatted()), ShareStat(label: "Artists", value: totals.artists.formatted()),
+                    ShareStat(label: "Albums", value: totals.albums.formatted()), ShareStat(label: "Tracks", value: totals.tracks.formatted()),
+                ],
+                chips: Array(chips), highlights: highlights, trend: []
             )
         )
     }

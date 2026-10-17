@@ -202,6 +202,83 @@ enum ShareChecks {
             check("a release-period collage says one favorite per period instead of a range", eraCaption.text(date: when) == "Top Tracks · One favorite per release decade · Ranked by time listened · \(dateText)", eraCaption.text(date: when))
             check("the strip's height is a fixed share of the width", CollageCanvas.heightRatio(grid: .three, footer: .none) == 1 && abs(CollageCanvas.heightRatio(grid: .three, footer: footerDetails) - 1.07) < 0.0001)
 
+            // MARK: Milestones and Timeline
+            let reached = Date(timeIntervalSince1970: 1_700_000_000), firstPlay = Date(timeIntervalSince1970: 1_690_000_000)
+            let reachedText = reached.formatted(date: .abbreviated, time: .omitted)
+            let milestoneCard = ShareCards.milestone(kind: "Album", name: "Album A", artist: "Artist A", imageURL: "file:///art/m.jpg", milestone: 1000, achievedAt: reached, firstAt: firstPlay)
+            check("a milestone card says what was reached, when, and how long it took", milestoneCard.profile?.stats.map(\.label) == ["Reached", "Time to get there", "First scrobble"] && milestoneCard.profile?.headline == "\(1000.formatted()) plays" && milestoneCard.profile?.stats[0].value == reachedText && milestoneCard.profile?.stats[1].value == MilestoneFormatting.formatElapsedDays(reached.timeIntervalSince(firstPlay) / 86400) && milestoneCard.profile?.kind == "Album milestone" && milestoneCard.profile?.subtitle == "Artist A" && milestoneCard.kindID == "milestone.album")
+            check("the milestone's text says what was reached", ShareText.markdownTable(milestoneCard, options: ShareOptions()).contains("| Milestone | \(1000.formatted()) plays |") && ShareText.markdownList(milestoneCard, options: ShareOptions()).contains("- **Milestone:** \(1000.formatted()) plays") && ShareText.plain(milestoneCard, options: ShareOptions()).contains("• Milestone: \(1000.formatted()) plays"))
+            check("a library-wide milestone has no artist line", ShareCards.milestone(kind: "Total", name: "1,000 scrobbles", artist: nil, imageURL: nil, milestone: 1000, achievedAt: reached, firstAt: firstPlay).profile?.subtitle == "")
+            let milestoneList = ShareCards.milestones(category: "Albums", tierLabel: "1K milestones", rows: [
+                ShareCards.MilestoneRow(name: "Album A", artist: "Artist A", imageURL: nil, milestone: 1000, achievedAt: reached),
+                ShareCards.MilestoneRow(name: "Album *B*", artist: "Artist B", imageURL: nil, milestone: 250, achievedAt: firstPlay),
+            ])
+            check("the milestone list is in the order given, not numbered, and says its category and filter", milestoneList.rows.map(\.title) == ["Album A", "Album *B*"] && !milestoneList.numbered && milestoneList.period == "Albums" && milestoneList.measure == "1K milestones" && milestoneList.rows[0].value == "1K · \(reachedText)")
+            check("each milestone row carries its tier and date for the coloured pill", milestoneList.rows[0].milestone == ShareMilestone(tier: 1000, date: reachedText) && milestoneList.rows[1].milestone?.tier == 250)
+            let allTiers = ShareCards.milestones(category: "Albums", tierLabel: "", rows: [ShareCards.MilestoneRow(name: "A", artist: nil, imageURL: nil, milestone: 100, achievedAt: reached)])
+            check("with no tier chosen the card has no filter label, in the text either", allTiers.measure.isEmpty && !ShareText.markdownTable(allTiers, options: ShareOptions()).contains("All milestones") && ShareText.markdownTable(allTiers, options: ShareOptions()).hasPrefix("**Milestones reached** · Albums · \(ShareText.dateText(allTiers))\n") && ShareText.plain(allTiers, options: ShareOptions()).hasPrefix("Milestones reached — Albums, \(ShareText.dateText(allTiers))\n"), ShareText.plain(allTiers, options: ShareOptions()))
+            check("a milestone row's text isn't followed by the word milestone", ShareText.plain(allTiers, options: ShareOptions()).contains("• A (100 · \(reachedText))") && ShareText.markdownList(allTiers, options: ShareOptions()).contains("- **A** (100 · \(reachedText))"), ShareText.plain(allTiers, options: ShareOptions()))
+            check("a chosen tier is lowercased only at its first letter in the text", ShareText.plain(milestoneList, options: ShareOptions()).hasPrefix("Milestones reached — Albums, 1K milestones, "), ShareText.plain(milestoneList, options: ShareOptions()))
+            let totalList = ShareCards.milestones(category: "Total", tierLabel: "", rows: [ShareCards.MilestoneRow(name: "1,000 scrobbles", artist: nil, imageURL: nil, milestone: 1000, achievedAt: reached)])
+            check("a list of totals offers the trophy or Last.fm picture; a list with pictures does not", totalList.iconChoice && !milestoneList.iconChoice && ShareCards.milestone(kind: "Total", name: "x", artist: nil, imageURL: nil, milestone: 100, achievedAt: reached, firstAt: firstPlay).iconChoice && !milestoneCard.iconChoice)
+            var trophyOptions = ShareOptions(); trophyOptions.icon = .trophy
+            var lastfmOptions = ShareOptions(); lastfmOptions.icon = .lastfm
+            let trophyPNG = ShareRenderer.png(card: totalList, options: trophyOptions, identity: .anonymous, images: [:])
+            let lastfmPNG = ShareRenderer.png(card: totalList, options: lastfmOptions, identity: .anonymous, images: [:])
+            check("the two pictures for a total draw differently", trophyPNG != nil && trophyPNG != lastfmPNG)
+            let oldOptions = try? JSONDecoder().decode(ShareOptions.self, from: Data(#"{"size":"portrait","rowCount":15,"showValues":false,"showMovement":true,"showDate":true}"#.utf8))
+            check("options remembered before the picture choice existed still load, with the trophy", oldOptions?.size == .portrait && oldOptions?.rowCount == 15 && oldOptions?.showValues == false && oldOptions?.icon == .trophy)
+            let listTable = ShareText.markdownTable(milestoneList, options: ShareOptions())
+            check("an unnumbered list has no number column, and bullets instead of numbers", !listTable.contains("| # |") && listTable.contains("| Album A | Artist A | 1K · \(reachedText) |") && ShareText.markdownList(milestoneList, options: ShareOptions()).contains("\n- **Album A**") && ShareText.plain(milestoneList, options: ShareOptions()).contains("\n• Album A") && !ShareText.plain(milestoneList, options: ShareOptions()).contains("1. "), listTable)
+            check("a ranked list is still numbered", ShareText.markdownTable(card, options: options).contains("| # | Name |") && ShareText.plain(card, options: options).contains("\n1. "))
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                let png = ShareRenderer.png(card: milestoneList, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("the milestone list, \(size.label): renders, not blank", image?.pixelsWide == Int(size.points.width) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                let single = ShareRenderer.png(card: milestoneCard, options: o, identity: .anonymous, images: [:])
+                check("a milestone card, \(size.label): renders", (single.flatMap { NSBitmapImageRep(data: $0) }?.pixelsWide ?? 0) == Int(size.points.width) * 2)
+            }
+            let monthStart = Date(timeIntervalSince1970: 1_759_000_000)
+            func topItem(_ entity: TopChartsEntity, _ name: String, _ artist: String?, plays: Int, seconds: Int?) -> TimelineTopItem {
+                TimelineTopItem(entity: entity, name: name, artist: artist, album: nil, playcount: plays, timeListenedSeconds: seconds, imageURL: "file:///art/\(name).jpg", loved: false)
+            }
+            let timelineMonth = TimelineMonth(
+                monthStart: monthStart,
+                top: TimelinePeriodTop(artist: topItem(.artist, "Artist A", nil, plays: 41, seconds: 9_000), album: topItem(.album, "Album A", "Artist A", plays: 30, seconds: 7_200), track: topItem(.track, "Song A", "Artist A", plays: 1, seconds: 200)),
+                weeks: [], totals: TimelineMonthTotals(plays: 412, artists: 61, albums: 88, tracks: 230),
+                milestones: [TimelineMilestone(kind: .artist, name: "Artist A", artist: nil, milestone: 1000, achievedAt: monthStart), TimelineMilestone(kind: .total, name: "", artist: nil, milestone: 25_000, achievedAt: monthStart), TimelineMilestone(kind: .artist, name: "Artist B", artist: nil, milestone: 5000, achievedAt: monthStart)]
+            )
+            let monthCard = ShareCards.timelineMonth(timelineMonth, metric: .scrobbles)
+            check("a month card has its name, totals and the three picks", monthCard.title == monthStart.formatted(.dateTime.month(.wide).year()) && monthCard.profile?.stats.map(\.value) == ["412", "61", "88", "230"] && monthCard.profile?.highlights.map(\.role) == ["Top Artist", "Top Album", "Top Track"] && monthCard.profile?.highlights[0].value == "41 plays" && monthCard.profile?.highlights[2].value == "1 play" && monthCard.profile?.highlights[1].subtitle == "Artist A" && monthCard.profile?.highlights[0].subtitle == nil)
+            check("its milestones are grouped by kind, biggest first", monthCard.profile?.chips.map(\.text) == ["25K · Total", "5K · Artist B", "1K · Artist A"], "\(monthCard.profile?.chips.map(\.text) ?? [])")
+            check("by time listened the picks show time", ShareCards.timelineMonth(timelineMonth, metric: .timeListened).profile?.highlights[0].value == DurationEngine.formatTimeListened(9_000))
+            check("a recap draws its three pictures", monthCard.pictureURLs(for: ShareOptions()).compactMap { $0 }.count == 3)
+            let monthTable = ShareText.markdownTable(monthCard, options: ShareOptions())
+            check("the month's text carries the picks", monthTable.contains("| Top Artist | Artist A (41 plays) |") && monthTable.contains("| Top Album | Album A — Artist A (30 plays) |") && ShareText.plain(monthCard, options: ShareOptions()).contains("• Top Track: Song A — Artist A (1 play)"), monthTable)
+            check("a month's milestone chips carry their tier and what they were for", monthCard.profile?.chips.map(\.tier) == [25_000, 5000, 1000] && monthCard.profile?.chips.map(\.detail) == ["Total", "Artist B", "Artist A"])
+            var recoloured = monthCard
+            recoloured.profile?.chips[2].tier = 100
+            check("the chip colour follows the tier (same words, different tier, different image)", ShareRenderer.png(card: recoloured, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: monthCard, options: ShareOptions(), identity: .anonymous, images: [:]))
+            check("a milestone card's headline carries its tier", milestoneCard.profile?.headlineTier == 1000)
+            var otherTier = milestoneCard
+            otherTier.profile?.headlineTier = 100
+            check("…and its colour follows it", ShareRenderer.png(card: otherTier, options: ShareOptions(), identity: .anonymous, images: [:]) != ShareRenderer.png(card: milestoneCard, options: ShareOptions(), identity: .anonymous, images: [:]))
+            check("the tier colours are the app's, gold for the prestige tiers", ShareCardStyle.milestoneColor(25_000) == ShareCardStyle.gold && ShareCardStyle.milestoneColor(100) == MilestoneFormatting.milestoneColor(100) && ShareCardStyle.milestoneColor(100) != ShareCardStyle.milestoneColor(1000))
+            let recapSwatch = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in NSColor.systemPurple.setFill(); rect.fill(); return true }
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                let png = ShareRenderer.png(card: monthCard, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("a month card, \(size.label): a PNG at 2x, not blank", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                let withArt = ShareRenderer.png(card: monthCard, options: o, identity: .anonymous, images: ["file:///art/Album A.jpg": recapSwatch])
+                let withName = ShareRenderer.png(card: monthCard, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:])
+                check("a month card, \(size.label): pictures and the footer change the image", withArt != png && withName != png)
+            }
+            let emptyMonth = TimelineMonth(monthStart: monthStart, top: TimelinePeriodTop(artist: nil, album: nil, track: nil), weeks: [], totals: TimelineMonthTotals(plays: 0, artists: 0, albums: 0, tracks: 0), milestones: [])
+            let emptyCard = ShareCards.timelineMonth(emptyMonth, metric: .scrobbles)
+            check("a month with no picks still makes a card that renders", emptyCard.profile?.highlights.isEmpty == true && (ShareRenderer.png(card: emptyCard, options: ShareOptions(), identity: .anonymous, images: [:]).flatMap { NSBitmapImageRep(data: $0) }?.pixelsWide ?? 0) == 2160)
+
             // MARK: One artist, album or track
             let profileCard = sampleProfileCard()
             check("no card until the page's numbers have loaded", ShareCards.profile(entity: .album, name: "Album A", artist: "Artist A", album: nil, imageURL: nil, periodLabel: "All time", stats: nil, metric: .scrobbles, timeListenedSeconds: nil, facts: [], yearlyTopRanks: []) == nil)
@@ -209,6 +286,7 @@ enum ShareChecks {
             check("its tiles are the headline numbers then the page's facts that have a value", profileCard.profile?.stats.map(\.label) == ["Scrobbles", "First scrobble", "Last scrobble", "Play frequency", "Released", "Turnover rate"], "\(profileCard.profile?.stats.map(\.label) ?? [])")
             check("the plays tile reads as the page shows it", profileCard.profile?.stats.first?.value == 1234.formatted())
             check("rank chips then the three highest milestones, highest first", profileCard.profile?.chips.map(\.text) == ["#3 of 2024", "#7 of 2022", "5K plays · " + Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .omitted), "1K plays · " + Date(timeIntervalSince1970: 1_650_000_000).formatted(date: .abbreviated, time: .omitted), "500 plays · " + Date(timeIntervalSince1970: 1_600_000_000).formatted(date: .abbreviated, time: .omitted)], "\(profileCard.profile?.chips.map(\.text) ?? [])")
+            check("a page's milestone chips carry their tier and date, rank chips none", profileCard.profile?.chips.map(\.tier) == [nil, nil, 5000, 1000, 500] && profileCard.profile?.chips[2].detail == Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .omitted))
             check("the trend carries each bucket's plays", profileCard.profile?.trend == [0, 4, 9, 2, 7, 3])
             let timeCard = ShareCards.profile(entity: .track, name: "Song A", artist: "Artist A", album: "Album A", imageURL: nil, periodLabel: "All time", stats: sampleProfileStats(), metric: .timeListened, timeListenedSeconds: 7_320, facts: [], yearlyTopRanks: [])
             check("by time listened the first tile and the text label change", timeCard?.profile?.stats.first?.label == "Time Listened" && timeCard?.valueLabel == "Time" && timeCard?.profile?.subtitle == "Artist A · Album A" && timeCard?.profile?.kind == "Track")
@@ -351,6 +429,43 @@ enum ShareChecks {
                 let seconds = Date().timeIntervalSince(start)
                 if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-page-\(entity.rawValue)-\(size.rawValue).png")) }
                 check("\(entity.displayName) page card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s (\(images.count) of \(urls.compactMap { $0 }.count) pictures)", png != nil && seconds < 3)
+            }
+        }
+        // Milestones and Timeline, from the same engines the pages use, against plain counts over the history.
+        let canonical = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+        let milestoneResult = MilestonesEngine.fetch(scrobbles: canonical)
+        let listCard = ShareCards.milestones(category: "Albums", tierLabel: "All milestones", rows: milestoneResult.albums.achieved.map {
+            ShareCards.MilestoneRow(name: $0.name, artist: $0.artist, imageURL: $0.imageURL, milestone: $0.milestone, achievedAt: $0.achievedAt)
+        })
+        check("the albums milestone list has rows", !listCard.rows.isEmpty, "\(listCard.rows.count)")
+        for item in milestoneResult.albums.achieved.prefix(5) {
+            let artistKey = item.artist.map(TextNormalization.artistIdentityKey)
+            let dates = canonical.filter { $0.albumName == item.name && TextNormalization.artistIdentityKey($0.artistName) == artistKey }.map(\.playedAt).sorted()
+            let nth = dates.count >= item.milestone ? dates[item.milestone - 1] : nil
+            let card = ShareCards.milestone(kind: "Album", name: item.name, artist: item.artist, imageURL: item.imageURL, milestone: item.milestone, achievedAt: item.achievedAt, firstAt: item.firstAt)
+            check("milestone card \(item.milestone.formatted()) plays: reached on the date of the \(item.milestone.formatted())th play, first play matches", nth == item.achievedAt && dates.first == item.firstAt && card.profile?.stats.first?.value == item.achievedAt.formatted(date: .abbreviated, time: .omitted), "\(String(describing: nth)) vs \(item.achievedAt)")
+        }
+        let timeline = TimelineEngine.fetch(scrobbles: (try? await ScrobbleHistoryCache.shared.snapshots(container: container)) ?? [], metric: .scrobbles)
+        if let month = timeline.months.first {
+            let calendar = AppCalendars.listening
+            let end = calendar.date(byAdding: .month, value: 1, to: month.monthStart)!
+            let inMonth = canonical.filter { $0.playedAt >= month.monthStart && $0.playedAt < end }
+            let card = ShareCards.timelineMonth(month, metric: .scrobbles)
+            check("the latest month card: plays equal an independent count (\(inMonth.count))", card.profile?.stats.first?.value == inMonth.count.formatted(), "\(card.profile?.stats.first?.value ?? "none")")
+            check("…and its artists, albums and tracks are the distinct counts", card.profile?.stats.dropFirst().map(\.value) == [Set(inMonth.map { TextNormalization.artistIdentityKey($0.artistName) }).count.formatted(), Set(inMonth.map { TextNormalization.artistIdentityKey($0.artistName) + "|" + $0.albumName }).count.formatted(), Set(inMonth.map { TextNormalization.artistIdentityKey($0.artistName) + "|" + $0.trackName }).count.formatted()].map { $0 }, "\(card.profile?.stats.map(\.value) ?? [])")
+            if let top = month.top.artist {
+                let plays = inMonth.filter { TextNormalization.artistIdentityKey($0.artistName) == TextNormalization.artistIdentityKey(top.name) }.count
+                check("…and the top artist's plays equal an independent count (\(plays))", card.profile?.highlights.first?.value == "\(plays.formatted()) \(plays == 1 ? "play" : "plays")", "\(card.profile?.highlights.first?.value ?? "none")")
+            }
+            let urls = card.pictureURLs(for: ShareOptions())
+            let images = await ShareArtwork.load(urls)
+            for size in ShareSize.allCases {
+                var options = ShareOptions(); options.size = size
+                let start = Date()
+                let png = ShareRenderer.png(card: card, options: options, identity: .anonymous, images: images)
+                let seconds = Date().timeIntervalSince(start)
+                if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-month-\(size.rawValue).png")) }
+                check("the latest month card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s", png != nil && seconds < 3)
             }
         }
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
@@ -508,6 +623,42 @@ enum ShareChecks {
             var o = ShareOptions(); o.size = .square
             if let png = ShareRenderer.png(card: card, options: o, identity: ShareIdentity(name: "someone", showsFooter: true, logo: style), images: swatches, scale: 1) {
                 try? png.write(to: URL(fileURLWithPath: folder).appending(path: "logo-\(style.rawValue).png"))
+            }
+        }
+        // Milestones and a Timeline month.
+        let snapReached = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapMilestones = ShareCards.milestones(category: "Albums", tierLabel: "", rows: (1...8).map { i in
+            ShareCards.MilestoneRow(name: "Album \(i)", artist: "Artist \(i)", imageURL: nil, milestone: [1000, 500, 250, 100][i % 4], achievedAt: snapReached.addingTimeInterval(Double(-i) * 40 * 86400))
+        })
+        let snapSingle = ShareCards.milestone(kind: "Album", name: "Album A", artist: "Artist A", imageURL: nil, milestone: 1000, achievedAt: snapReached, firstAt: snapReached.addingTimeInterval(-86400 * 190))
+        let snapMonthStart = Date(timeIntervalSince1970: 1_759_000_000)
+        func snapItem(_ entity: TopChartsEntity, _ name: String, _ artist: String?, _ plays: Int) -> TimelineTopItem {
+            TimelineTopItem(entity: entity, name: name, artist: artist, album: nil, playcount: plays, timeListenedSeconds: nil, imageURL: "file:///art/\(name).jpg", loved: false)
+        }
+        let snapMonth = ShareCards.timelineMonth(TimelineMonth(
+            monthStart: snapMonthStart,
+            top: TimelinePeriodTop(artist: snapItem(.artist, "Artist A", nil, 41), album: snapItem(.album, "Album A", "Artist A", 30), track: snapItem(.track, "Song With A Rather Long Title", "Artist A & Friends", 12)),
+            weeks: [], totals: TimelineMonthTotals(plays: 412, artists: 61, albums: 88, tracks: 230),
+            milestones: [TimelineMilestone(kind: .total, name: "", artist: nil, milestone: 25_000, achievedAt: snapMonthStart), TimelineMilestone(kind: .artist, name: "Artist A", artist: nil, milestone: 1000, achievedAt: snapMonthStart), TimelineMilestone(kind: .album, name: "Album A", artist: "Artist A", milestone: 500, achievedAt: snapMonthStart)]
+        ), metric: .scrobbles)
+        let recapArt: [String: NSImage] = Dictionary(uniqueKeysWithValues: ["Artist A", "Album A", "Song With A Rather Long Title"].enumerated().map { index, name in
+            ("file:///art/\(name).jpg", NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in NSColor(hue: 0.1 + CGFloat(index) * 0.25, saturation: 0.55, brightness: 0.8, alpha: 1).setFill(); rect.fill(); return true })
+        })
+        let snapTotals = ShareCards.milestones(category: "Total", tierLabel: "", rows: [100, 250, 500, 1000, 2500, 5000, 10000, 25000].enumerated().map { index, tier in
+            ShareCards.MilestoneRow(name: "\(tier.formatted()) scrobbles", artist: nil, imageURL: nil, milestone: tier, achievedAt: snapReached.addingTimeInterval(Double(-index) * 120 * 86400))
+        })
+        for icon in ShareIcon.allCases {
+            var o = ShareOptions(); o.size = .square; o.icon = icon
+            if let png = ShareRenderer.png(card: snapTotals, options: o, identity: .anonymous, images: [:], scale: 1) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "milestones-totals-\(icon.rawValue).png"))
+            }
+        }
+        for (name, c, images) in [("milestones-list", snapMilestones, [String: NSImage]()), ("milestone-single", snapSingle, [:]), ("month", snapMonth, recapArt)] {
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                if let png = ShareRenderer.png(card: c, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: images, scale: 1) {
+                    try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(size.rawValue).png"))
+                }
             }
         }
         // The collage with its caption: what and when, the name and the tag.

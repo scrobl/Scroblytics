@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 /// one popover (the same for every card) with a live preview, the options that suit the card, and the ways to send it on.
 struct ShareButton: View {
     var title = "Share"
+    /// Just the icon, for a small spot on a card in a list (each one names what it shares, for VoiceOver and the tooltip).
+    var iconOnly = false
     /// Builds the card when the button is pressed; nil (nothing to share yet) disables the button.
     let card: @MainActor () -> ShareCard?
     var isEnabled = true
@@ -17,10 +19,15 @@ struct ShareButton: View {
         Button {
             presented = card()
         } label: {
-            Label(title, systemImage: "square.and.arrow.up")
+            if iconOnly {
+                Image(systemName: "square.and.arrow.up")
+            } else {
+                Label(title, systemImage: "square.and.arrow.up")
+            }
         }
+        .accessibilityLabel(iconOnly ? "Share \(title)" : "Share")
         .disabled(!isEnabled)
-        .help("Make an image or text of this to share")
+        .help(iconOnly ? "Share \(title)" : "Make an image or text of this to share")
         .popover(item: Binding(get: { presented.map(PresentedCard.init) }, set: { presented = $0?.card }), arrowEdge: .bottom) { item in
             SharePopover(card: item.card)
         }
@@ -160,6 +167,17 @@ private struct SharePopover: View {
                     }
                     .fixedSize()
                     Spacer()
+                }
+            }
+            if card.iconChoice {
+                HStack {
+                    Text("Picture for the total")
+                    Picker("Picture for the total", selection: $options.icon) {
+                        ForEach(ShareIcon.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
             }
             if card.isList {

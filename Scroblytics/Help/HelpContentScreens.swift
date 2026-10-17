@@ -50,7 +50,7 @@ extension HelpContent {
             title: "Sharing",
             summary: "The Share button: an image or text of what you are looking at, for friends or a Reddit post.",
             blocks: [
-                .paragraph("A **Share** button appears where something worth showing is: on [Top Charts](help://screen-top-charts), and on the header of an artist, album or track page ([how](help://screen-detail-pages)). The [Collage Generator](help://tool-collage) has **Copy Image** and **Share…** beside Save PNG. More screens will follow. The button opens a preview of a card made from exactly what is on screen, with options that suit that card (size, how many rows, whether to show plays and movement) and four ways to send it on."),
+                .paragraph("A **Share** button appears where something worth showing is: on [Top Charts](help://screen-top-charts), and on the header of an artist, album or track page ([how](help://screen-detail-pages)), on [Milestones](help://screen-milestones) and on each month of the [Timeline](help://screen-timeline). The [Collage Generator](help://tool-collage) has **Copy Image** and **Share…** beside Save PNG. More screens will follow. The button opens a preview of a card made from exactly what is on screen, with options that suit that card (size, how many rows, whether to show plays and movement) and four ways to send it on."),
                 .bullets([
                     "**Copy Image** puts the card on the clipboard. Paste it into a Reddit post, a message or a document.",
                     "**Save PNG…** saves it as a file (twice the card’s size, so it stays sharp when shrunk).",
@@ -58,6 +58,7 @@ extension HelpContent {
                     "**Copy Text** copies the same list as a Markdown table (Reddit shows it as a table), a Markdown list, or plain text.",
                 ]),
                 .paragraph("A chart makes a ranked list. An artist, album or track page makes a profile card: the picture and name, the page’s own numbers as tiles (the plays or time in the page’s period, first and last scrobble, play frequency, and the page’s facts such as release date and turnover), the yearly rank and milestone badges, and the trend line. The card says the period the page is showing. The text forms give the same numbers as a table or list."),
+                .paragraph("A list that isn’t a ranking (the milestones you reached) has no row numbers, and shows each milestone as a coloured pill like the Milestones page. The library’s own total milestones have no picture, so the preview lets you choose a trophy or the Last.fm logo for them. A month of the Timeline makes a recap card: its name, totals, its top artist, album and track with their pictures, and the milestones reached that month. One achieved milestone makes a card with the number reached, the date and how long it took."),
                 .paragraph("Cards are square, portrait or wide. The card uses the pictures saved on this Mac; with [Offline mode](help://offline-mode) on, a picture that isn’t saved is left out and the preview says so."),
                 .heading("What a card says about you"),
                 .paragraph("Nothing by default: no Last.fm name and no “Scroblytics” credit. Turn on **Show my Last.fm name** (from your saved account) or **Show “Scroblytics” on the card** in the preview, or under Settings › General › Sharing; your choice is remembered. In front of your name goes the Last.fm logo (the red circle) by default; Settings › General › Sharing also offers the “last.fm” wordmark, a simple badge, or no mark at all, and the same choice marks the Now Playing bar. A card is made on your Mac. Nothing is sent anywhere unless you paste it or pick a target in the Share menu, and no Reddit or other account is used."),
@@ -98,7 +99,7 @@ extension HelpContent {
             title: "Timeline",
             summary: "Your top artist, album and track for every month and week.",
             blocks: [
-                .paragraph("Newest month first. Each month shows totals (plays, artists, albums, tracks), any milestone badges reached that month, and the top artist, album and track; its weeks (starting on your chosen week-start day) are nested beneath. The only control is the Metric. It ignores the date range."),
+                .paragraph("Newest month first. Each month shows totals (plays, artists, albums, tracks), any milestone badges reached that month, and the top artist, album and track; its weeks (starting on your chosen week-start day) are nested beneath. The only control is the Metric. It ignores the date range. Each month has a **Share** button that makes a recap card of it ([Sharing](help://screen-sharing))."),
                 .paragraph("A period’s winner is the highest value; ties go to whichever was first played in that period, then to artist name. Artist spellings are combined; albums are identified by exact artist and album name."),
             ]
         ),
@@ -121,7 +122,7 @@ extension HelpContent {
             title: "Milestones",
             summary: "Upcoming and achieved play-count milestones.",
             blocks: [
-                .paragraph("Pick Total, Artists, Albums or Tracks, then filter by tier (100 up to 10K, and a combined 25K+ chip). **Upcoming** shows progress to the next threshold, “N to go” and an estimated date based on your last 30 days (up to 60 per category); **Achieved** shows when each threshold was crossed. It covers all of your history and ignores the date range. Definitions: [Milestones](help://metrics-milestones)."),
+                .paragraph("Pick Total, Artists, Albums or Tracks, then filter by tier (100 up to 10K, and a combined 25K+ chip). **Upcoming** shows progress to the next threshold, “N to go” and an estimated date based on your last 30 days (up to 60 per category); **Achieved** shows when each threshold was crossed. It covers all of your history and ignores the date range. Definitions: [Milestones](help://metrics-milestones). **Share** (top right) makes a list card of the achieved milestones for the category and tier you are looking at; the share icon on an achieved card makes a card for that one milestone ([Sharing](help://screen-sharing))."),
             ]
         ),
         HelpArticle(

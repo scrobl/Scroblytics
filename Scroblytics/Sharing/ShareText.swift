@@ -19,6 +19,11 @@ enum ShareText {
         return out
     }
 
+    /// "Ranked by scrobbles" reads on mid-sentence as "ranked by scrobbles"; "1K milestones" keeps its K.
+    private static func lowercasingFirst(_ text: String) -> String {
+        text.prefix(1).lowercased() + text.dropFirst()
+    }
+
     /// The card's date as the image shows it.
     static func dateText(_ card: ShareCard) -> String {
         card.generatedAt.formatted(date: .abbreviated, time: .omitted)
@@ -31,7 +36,8 @@ enum ShareText {
     }
 
     private static func header(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity) -> [String] {
-        var line = "**\(escape(card.title))** · \(escape(card.period)) · \(escape(card.measure.lowercased()))"
+        var line = "**\(escape(card.title))** · \(escape(card.period))"
+        if !card.measure.isEmpty { line += " · \(escape(lowercasingFirst(card.measure)))" }
         if options.showDate { line += " · \(escape(dateText(card)))" }
         if let name = identity.name, !name.isEmpty { line += " · \(escape(name))" }
         var lines = [line]
@@ -68,8 +74,13 @@ enum ShareText {
         let text: (String) -> String = { markdown ? escape($0) : $0 }
         let bullet = markdown ? "- " : "• "
         var lines = [profileHeader(card, options: options, identity: identity, markdown: markdown), ""]
+        if let headline = card.profile?.headline { lines.append(markdown ? "\(bullet)**Milestone:** \(text(headline))" : "\(bullet)Milestone: \(headline)") }
         for stat in profileStats(card, options: options) {
             lines.append(markdown ? "\(bullet)**\(text(stat.label)):** \(text(stat.value))" : "\(bullet)\(stat.label): \(stat.value)")
+        }
+        for pick in card.profile?.highlights ?? [] {
+            let by = pick.subtitle.map { " — \(text($0))" } ?? ""
+            lines.append(markdown ? "\(bullet)**\(text(pick.role)):** \(text(pick.title))\(by) (\(text(pick.value)))" : "\(bullet)\(pick.role): \(pick.title)\(pick.subtitle.map { " — \($0)" } ?? "") (\(pick.value))")
         }
         let chips = chipLines(card)
         if let ranks = chips.ranks { lines.append(markdown ? "\(bullet)**Top ranks:** \(text(ranks))" : "\(bullet)Top ranks: \(ranks)") }
@@ -80,7 +91,12 @@ enum ShareText {
 
     private static func profileTable(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity) -> String {
         var lines = [profileHeader(card, options: options, identity: identity, markdown: true), "", "| Stat | Value |", "|---|---|"]
+        if let headline = card.profile?.headline { lines.append("| Milestone | \(escape(headline)) |") }
         for stat in profileStats(card, options: options) { lines.append("| \(escape(stat.label)) | \(escape(stat.value)) |") }
+        for pick in card.profile?.highlights ?? [] {
+            let by = pick.subtitle.map { " — \(escape($0))" } ?? ""
+            lines.append("| \(escape(pick.role)) | \(escape(pick.title))\(by) (\(escape(pick.value))) |")
+        }
         let chips = chipLines(card)
         if let ranks = chips.ranks { lines.append("| Top ranks | \(escape(ranks)) |") }
         if let milestones = chips.milestones { lines.append("| Milestones | \(escape(milestones)) |") }
@@ -98,10 +114,10 @@ enum ShareText {
     }
 
     private static func line(_ row: ShareRow, options: ShareOptions, card: ShareCard) -> String {
-        var text = "\(row.rank). **\(escape(row.title))**"
+        var text = "\(card.numbered ? "\(row.rank). " : "- ")**\(escape(row.title))**"
         if let subtitle = row.subtitle, !subtitle.isEmpty { text += " — \(escape(subtitle))" }
         var tail: [String] = []
-        if options.showValues { tail.append("\(row.value) \(card.valueLabel.lowercased())") }
+        if options.showValues { tail.append(row.milestone == nil ? "\(row.value) \(card.valueLabel.lowercased())" : row.value) }
         let change = changeText(row.change)
         if options.showMovement, card.hasMovement, !change.isEmpty { tail.append(change) }
         if !tail.isEmpty { text += " (" + tail.joined(separator: ", ") + ")" }
@@ -122,13 +138,13 @@ enum ShareText {
         if card.profile != nil { return profileTable(card, options: options, identity: identity) }
         let hasSubtitle = card.rows.contains { $0.subtitle?.isEmpty == false }
         let showsMovement = options.showMovement && card.hasMovement
-        var headers = ["#", "Name"]
+        var headers = card.numbered ? ["#", "Name"] : ["Name"]
         if hasSubtitle { headers.append("Artist") }
         if options.showValues { headers.append(card.valueLabel) }
         if showsMovement { headers.append("Move") }
         var lines = header(card, options: options, identity: identity) + ["", "| " + headers.joined(separator: " | ") + " |", "|" + headers.map { _ in "---" }.joined(separator: "|") + "|"]
         for row in card.visibleRows(for: options) {
-            var cells = ["\(row.rank)", escape(row.title)]
+            var cells = card.numbered ? ["\(row.rank)", escape(row.title)] : [escape(row.title)]
             if hasSubtitle { cells.append(escape(row.subtitle ?? "")) }
             if options.showValues { cells.append(row.value) }
             if showsMovement { cells.append(changeText(row.change)) }
@@ -141,17 +157,18 @@ enum ShareText {
     /// Plain text with no formatting characters.
     static func plain(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
         if card.profile != nil { return profileList(card, options: options, identity: identity, markdown: false) }
-        var title = "\(card.title) — \(card.period), \(card.measure.lowercased())"
+        var title = "\(card.title) — \(card.period)"
+        if !card.measure.isEmpty { title += ", \(lowercasingFirst(card.measure))" }
         if options.showDate { title += ", \(dateText(card))" }
         if let name = identity.name, !name.isEmpty { title += " (\(name))" }
         var lines = [title]
         if let note = movementNote(card, options: options) { lines.append(note) }
         lines.append("")
         for row in card.visibleRows(for: options) {
-            var text = "\(row.rank). \(row.title)"
+            var text = "\(card.numbered ? "\(row.rank). " : "• ")\(row.title)"
             if let subtitle = row.subtitle, !subtitle.isEmpty { text += " — \(subtitle)" }
             var tail: [String] = []
-            if options.showValues { tail.append("\(row.value) \(card.valueLabel.lowercased())") }
+            if options.showValues { tail.append(row.milestone == nil ? "\(row.value) \(card.valueLabel.lowercased())" : row.value) }
             let change = changeText(row.change)
             if options.showMovement, card.hasMovement, !change.isEmpty { tail.append(change) }
             if !tail.isEmpty { text += " (" + tail.joined(separator: ", ") + ")" }

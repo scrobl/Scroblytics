@@ -6,6 +6,34 @@ enum ShareCardStyle {
     static let gold = Color(red: 1.0, green: 0.82, blue: 0.32)
 }
 
+extension ShareCardStyle {
+    /// A milestone tier's colour on a dark card: the app's tier colours, gold for the prestige tiers (which the app marks with its accent).
+    static func milestoneColor(_ tier: Int) -> Color {
+        MilestoneFormatting.isPrestigeMilestone(tier) ? gold : MilestoneFormatting.milestoneColor(tier)
+    }
+}
+
+/// What stands in for the picture of something that has none (the library's total): a trophy on a gold tile, or the Last.fm logo.
+struct SharePlaceholderIcon: View {
+    let icon: ShareIcon
+    let side: CGFloat
+
+    var body: some View {
+        switch icon {
+        case .trophy:
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.12, style: .continuous).fill(ShareCardStyle.gold.opacity(0.18))
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: side * 0.5))
+                    .foregroundStyle(ShareCardStyle.gold)
+            }
+            .frame(width: side, height: side)
+        case .lastfm:
+            LastfmMark(size: side, style: .circle)
+        }
+    }
+}
+
 struct ShareCardBackground: View {
     let size: CGSize
     /// The picture to blur behind everything.
@@ -65,7 +93,9 @@ struct ShareCardView: View {
     let images: [String: NSImage]
 
     var body: some View {
-        if card.profile != nil {
+        if card.profile?.highlights.isEmpty == false {
+            ShareRecapCardView(card: card, options: options, identity: identity, images: images)
+        } else if card.profile != nil {
             ShareProfileCardView(card: card, options: options, identity: identity, images: images)
         } else {
             ShareTopListCardView(card: card, options: options, identity: identity, images: images)
@@ -133,11 +163,13 @@ struct ShareTopListCardView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-            Text(card.measure)
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.68))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+            if !card.measure.isEmpty {
+                Text(card.measure)
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
             if showsMovementCaption, let note = card.movementNote {
                 HStack(spacing: 8) {
                     Text("▲▼")
@@ -182,12 +214,14 @@ struct ShareTopListCardView: View {
         let art = height - 14
         let titleSize = min(max(height * 0.33, 20), 40)
         HStack(spacing: height * 0.16) {
-            Text("\(row.rank)")
-                .font(.system(size: min(max(height * 0.40, 22), 48), weight: .heavy, design: .rounded))
-                .foregroundStyle(row.rank == 1 ? gold : Color.white.opacity(0.8))
-                .frame(width: height * 0.62, alignment: .center)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
+            if card.numbered {
+                Text("\(row.rank)")
+                    .font(.system(size: min(max(height * 0.40, 22), 48), weight: .heavy, design: .rounded))
+                    .foregroundStyle(row.rank == 1 ? gold : Color.white.opacity(0.8))
+                    .frame(width: height * 0.62, alignment: .center)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+            }
             artwork(row, side: art)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.title)
@@ -204,14 +238,42 @@ struct ShareTopListCardView: View {
             Spacer(minLength: 8)
             if options.showMovement, card.hasMovement { changeBadge(row.change, size: titleSize * 0.62) }
             if options.showValues {
-                Text(row.value)
-                    .font(.system(size: titleSize * 0.8, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(Color.white.opacity(0.85))
-                    .lineLimit(1)
-                    .fixedSize()
+                if let milestone = row.milestone {
+                    milestonePill(milestone, size: titleSize)
+                } else {
+                    Text(row.value)
+                        .font(.system(size: titleSize * 0.8, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
         }
         .frame(width: width, height: height)
+    }
+
+    /// A milestone as the Milestones page draws it: a trophy and the tier's number in the tier's colour, with the date beside it.
+    private func milestonePill(_ milestone: ShareMilestone, size: CGFloat) -> some View {
+        let color = ShareCardStyle.milestoneColor(milestone.tier)
+        return HStack(spacing: size * 0.4) {
+            HStack(spacing: size * 0.18) {
+                Image(systemName: "trophy.fill").font(.system(size: size * 0.55, weight: .semibold))
+                Text(MilestoneFormatting.formatMilestone(milestone.tier))
+                    .font(.system(size: size * 0.7, weight: .bold, design: .rounded).monospacedDigit())
+            }
+            .fixedSize()
+            .padding(.horizontal, size * 0.45).padding(.vertical, size * 0.18)
+            .foregroundStyle(color)
+            .background(color.opacity(0.22), in: Capsule())
+            .overlay(Capsule().stroke(MilestoneFormatting.isPrestigeMilestone(milestone.tier) ? ShareCardStyle.gold : .clear, lineWidth: 2))
+            .frame(width: size * 3.7, alignment: .trailing)
+            Text(milestone.date)
+                .font(.system(size: size * 0.62, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.7))
+                .frame(width: size * 4.4, alignment: .leading)
+        }
+        .lineLimit(1)
+        .fixedSize()
     }
 
     @ViewBuilder
@@ -219,6 +281,8 @@ struct ShareTopListCardView: View {
         Group {
             if let url = row.imageURL, let image = images[url] {
                 Image(nsImage: image).resizable().scaledToFill()
+            } else if card.iconChoice {
+                SharePlaceholderIcon(icon: options.icon, side: side)
             } else {
                 ZStack {
                     Color.white.opacity(0.10)

@@ -28,6 +28,8 @@ struct DetailHeaderCard<Tags: View>: View {
     var onFixAlbumMatch: (() -> Void)? = nil
     /// The page's own facts, under the headline numbers.
     var facts: [DetailFact] = []
+    /// The page's chosen period ("Last 12 months", "All time"); when given, the card carries a Share button that makes a card of this page.
+    var sharePeriodLabel: String? = nil
     @ViewBuilder var tags: () -> Tags
 
     var body: some View {
@@ -40,6 +42,12 @@ struct DetailHeaderCard<Tags: View>: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .topTrailing) {
+            if sharePeriodLabel != nil {
+                ShareButton(card: { makeShareCard() }, isEnabled: stats != nil)
+                    .padding(14)
+            }
+        }
         .background {
             ColorWashView(imageURLs: [effectiveImageURL ?? imageURL].compactMap { $0 }, strength: 0.78)
         }
@@ -111,6 +119,8 @@ struct DetailHeaderCard<Tags: View>: View {
                     TrackLibraryGapBadge(artist: subtitle ?? "", track: name, font: AppTypography.entitySubtitle)
                 }
             }
+            // Room for the Share button in the card's corner, so a long title never runs under it.
+            .padding(.trailing, sharePeriodLabel != nil ? Self.shareButtonReserve : 0)
             if let subtitle {
                 Text(subtitle).font(AppTypography.entitySubtitle).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -133,6 +143,17 @@ struct DetailHeaderCard<Tags: View>: View {
                 .padding(.top, 4)
             }
         }
+    }
+
+    /// A card of what this header shows. Nil until the page's numbers have loaded.
+    private func makeShareCard() -> ShareCard? {
+        guard let sharePeriodLabel else { return nil }
+        return ShareCards.profile(
+            entity: entity, name: name,
+            artist: entity == .artist ? nil : subtitle, album: entity == .track ? tertiary : nil,
+            imageURL: effectiveImageURL ?? imageURL, periodLabel: sharePeriodLabel, stats: stats, metric: metric,
+            timeListenedSeconds: timeListenedSeconds, facts: facts, yearlyTopRanks: yearlyTopRanks
+        )
     }
 
     private func lovedHeartButton(loved: Bool, action: @escaping () -> Void) -> some View {
@@ -188,6 +209,8 @@ struct DetailHeaderCard<Tags: View>: View {
     }
 
     static var artworkSize: CGFloat { 128 }
+    /// How much of the title row the corner Share button takes.
+    static var shareButtonReserve: CGFloat { 96 }
 
     private var canShowLargerArtwork: Bool { (effectiveImageURL ?? imageURL) != nil }
 
@@ -313,12 +336,13 @@ extension DetailHeaderCard where Tags == EmptyView {
     init(
         entity: TopChartsEntity, name: String, subtitle: String?, tertiary: String?, imageURL: String?, stats: EntityStats?,
         errorMessage: String?, metric: TopChartsMetric, timeListenedSeconds: Int? = nil, yearlyTopRanks: [TopChartsEngine.YearlyRank] = [],
-        onToggleLoved: (() -> Void)? = nil, isTogglingLoved: Bool = false, onFixAlbumMatch: (() -> Void)? = nil, facts: [DetailFact] = []
+        onToggleLoved: (() -> Void)? = nil, isTogglingLoved: Bool = false, onFixAlbumMatch: (() -> Void)? = nil, facts: [DetailFact] = [],
+        sharePeriodLabel: String? = nil
     ) {
         self.init(
             entity: entity, name: name, subtitle: subtitle, tertiary: tertiary, imageURL: imageURL, stats: stats, errorMessage: errorMessage,
             metric: metric, timeListenedSeconds: timeListenedSeconds, yearlyTopRanks: yearlyTopRanks, onToggleLoved: onToggleLoved,
-            isTogglingLoved: isTogglingLoved, onFixAlbumMatch: onFixAlbumMatch, facts: facts, tags: { EmptyView() }
+            isTogglingLoved: isTogglingLoved, onFixAlbumMatch: onFixAlbumMatch, facts: facts, sharePeriodLabel: sharePeriodLabel, tags: { EmptyView() }
         )
     }
 }

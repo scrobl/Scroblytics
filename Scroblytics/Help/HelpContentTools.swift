@@ -181,7 +181,7 @@ extension HelpContent {
             title: "Collage Generator",
             summary: "Make a PNG collage of your top artwork.",
             blocks: [
-                .paragraph("Choose a layout (3×3 up to 16×9), a source — **Top items** for a listening period, or **One per release period** (week, month, year or decade) — the content (artists, albums or tracks) and the Metric. Toggle titles, stats and period labels, zoom, then **Save PNG**. It shows how many tiles have artwork. Release-period collages bucket by release date (UTC); only music with a known release date is included."),
+                .paragraph("Choose a layout (3×3 up to 16×9), a source — **Top items** for a listening period, or **One per release period** (week, month, year or decade) — the content (artists, albums or tracks) and the Metric. Toggle titles, stats and period labels, zoom, then **Save PNG**, **Copy Image** (to paste into a post or message) or **Share…** (the macOS Share menu). Three more switches add a strip under the collage: **What and when** (what it shows, the period, how it is ranked and today’s date), **My Last.fm name** and **Scroblytics**. The last two are off until you turn them on and are the same switches as in the Share preview and Settings › General › Sharing. It shows how many tiles have artwork. Release-period collages bucket by release date (UTC); only music with a known release date is included."),
             ]
         ),
     ])

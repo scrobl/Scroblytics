@@ -21,6 +21,33 @@ struct ShareCard: Sendable, Equatable {
     var generatedAt = Date()
     /// Stable per kind of card; the remembered options are stored under it.
     var kindID: String
+    /// Set for a card about one artist, album or track (numbers, rank chips, trend) instead of a ranked list.
+    var profile: ShareProfile? = nil
+}
+
+/// What a card about a single artist, album or track carries beyond its title: the page's own numbers, rank chips and trend line.
+struct ShareProfile: Sendable, Equatable {
+    /// "Artist", "Album" or "Track".
+    var kind: String
+    /// The artist (and album) under the title; empty on an artist page.
+    var subtitle: String
+    var heroImageURL: String?
+    /// The headline numbers and the page's facts, as tiles.
+    var stats: [ShareStat]
+    var chips: [ShareChip]
+    /// Plays per bucket over the period, oldest first; fewer than two points draws no line.
+    var trend: [Int]
+}
+
+struct ShareStat: Sendable, Equatable {
+    var label: String
+    var value: String
+}
+
+struct ShareChip: Sendable, Equatable {
+    enum Kind: Sendable, Equatable { case rank, milestone }
+    var kind: Kind
+    var text: String
 }
 
 struct ShareRow: Sendable, Equatable {
@@ -64,6 +91,14 @@ enum ShareSize: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     /// Columns of rows on the card: a wide card splits its list in two.
     var columns: Int { self == .wide ? 2 : 1 }
+    /// How many stat tiles a profile card has room for.
+    var statLimit: Int {
+        switch self {
+        case .square: 6
+        case .portrait: 9
+        case .wide: 8
+        }
+    }
 }
 
 /// What the person chose on the popover. Remembered per kind of card (`ShareSettings`).
@@ -82,6 +117,8 @@ struct ShareIdentity: Equatable, Sendable {
     /// Their Last.fm name when they chose to show it.
     var name: String?
     var showsFooter = false
+    /// The mark in front of the name.
+    var logo = LastfmLogoStyle.circle
 
     static let anonymous = ShareIdentity(name: nil, showsFooter: false)
 }
@@ -91,4 +128,19 @@ extension ShareCard {
     func visibleRows(for options: ShareOptions) -> [ShareRow] {
         Array(rows.prefix(max(1, options.rowCount)))
     }
+
+    /// The stat tiles a profile card shows at this size.
+    func visibleStats(for options: ShareOptions) -> [ShareStat] {
+        Array((profile?.stats ?? []).prefix(options.size.statLimit))
+    }
+
+    /// The pictures a card with these options draws, for the renderer to load first: a list's visible rows (the first one is also the
+    /// background), a profile's one hero picture.
+    func pictureURLs(for options: ShareOptions) -> [String?] {
+        if let profile { return [profile.heroImageURL] }
+        return visibleRows(for: options).map(\.imageURL)
+    }
+
+    /// Whether the Rows and values options mean anything for this card.
+    var isList: Bool { profile == nil }
 }

@@ -52,6 +52,7 @@ private struct SharePopover: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage(ShareSettings.showsNameKey) private var showsName = false
     @AppStorage(ShareSettings.showsFooterKey) private var showsFooter = false
+    @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
     @State private var options = ShareOptions()
     @State private var images: [String: NSImage] = [:]
     @State private var imagesLoaded = false
@@ -60,13 +61,13 @@ private struct SharePopover: View {
     @State private var status: String?
 
     private var identity: ShareIdentity {
-        ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsFooter)
+        ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsFooter, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
     }
 
     /// Rows whose picture exists but could not be loaded (Offline mode, or the picture is not saved on this Mac).
     private var missingPictures: Int {
         guard imagesLoaded else { return 0 }
-        return card.visibleRows(for: options).filter { $0.imageURL != nil && images[$0.imageURL!] == nil }.count
+        return card.pictureURLs(for: options).compactMap { $0 }.filter { images[$0] == nil }.count
     }
 
     var body: some View {
@@ -100,6 +101,7 @@ private struct SharePopover: View {
         }
         .onChange(of: showsName) { renderPreview() }
         .onChange(of: showsFooter) { renderPreview() }
+        .onChange(of: logoRaw) { renderPreview() }
     }
 
     // MARK: Preview
@@ -151,14 +153,18 @@ private struct SharePopover: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            HStack {
-                Picker("Rows", selection: Binding(get: { shownRowCount }, set: { options.rowCount = $0 })) {
-                    ForEach(rowChoices, id: \.self) { Text("\($0) \($0 == 1 ? "row" : "rows")").tag($0) }
+            if card.isList {
+                HStack {
+                    Picker("Rows", selection: Binding(get: { shownRowCount }, set: { options.rowCount = $0 })) {
+                        ForEach(rowChoices, id: \.self) { Text("\($0) \($0 == 1 ? "row" : "rows")").tag($0) }
+                    }
+                    .fixedSize()
+                    Spacer()
                 }
-                .fixedSize()
-                Spacer()
             }
-            Toggle("Show \(card.valueLabel.lowercased())", isOn: $options.showValues)
+            if card.isList {
+                Toggle("Show \(card.valueLabel.lowercased())", isOn: $options.showValues)
+            }
             Toggle("Show today’s date", isOn: $options.showDate)
             if card.hasMovement {
                 Toggle("Show movement", isOn: $options.showMovement)

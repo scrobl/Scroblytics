@@ -123,6 +123,19 @@ enum ShareChecks {
             ShareSettings.save(chosen, for: "topChart.album", defaults: suite)
             check("options are remembered per kind of card", ShareSettings.options(for: "topChart.album", defaults: suite) == chosen && ShareSettings.options(for: "topChart.track", defaults: suite) == ShareOptions())
 
+            // The mark in front of the name: the red circle by default, a simple badge, or none
+            let logoSuite = UserDefaults(suiteName: "share-logo-\(UUID().uuidString)")!
+            check("the logo defaults to the circle; each choice reads back; junk falls back to the circle", ShareSettings.logo(defaults: logoSuite) == .circle && LastfmLogoStyle.allCases.allSatisfy { style in logoSuite.set(style.rawValue, forKey: ShareSettings.logoKey); return ShareSettings.logo(defaults: logoSuite) == style } && { logoSuite.set("nonsense", forKey: ShareSettings.logoKey); return ShareSettings.logo(defaults: logoSuite) == .circle }())
+            check("the circle and wordmark artwork are in the app", NSImage(named: "LastfmLogo") != nil && NSImage(named: "LastfmWordmark") != nil)
+            check("a card's identity carries the chosen mark", ShareSettings.identity(context: container.mainContext, defaults: { let d = UserDefaults(suiteName: "share-logo2-\(UUID().uuidString)")!; d.set(true, forKey: ShareSettings.showsNameKey); d.set("badge", forKey: ShareSettings.logoKey); return d }()).logo == .badge)
+            var logoOptions = ShareOptions(); logoOptions.size = .square
+            let logoCircle = ShareRenderer.png(card: card, options: logoOptions, identity: ShareIdentity(name: "someone", showsFooter: false, logo: .circle), images: [:])
+            let logoBadge = ShareRenderer.png(card: card, options: logoOptions, identity: ShareIdentity(name: "someone", showsFooter: false, logo: .badge), images: [:])
+            let logoNone = ShareRenderer.png(card: card, options: logoOptions, identity: ShareIdentity(name: "someone", showsFooter: false, logo: .none), images: [:])
+            let logoWordmark = ShareRenderer.png(card: card, options: logoOptions, identity: ShareIdentity(name: "someone", showsFooter: false, logo: .wordmark), images: [:])
+            check("the four marks draw four different cards", logoCircle != nil && Set([logoCircle, logoWordmark, logoBadge, logoNone]).count == 4)
+            check("the wordmark keeps its proportions", abs(LastfmMark.wordmarkAspect - 352.0 / 96.0) < 0.001 && (NSImage(named: "LastfmWordmark").map { abs($0.size.width / $0.size.height - LastfmMark.wordmarkAspect) < 0.01 } ?? false))
+
             // MARK: Images
             check("the three sizes in points", ShareSize.square.points == CGSize(width: 1080, height: 1080) && ShareSize.portrait.points == CGSize(width: 1080, height: 1350) && ShareSize.wide.points == CGSize(width: 1920, height: 1080))
             for size in ShareSize.allCases {
@@ -155,6 +168,85 @@ enum ShareChecks {
             let swatch = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in NSColor.systemRed.setFill(); rect.fill(); return true }
             let withArt = ShareRenderer.png(card: card, options: squareOptions, identity: .anonymous, images: [entries[0].imageURL ?? "": swatch])
             check("a loaded picture is drawn on the card", withArt != nil && withArt != plainData)
+
+            // MARK: The Collage tool shares the same way (Copy Image and Share use the renderer Save PNG always used)
+            let collageItems = (1...9).map { CollageItem(id: "c\($0)", name: "Album \($0)", artist: "Artist \($0)", album: nil, metricValue: 100 - $0, imageURL: nil, periodLabel: nil) }
+            for (grid, width, height) in [(CollageGrid.three, 3600, 3600), (CollageGrid.widescreen, 3600, 2025)] {
+                let png = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: grid, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false)
+                let bitmap = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("the collage renders at \(width) × \(height) (\(grid.rawValue))", bitmap?.pixelsWide == width && bitmap?.pixelsHigh == height, "\(bitmap?.pixelsWide ?? -1)x\(bitmap?.pixelsHigh ?? -1)")
+                check("…and is not blank (\(grid.rawValue))", bitmap.map { luminanceSpread($0) > 0.02 } ?? false)
+            }
+
+            // The caption under a collage: what and when, the name, the tag; each only when chosen, and the saved size grows by the strip
+            let plainCollage = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: .three, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false)
+            let footerDetails = CollageFooter(details: "x", identity: .anonymous)
+            let footerName = CollageFooter(details: nil, identity: ShareIdentity(name: "someone", showsFooter: false))
+            let footerTag = CollageFooter(details: nil, identity: ShareIdentity(name: nil, showsFooter: true))
+            check("nothing chosen means no strip", CollageFooter.none.isEmpty && !footerDetails.isEmpty && !footerName.isEmpty && !footerTag.isEmpty && CollageFooter(details: nil, identity: ShareIdentity(name: "", showsFooter: false)).isEmpty)
+            for (label, footer) in [("details", footerDetails), ("name", footerName), ("tag", footerTag)] {
+                for (grid, width, height) in [(CollageGrid.three, 3600, 3852), (CollageGrid.widescreen, 3600, 2277)] {
+                    let png = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: grid, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false, footer: footer)
+                    let bitmap = png.flatMap { NSBitmapImageRep(data: $0) }
+                    check("a collage with the \(label) strip is \(width) × \(height) (\(grid.rawValue))", bitmap?.pixelsWide == width && bitmap?.pixelsHigh == height, "\(bitmap?.pixelsWide ?? -1)x\(bitmap?.pixelsHigh ?? -1)")
+                }
+            }
+            let collageWithName = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: .three, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false, footer: footerName)
+            let collageWithTag = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: .three, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false, footer: footerTag)
+            check("the name and the tag draw differently, and a collage without them is unchanged", collageWithName != collageWithTag && collageWithName != plainCollage && plainCollage == CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: .three, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false, footer: .none))
+            let when = Date(timeIntervalSince1970: 1_760_500_000)
+            let dateText = when.formatted(date: .abbreviated, time: .omitted)
+            let topCaption = CollageCaption.make(source: .top, entity: .album, metric: .scrobbles, period: .year, rangeLabel: "Last 365 days")
+            check("the caption says what, the period, how it is ranked and the date", topCaption.text(date: when) == "Top Albums · Last 365 days · Ranked by scrobbles · \(dateText)", topCaption.text(date: when))
+            let eraCaption = CollageCaption.make(source: .period, entity: .track, metric: .timeListened, period: .decade, rangeLabel: "ignored")
+            check("a release-period collage says one favorite per period instead of a range", eraCaption.text(date: when) == "Top Tracks · One favorite per release decade · Ranked by time listened · \(dateText)", eraCaption.text(date: when))
+            check("the strip's height is a fixed share of the width", CollageCanvas.heightRatio(grid: .three, footer: .none) == 1 && abs(CollageCanvas.heightRatio(grid: .three, footer: footerDetails) - 1.07) < 0.0001)
+
+            // MARK: One artist, album or track
+            let profileCard = sampleProfileCard()
+            check("no card until the page's numbers have loaded", ShareCards.profile(entity: .album, name: "Album A", artist: "Artist A", album: nil, imageURL: nil, periodLabel: "All time", stats: nil, metric: .scrobbles, timeListenedSeconds: nil, facts: [], yearlyTopRanks: []) == nil)
+            check("a page card says what it is", profileCard.title == "Album A" && profileCard.period == "Last 12 months" && profileCard.kindID == "page.album" && profileCard.profile?.kind == "Album" && profileCard.profile?.subtitle == "Artist A" && profileCard.profile?.heroImageURL == "file:///art/a.jpg")
+            check("its tiles are the headline numbers then the page's facts that have a value", profileCard.profile?.stats.map(\.label) == ["Scrobbles", "First scrobble", "Last scrobble", "Play frequency", "Released", "Turnover rate"], "\(profileCard.profile?.stats.map(\.label) ?? [])")
+            check("the plays tile reads as the page shows it", profileCard.profile?.stats.first?.value == 1234.formatted())
+            check("rank chips then the three highest milestones, highest first", profileCard.profile?.chips.map(\.text) == ["#3 of 2024", "#7 of 2022", "5K plays · " + Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .omitted), "1K plays · " + Date(timeIntervalSince1970: 1_650_000_000).formatted(date: .abbreviated, time: .omitted), "500 plays · " + Date(timeIntervalSince1970: 1_600_000_000).formatted(date: .abbreviated, time: .omitted)], "\(profileCard.profile?.chips.map(\.text) ?? [])")
+            check("the trend carries each bucket's plays", profileCard.profile?.trend == [0, 4, 9, 2, 7, 3])
+            let timeCard = ShareCards.profile(entity: .track, name: "Song A", artist: "Artist A", album: "Album A", imageURL: nil, periodLabel: "All time", stats: sampleProfileStats(), metric: .timeListened, timeListenedSeconds: 7_320, facts: [], yearlyTopRanks: [])
+            check("by time listened the first tile and the text label change", timeCard?.profile?.stats.first?.label == "Time Listened" && timeCard?.valueLabel == "Time" && timeCard?.profile?.subtitle == "Artist A · Album A" && timeCard?.profile?.kind == "Track")
+            let pageArtistCard = ShareCards.profile(entity: .artist, name: "Artist A", artist: nil, album: nil, imageURL: nil, periodLabel: "All time", stats: sampleProfileStats(), metric: .scrobbles, timeListenedSeconds: nil, facts: [], yearlyTopRanks: [])
+            check("an artist card has no subtitle", pageArtistCard?.profile?.subtitle == "" && pageArtistCard?.profile?.kind == "Artist")
+            var profileOptions = ShareOptions()
+            let wideStats = ShareCard(title: "T", period: "P", measure: "", rows: [], valueLabel: "Plays", hasMovement: false, kindID: "page.album", profile: ShareProfile(kind: "Album", subtitle: "", heroImageURL: nil, stats: (1...10).map { ShareStat(label: "L\($0)", value: "\($0)") }, chips: [], trend: []))
+            check("a square card has room for six tiles, a portrait one nine, a wide one eight", { profileOptions.size = .square; let a = wideStats.visibleStats(for: profileOptions).count; profileOptions.size = .portrait; let b = wideStats.visibleStats(for: profileOptions).count; profileOptions.size = .wide; return (a, b, wideStats.visibleStats(for: profileOptions).count) == (6, 9, 8) }())
+            check("a page card draws only its hero picture", profileCard.pictureURLs(for: ShareOptions()) == ["file:///art/a.jpg"] && !profileCard.isList)
+            profileOptions = ShareOptions()
+            let profileTable = ShareText.markdownTable(profileCard, options: profileOptions)
+            check("the table gives every tile, the ranks and the milestones", profileTable.contains("| Scrobbles | \(1234.formatted()) |") && profileTable.contains("| Top ranks | \\#3 of 2024, \\#7 of 2022 |") && profileTable.contains("| Milestones |") && profileTable.contains("**Album A** — Artist A · Last 12 months"), profileTable)
+            check("the list uses bullets and bold labels", ShareText.markdownList(profileCard, options: profileOptions).contains("- **Scrobbles:** \(1234.formatted())"))
+            let plainProfile = ShareText.plain(profileCard, options: profileOptions)
+            check("plain text has no formatting characters", plainProfile.contains("Scrobbles: \(1234.formatted())") && !plainProfile.contains("**") && plainProfile.hasPrefix("Album A — Artist A · Last 12 months"), plainProfile)
+            var pageHidden = profileOptions; pageHidden.showValues = false; pageHidden.showDate = false
+            check("a page card ignores the plays switch (it has none), and the date goes with its switch", ShareText.markdownList(profileCard, options: pageHidden).contains("Scrobbles") && !ShareText.plain(profileCard, options: pageHidden).contains(ShareText.dateText(profileCard)) && ShareText.plain(profileCard, options: profileOptions).contains(ShareText.dateText(profileCard)))
+            check("the plays switch is for lists only", ShareCards.topChart(entries: sampleEntries(), entity: .album, metric: .scrobbles, periodLabel: "P").isList && !profileCard.isList)
+            var pageOdd = profileCard; pageOdd.title = "Song *1* | one"
+            check("names are escaped in the table", ShareText.markdownTable(pageOdd, options: profileOptions).contains("Song \\*1\\* \\| one"))
+            let profileNamed = ShareText.markdownTable(profileCard, options: profileOptions, identity: ShareIdentity(name: "someone_88", showsFooter: true))
+            check("a chosen name and the footer appear once each in a page card's text; by default neither", profileNamed.components(separatedBy: "someone\\_88").count == 2 && profileNamed.components(separatedBy: "Scroblytics").count == 2 && !profileTable.contains("Scroblytics") && !profileTable.contains("someone"))
+            let linePoints = ShareTrendLine.points([0, 5, 10], in: CGSize(width: 100, height: 50))
+            check("the trend line runs from the left edge to the right, busiest at the top", linePoints.count == 3 && linePoints[0] == CGPoint(x: 0, y: 46) && linePoints[1] == CGPoint(x: 50, y: 25) && linePoints[2] == CGPoint(x: 100, y: 4), "\(linePoints)")
+            check("fewer than two buckets draw no line", ShareTrendLine.points([5], in: CGSize(width: 100, height: 50)).isEmpty)
+            let heroSwatch = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in NSColor.systemTeal.setFill(); rect.fill(); return true }
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                let png = ShareRenderer.png(card: profileCard, options: o, identity: .anonymous, images: [:])
+                let image = png.flatMap { NSBitmapImageRep(data: $0) }
+                check("page card, \(size.label): a PNG at 2x the card size", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2)
+                check("page card, \(size.label): something is drawn", image.map { luminanceSpread($0) > 0.05 } ?? false)
+                let withHero = ShareRenderer.png(card: profileCard, options: o, identity: .anonymous, images: ["file:///art/a.jpg": heroSwatch])
+                let withFooter = ShareRenderer.png(card: profileCard, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:])
+                check("page card, \(size.label): the hero picture and the identity footer change the image", withHero != png && withFooter != png)
+                let bare = ShareCard(title: "日本語のとても長いタイトルがここに入りますよ and a very long name that never fits on a single line of a card", period: "A very long period name", measure: "", rows: [], valueLabel: "Plays", hasMovement: false, kindID: "page.artist", profile: ShareProfile(kind: "Artist", subtitle: "", heroImageURL: nil, stats: [ShareStat(label: "Scrobbles", value: "1")], chips: [], trend: []))
+                check("page card, \(size.label): one tile, no chips and no trend still renders", (ShareRenderer.png(card: bare, options: o, identity: named, images: [:]).flatMap { NSBitmapImageRep(data: $0) }?.pixelsWide ?? 0) == Int(size.points.width) * 2)
+            }
 
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
@@ -213,6 +305,54 @@ enum ShareChecks {
                 check("\(entity.displayName), \(size.label): rendered in \(String(format: "%.2f", seconds)) s (\(images.count) of \(urls.compactMap { $0 }.count) pictures loaded in \(String(format: "%.2f", loaded)) s)", png != nil && seconds < 3)
             }
         }
+        // The page cards: the top artist, album and track of the period, built from the same engines the pages use, against plain counts.
+        let context = container.mainContext
+        for entity in TopChartsEntity.allCases {
+            guard let top = (try? await TopChartsEngine.fetchRankings(container: container, entity: entity, range: range, compareRange: nil, limit: 1, includePeak: false))?.first else {
+                check("\(entity.displayName): a top entry for the page card", false); continue
+            }
+            let stats: EntityStats?
+            switch entity {
+            case .artist: stats = try? EntityStatsEngine.fetchArtistStats(context: context, artist: top.name, range: range)
+            case .album: stats = try? EntityStatsEngine.fetchAlbumStats(context: context, artist: top.artist ?? "", album: top.name, range: range)
+            case .track: stats = try? EntityStatsEngine.fetchTrackStats(context: context, artist: top.artist ?? "", track: top.name, range: range)
+            }
+            let ranks = (try? await TopChartsEngine.fetchYearlyTopRanks(container: container, entity: entity, name: top.name, artist: entity == .artist ? nil : top.artist)) ?? []
+            guard let card = ShareCards.profile(entity: entity, name: top.name, artist: entity == .artist ? nil : top.artist, album: nil, imageURL: top.imageURL, periodLabel: "Last 365 days", stats: stats, metric: .scrobbles, timeListenedSeconds: nil, facts: [], yearlyTopRanks: ranks) else {
+                check("\(entity.displayName): the page card builds", false); continue
+            }
+            let artistKey = top.artist.map(TextNormalization.artistIdentityKey)
+            let plays = inRange.filter { play in
+                switch entity {
+                case .artist: TextNormalization.artistIdentityKey(play.artistName) == TextNormalization.artistIdentityKey(top.name)
+                case .album: play.albumName == top.name && TextNormalization.artistIdentityKey(play.artistName) == artistKey
+                case .track: play.trackName == top.name && TextNormalization.artistIdentityKey(play.artistName) == artistKey
+                }
+            }
+            let tiles = Dictionary(uniqueKeysWithValues: (card.profile?.stats ?? []).map { ($0.label, $0.value) })
+            func day(_ date: Date?) -> String { date.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—" }
+            check("\(entity.displayName) page card: scrobbles equal an independent count (\(plays.count))", tiles["Scrobbles"] == plays.count.formatted(), "\(tiles["Scrobbles"] ?? "none")")
+            check("\(entity.displayName) page card: first and last scrobble equal the history's own", tiles["First scrobble"] == day(plays.map(\.playedAt).min()) && tiles["Last scrobble"] == day(plays.map(\.playedAt).max()), "\(tiles["First scrobble"] ?? "none") / \(tiles["Last scrobble"] ?? "none")")
+            check("\(entity.displayName) page card: the trend adds up to the plays", (card.profile?.trend.reduce(0, +) ?? 0) == plays.count, "\(card.profile?.trend.reduce(0, +) ?? -1) vs \(plays.count)")
+            if entity == .artist, let rankChip = ranks.first {
+                let yearPlays = history.filter { AppCalendars.listening.component(.year, from: $0.playedAt) == rankChip.year }
+                let counts = Dictionary(grouping: yearPlays, by: { TextNormalization.artistIdentityKey($0.artistName) }).mapValues(\.count)
+                let mine = counts[TextNormalization.artistIdentityKey(top.name)] ?? 0
+                let better = counts.values.filter { $0 > mine }.count
+                let tied = counts.values.filter { $0 == mine }.count
+                check("artist page card: the \(rankChip.year) rank chip (#\(rankChip.rank)) fits an independent ranking (\(better + 1)–\(better + tied))", rankChip.rank >= better + 1 && rankChip.rank <= better + tied)
+            }
+            let urls = ShareRenderer.imageURLs(card: card, options: ShareOptions())
+            let images = await ShareArtwork.load(urls)
+            for size in ShareSize.allCases {
+                var options = ShareOptions(); options.size = size
+                let start = Date()
+                let png = ShareRenderer.png(card: card, options: options, identity: .anonymous, images: images)
+                let seconds = Date().timeIntervalSince(start)
+                if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-page-\(entity.rawValue)-\(size.rawValue).png")) }
+                check("\(entity.displayName) page card, \(size.label): rendered in \(String(format: "%.2f", seconds)) s (\(images.count) of \(urls.compactMap { $0 }.count) pictures)", png != nil && seconds < 3)
+            }
+        }
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)
     }
@@ -266,6 +406,40 @@ enum ShareChecks {
         ]
     }
 
+
+    // MARK: Page card samples
+
+    static func sampleProfileStats() -> EntityStats {
+        let achieved: [(milestone: Int, achievedAt: Date, firstAt: Date)] = [
+            (500, Date(timeIntervalSince1970: 1_600_000_000), Date(timeIntervalSince1970: 1_500_000_000)),
+            (5000, Date(timeIntervalSince1970: 1_700_000_000), Date(timeIntervalSince1970: 1_500_000_000)),
+            (1000, Date(timeIntervalSince1970: 1_650_000_000), Date(timeIntervalSince1970: 1_500_000_000)),
+            (100, Date(timeIntervalSince1970: 1_550_000_000), Date(timeIntervalSince1970: 1_500_000_000)),
+        ]
+        let counts = [0, 4, 9, 2, 7, 3]
+        return EntityStats(
+            plays: 1234, firstScrobble: Date(timeIntervalSince1970: 1_500_000_000), lastScrobble: Date(timeIntervalSince1970: 1_760_000_000), imageURL: nil, loved: false,
+            trend: counts.enumerated().map { TrendBucket(start: Date(timeIntervalSince1970: 1_500_000_000 + Double($0.offset) * 86_400), count: $0.element) },
+            milestones: MilestonesEngine.EntityMilestones(achieved: achieved, upcoming: nil)
+        )
+    }
+
+    @MainActor
+    static func sampleProfileCard(imageURL: String? = "file:///art/a.jpg") -> ShareCard {
+        let facts = [
+            DetailFact(id: "released", label: "Released", value: .text("Sep 12, 2018")),
+            DetailFact(id: "turnover", label: "Turnover rate", value: .text("1.4 per year")),
+            DetailFact(id: "tempo", label: "Tempo", value: .loading),
+            DetailFact(id: "length", label: "Length", value: .unknown),
+        ]
+        return ShareCards.profile(
+            entity: .album, name: "Album A", artist: "Artist A", album: nil, imageURL: imageURL, periodLabel: "Last 12 months",
+            stats: sampleProfileStats(), metric: .scrobbles, timeListenedSeconds: nil, facts: facts,
+            yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 3), TopChartsEngine.YearlyRank(year: 2022, rank: 7)],
+            now: Date(timeIntervalSince1970: 1_760_500_000)
+        )!
+    }
+
     /// The spread (standard deviation) of the picture's brightness: a blank card has none.
     private static func luminanceSpread(_ bitmap: NSBitmapImageRep) -> Double {
         let step = max(1, bitmap.pixelsWide / 120)
@@ -308,6 +482,43 @@ enum ShareChecks {
                 if let png = ShareRenderer.png(card: c, options: o, identity: identity, images: images, scale: 1) {
                     try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(size.rawValue).png"))
                 }
+            }
+        }
+        // The page cards: an album with everything, a track with a long name and few numbers, an artist with no picture.
+        let hero = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in NSColor(hue: 0.08, saturation: 0.6, brightness: 0.85, alpha: 1).setFill(); rect.fill(); return true }
+        var longTrack = sampleProfileCard()
+        longTrack.title = "An extremely long track title that will never fit on a single line of a card 🎵"
+        longTrack.profile?.kind = "Track"
+        longTrack.profile?.subtitle = "Artist with a long name & Friends · An album with an equally long title"
+        let fewStats = Array((longTrack.profile?.stats ?? []).prefix(4))
+        longTrack.profile?.stats = fewStats
+        longTrack.profile?.chips = []
+        var noPicture = sampleProfileCard(imageURL: nil)
+        noPicture.profile?.kind = "Artist"
+        noPicture.profile?.subtitle = ""
+        for (name, c, images, identity) in [("page-album", sampleProfileCard(), ["file:///art/a.jpg": hero], ShareIdentity(name: "someone", showsFooter: true)), ("page-longtrack", longTrack, ["file:///art/a.jpg": hero], ShareIdentity.anonymous), ("page-artist", noPicture, [:], ShareIdentity.anonymous)] {
+            for size in ShareSize.allCases {
+                var o = ShareOptions(); o.size = size
+                if let png = ShareRenderer.png(card: c, options: o, identity: identity, images: images, scale: 1) {
+                    try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(size.rawValue).png"))
+                }
+            }
+        }
+        for style in LastfmLogoStyle.allCases {
+            var o = ShareOptions(); o.size = .square
+            if let png = ShareRenderer.png(card: card, options: o, identity: ShareIdentity(name: "someone", showsFooter: true, logo: style), images: swatches, scale: 1) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "logo-\(style.rawValue).png"))
+            }
+        }
+        // The collage with its caption: what and when, the name and the tag.
+        let collageItems = (1...9).map { CollageItem(id: "c\($0)", name: "Album \($0)", artist: "Artist \($0)", album: nil, metricValue: 100 - $0, imageURL: nil, periodLabel: nil) }
+        let collageFooter = CollageFooter(
+            details: CollageCaption.make(source: .top, entity: .album, metric: .scrobbles, period: .year, rangeLabel: "Last 365 days").text(date: Date()),
+            identity: ShareIdentity(name: "someone", showsFooter: true)
+        )
+        for (name, grid) in [("collage-3x3", CollageGrid.three), ("collage-wide", CollageGrid.widescreen)] {
+            if let png = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: grid, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false, footer: collageFooter) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "\(name).png"))
             }
         }
     }

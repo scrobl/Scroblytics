@@ -39,6 +39,55 @@ enum ShareText {
         return lines
     }
 
+    // MARK: Profile cards (one artist, album or track)
+
+    /// The tiles the text shows: the same as the image's.
+    private static func profileStats(_ card: ShareCard, options: ShareOptions) -> [ShareStat] {
+        card.visibleStats(for: options)
+    }
+
+    private static func chipLines(_ card: ShareCard) -> (ranks: String?, milestones: String?) {
+        let chips = card.profile?.chips ?? []
+        let ranks = chips.filter { $0.kind == .rank }.map(\.text)
+        let milestones = chips.filter { $0.kind == .milestone }.map(\.text)
+        return (ranks.isEmpty ? nil : ranks.joined(separator: ", "), milestones.isEmpty ? nil : milestones.joined(separator: "; "))
+    }
+
+    private static func profileHeader(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity, markdown: Bool) -> String {
+        let text: (String) -> String = { markdown ? escape($0) : $0 }
+        let subtitle = card.profile?.subtitle ?? ""
+        var line = markdown ? "**\(text(card.title))**" : card.title
+        if !subtitle.isEmpty { line += " — \(text(subtitle))" }
+        line += " · \(text(card.period))"
+        if options.showDate { line += " · \(text(dateText(card)))" }
+        if let name = identity.name, !name.isEmpty { line += " · \(text(name))" }
+        return line
+    }
+
+    private static func profileList(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity, markdown: Bool) -> String {
+        let text: (String) -> String = { markdown ? escape($0) : $0 }
+        let bullet = markdown ? "- " : "• "
+        var lines = [profileHeader(card, options: options, identity: identity, markdown: markdown), ""]
+        for stat in profileStats(card, options: options) {
+            lines.append(markdown ? "\(bullet)**\(text(stat.label)):** \(text(stat.value))" : "\(bullet)\(stat.label): \(stat.value)")
+        }
+        let chips = chipLines(card)
+        if let ranks = chips.ranks { lines.append(markdown ? "\(bullet)**Top ranks:** \(text(ranks))" : "\(bullet)Top ranks: \(ranks)") }
+        if let milestones = chips.milestones { lines.append(markdown ? "\(bullet)**Milestones:** \(text(milestones))" : "\(bullet)Milestones: \(milestones)") }
+        if identity.showsFooter { lines += ["", markdown ? "^(made with Scroblytics)" : "Made with Scroblytics"] }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func profileTable(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity) -> String {
+        var lines = [profileHeader(card, options: options, identity: identity, markdown: true), "", "| Stat | Value |", "|---|---|"]
+        for stat in profileStats(card, options: options) { lines.append("| \(escape(stat.label)) | \(escape(stat.value)) |") }
+        let chips = chipLines(card)
+        if let ranks = chips.ranks { lines.append("| Top ranks | \(escape(ranks)) |") }
+        if let milestones = chips.milestones { lines.append("| Milestones | \(escape(milestones)) |") }
+        if identity.showsFooter { lines += ["", "^(made with Scroblytics)"] }
+        return lines.joined(separator: "\n")
+    }
+
     private static func changeText(_ change: ShareChange) -> String {
         switch change {
         case .none, .same: ""
@@ -61,6 +110,7 @@ enum ShareText {
 
     /// A numbered Markdown list, one row per line.
     static func markdownList(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
+        if card.profile != nil { return profileList(card, options: options, identity: identity, markdown: true) }
         var lines = header(card, options: options, identity: identity) + [""]
         lines += card.visibleRows(for: options).map { line($0, options: options, card: card) }
         if identity.showsFooter { lines += ["", "^(made with Scroblytics)"] }
@@ -69,6 +119,7 @@ enum ShareText {
 
     /// A Markdown table, which Reddit renders as a table.
     static func markdownTable(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
+        if card.profile != nil { return profileTable(card, options: options, identity: identity) }
         let hasSubtitle = card.rows.contains { $0.subtitle?.isEmpty == false }
         let showsMovement = options.showMovement && card.hasMovement
         var headers = ["#", "Name"]
@@ -89,6 +140,7 @@ enum ShareText {
 
     /// Plain text with no formatting characters.
     static func plain(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
+        if card.profile != nil { return profileList(card, options: options, identity: identity, markdown: false) }
         var title = "\(card.title) — \(card.period), \(card.measure.lowercased())"
         if options.showDate { title += ", \(dateText(card))" }
         if let name = identity.name, !name.isEmpty { title += " (\(name))" }

@@ -13,15 +13,15 @@ enum ShareRenderer {
     }
 
     static func nsImage(card: ShareCard, options: ShareOptions, identity: ShareIdentity, images: [String: NSImage], scale: CGFloat) -> NSImage? {
-        let view = ShareTopListCardView(card: card, options: options, identity: identity, images: images)
+        let view = ShareCardView(card: card, options: options, identity: identity, images: images)
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = ProposedViewSize(options.size.points)
         renderer.scale = scale
         return renderer.nsImage
     }
 
-    /// The pictures a card with these options will draw: the visible rows' and the first one's (the background).
+    /// The pictures a card with these options will draw.
     static func imageURLs(card: ShareCard, options: ShareOptions) -> [String?] {
-        card.visibleRows(for: options).map(\.imageURL)
+        card.pictureURLs(for: options)
     }
 }

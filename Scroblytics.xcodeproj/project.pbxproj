@@ -222,6 +222,7 @@
 		CBDE5F103618424ADD37667B /* AppCalendars.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10FF8ED563993228AE28068 /* AppCalendars.swift */; };
 		CC3B0E7E0FF75298A5ED4FD1 /* QueryCapChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEFAD2C4371248FE24587698 /* QueryCapChecks.swift */; };
 		CC694911B7969CFF319301F9 /* SyncSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C2AABE02B3FA2C61D7AE25 /* SyncSetupView.swift */; };
+		CC9D1B4A56DEDD221E457CC1 /* ShareProfileCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D64F7223BFEA111C35D60B6 /* ShareProfileCardView.swift */; };
 		CF2D6C7D306EF3AD006ABB24 /* RabbitHole.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D6C7C306EF3AD006ABB24 /* RabbitHole.swift */; };
 		CF2D6C7F306EF3FA006ABB24 /* RabbitHoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D6C7E306EF3FA006ABB24 /* RabbitHoleView.swift */; };
 		CF2D6C81306EFE2C006ABB24 /* AlbumTurnoversView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D6C80306EFE2C006ABB24 /* AlbumTurnoversView.swift */; };
@@ -461,6 +462,7 @@
 		895E6E93613F2189755A778C /* SyncEventsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEventsEngine.swift; sourceTree = "<group>"; };
 		8A2DE804C2BD59559CC51D84 /* UpdateViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateViews.swift; sourceTree = "<group>"; };
 		8B712979706D0BE6C002EF37 /* QueryValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValue.swift; sourceTree = "<group>"; };
+		8D64F7223BFEA111C35D60B6 /* ShareProfileCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareProfileCardView.swift; sourceTree = "<group>"; };
 		906BAA7BDBF09BEBA3B3A794 /* TagDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDataStore.swift; sourceTree = "<group>"; };
 		90810DA5598B14F663A676C7 /* HelpView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
 		9255131D357DB753A7CC76F4 /* ActivityLog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ActivityLog.swift; sourceTree = "<group>"; };
@@ -1024,6 +1026,7 @@
 				381401D82B61E976CFEB5ABC /* ShareButton.swift */,
 				ACB66BDBB2C1610EBD73CAA8 /* ShareCards.swift */,
 				9BF5A0B3ED46AD42B472533C /* LastfmMark.swift */,
+				8D64F7223BFEA111C35D60B6 /* ShareProfileCardView.swift */,
 			);
 			name = Sharing;
 			path = Sharing;
@@ -1530,6 +1533,7 @@
 				15F3A1E6B2FD53E8D5EEE8B0 /* ShareCards.swift in Sources */,
 				0D924834104BC2F360F16E18 /* ShareChecks.swift in Sources */,
 				0DC16F5B0D2945BE281C7285 /* LastfmMark.swift in Sources */,
+				CC9D1B4A56DEDD221E457CC1 /* ShareProfileCardView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

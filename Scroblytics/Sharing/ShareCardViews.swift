@@ -1,43 +1,21 @@
 import AppKit
 import SwiftUI
 
-/// The one dark card design. Sizes are in points (see `ShareSize.points`); the renderer scales to pixels. Everything it draws is handed
-/// in (pictures already loaded), because an image renderer draws one frame and waits for nothing.
-struct ShareTopListCardView: View {
-    let card: ShareCard
-    let options: ShareOptions
-    let identity: ShareIdentity
-    let images: [String: NSImage]
+/// What every card shares: the gold accent, the blurred-artwork background and the optional identity footer.
+enum ShareCardStyle {
+    static let gold = Color(red: 1.0, green: 0.82, blue: 0.32)
+}
 
-    private var rows: [ShareRow] { card.visibleRows(for: options) }
-    private var size: CGSize { options.size.points }
-    private var columns: Int { options.size.columns }
-    private let margin: CGFloat = 64
-    private let gold = Color(red: 1.0, green: 0.82, blue: 0.32)
+struct ShareCardBackground: View {
+    let size: CGSize
+    /// The picture to blur behind everything.
+    let imageURL: String?
+    let images: [String: NSImage]
 
     var body: some View {
         ZStack {
-            background
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.bottom, 28)
-                list
-                if hasFooter { footer.padding(.top, 20) }
-            }
-            .padding(margin)
-        }
-        .frame(width: size.width, height: size.height)
-        .environment(\.colorScheme, .dark)
-    }
-
-    private var hasFooter: Bool { identity.showsFooter || !(identity.name ?? "").isEmpty }
-
-    // MARK: Background
-
-    private var background: some View {
-        ZStack {
             LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.07), Color(red: 0.10, green: 0.09, blue: 0.13)], startPoint: .top, endPoint: .bottom)
-            if let top = rows.first?.imageURL, let image = images[top] {
+            if let imageURL, let image = images[imageURL] {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -50,6 +28,86 @@ struct ShareTopListCardView: View {
         }
         .frame(width: size.width, height: size.height)
         .clipped()
+    }
+}
+
+struct ShareCardFooter: View {
+    let identity: ShareIdentity
+
+    static func isShown(_ identity: ShareIdentity) -> Bool { identity.showsFooter || !(identity.name ?? "").isEmpty }
+
+    var body: some View {
+        HStack {
+            if let name = identity.name, !name.isEmpty {
+                HStack(spacing: 12) {
+                    LastfmMark(size: 34, style: identity.logo)
+                    Text(name)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            if identity.showsFooter {
+                Text("Scroblytics")
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.5))
+            }
+        }
+    }
+}
+
+/// The card for whatever a Share button made: a list for a chart, a profile for one artist, album or track.
+struct ShareCardView: View {
+    let card: ShareCard
+    let options: ShareOptions
+    let identity: ShareIdentity
+    let images: [String: NSImage]
+
+    var body: some View {
+        if card.profile != nil {
+            ShareProfileCardView(card: card, options: options, identity: identity, images: images)
+        } else {
+            ShareTopListCardView(card: card, options: options, identity: identity, images: images)
+        }
+    }
+}
+
+/// The one dark card design. Sizes are in points (see `ShareSize.points`); the renderer scales to pixels. Everything it draws is handed
+/// in (pictures already loaded), because an image renderer draws one frame and waits for nothing.
+struct ShareTopListCardView: View {
+    let card: ShareCard
+    let options: ShareOptions
+    let identity: ShareIdentity
+    let images: [String: NSImage]
+
+    private var rows: [ShareRow] { card.visibleRows(for: options) }
+    private var size: CGSize { options.size.points }
+    private var columns: Int { options.size.columns }
+    private let margin: CGFloat = 64
+    private var gold: Color { ShareCardStyle.gold }
+
+    var body: some View {
+        ZStack {
+            background
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .padding(.bottom, 28)
+                list
+                if hasFooter { ShareCardFooter(identity: identity).padding(.top, 20) }
+            }
+            .padding(margin)
+        }
+        .frame(width: size.width, height: size.height)
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var hasFooter: Bool { ShareCardFooter.isShown(identity) }
+
+    // MARK: Background
+
+    private var background: some View {
+        ShareCardBackground(size: size, imageURL: rows.first?.imageURL, images: images)
     }
 
     // MARK: Header
@@ -198,27 +256,5 @@ struct ShareTopListCardView: View {
             .padding(.vertical, size * 0.22)
             .background(color, in: Capsule())
             .fixedSize()
-    }
-
-    // MARK: Footer
-
-    private var footer: some View {
-        HStack {
-            if let name = identity.name, !name.isEmpty {
-                HStack(spacing: 12) {
-                    LastfmMark(size: 34)
-                    Text(name)
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.75))
-                        .lineLimit(1)
-                }
-            }
-            Spacer()
-            if identity.showsFooter {
-                Text("Scroblytics")
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
-            }
-        }
     }
 }

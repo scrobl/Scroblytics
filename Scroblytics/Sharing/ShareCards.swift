@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// One builder per screen: what to put on a card for what that screen is showing. Pure, so each is checked against hand-computed
 /// expectations.
@@ -30,6 +31,52 @@ enum ShareCards {
             movementNote: hasMovement ? compareRange.map(movementSince) : nil,
             generatedAt: now,
             kindID: "topChart.\(entity.rawValue)"
+        )
+    }
+
+    /// An artist, album or track page: the numbers its header shows (the headline tiles and the page's facts that have a value), the
+    /// rank-by-year chips, the milestones reached, and the trend line. `periodLabel` is the page's chosen period, which the plays and
+    /// the first and last scrobble are measured over. Nil until the page's stats have loaded.
+    static func profile(
+        entity: TopChartsEntity, name: String, artist: String?, album: String?, imageURL: String?, periodLabel: String,
+        stats: EntityStats?, metric: TopChartsMetric, timeListenedSeconds: Int?, facts: [DetailFact],
+        yearlyTopRanks: [TopChartsEngine.YearlyRank], now: Date = Date()
+    ) -> ShareCard? {
+        guard let stats else { return nil }
+        let shown = DetailHeaderCard<EmptyView>.headline(stats: stats, metric: metric, timeListenedSeconds: timeListenedSeconds) + facts
+        let tiles = shown.compactMap { fact -> ShareStat? in
+            guard fact.hasValue, fact.displayText != "—" else { return nil }
+            return ShareStat(label: fact.label, value: fact.displayText)
+        }
+        var chips = yearlyTopRanks.map { ShareChip(kind: .rank, text: "#\($0.rank) of \($0.year)") }
+        for milestone in stats.milestones.achieved.sorted(by: { $0.milestone > $1.milestone }).prefix(3) {
+            chips.append(ShareChip(kind: .milestone, text: "\(MilestoneFormatting.formatMilestone(milestone.milestone)) plays · \(milestone.achievedAt.formatted(date: .abbreviated, time: .omitted))"))
+        }
+        let kind: String
+        let subtitle: String
+        switch entity {
+        case .artist:
+            kind = "Artist"
+            subtitle = ""
+        case .album:
+            kind = "Album"
+            subtitle = artist ?? ""
+        case .track:
+            kind = "Track"
+            subtitle = [artist, album].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        return ShareCard(
+            title: name,
+            period: periodLabel,
+            measure: subtitle,
+            rows: [],
+            valueLabel: metric == .scrobbles ? "Plays" : "Time",
+            hasMovement: false,
+            generatedAt: now,
+            kindID: "page.\(entity.rawValue)",
+            profile: ShareProfile(
+                kind: kind, subtitle: subtitle, heroImageURL: imageURL, stats: tiles, chips: chips, trend: stats.trend.map(\.count)
+            )
         )
     }
 

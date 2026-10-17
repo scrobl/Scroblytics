@@ -24,7 +24,7 @@ enum DetailSnapshots {
             entity: .track, name: "Track Title", subtitle: "Artist A", tertiary: "Album Name", imageURL: nil, stats: stats,
             errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 142 * 224,
             yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 3), TopChartsEngine.YearlyRank(year: 2022, rank: 9)],
-            onToggleLoved: {}, facts: facts
+            onToggleLoved: {}, facts: facts, sharePeriodLabel: "Last 12 months"
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)
@@ -56,7 +56,8 @@ enum DetailSnapshots {
         DetailHeaderCard(
             entity: .artist, name: "Artist A", subtitle: nil, tertiary: nil, imageURL: nil, stats: stats,
             errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 300 * 3600,
-            yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 4), TopChartsEngine.YearlyRank(year: 2023, rank: 7)]
+            yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 4), TopChartsEngine.YearlyRank(year: 2023, rank: 7)],
+            sharePeriodLabel: "Last 12 months"
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)
@@ -72,7 +73,7 @@ enum DetailSnapshots {
             entity: .album, name: title, subtitle: "Artist A", tertiary: nil, imageURL: nil, stats: stats,
             errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 78 * 3600,
             yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 2)],
-            onFixAlbumMatch: {}, facts: [released] + AlbumDetailModel.turnoverFacts(turnover, onFixAlbumMatch: {})
+            onFixAlbumMatch: {}, facts: [released] + AlbumDetailModel.turnoverFacts(turnover, onFixAlbumMatch: {}), sharePeriodLabel: "Last 12 months"
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)

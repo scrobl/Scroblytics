@@ -44,6 +44,9 @@ enum DetailDump {
                 check("first and last scrobble match", model.stats?.firstScrobble == plays.map(\.playedAt).min() && model.stats?.lastScrobble == plays.map(\.playedAt).max())
                 let headline = DetailHeaderCard<EmptyView>.headline(stats: model.stats, metric: .scrobbles, timeListenedSeconds: nil)
                 check("the headline tiles all have values", headline.count == 4 && headline.allSatisfy(\.hasValue), "\(headline.map(\.displayText))")
+                // The rank-by-year chips come from the background computation; the year-by-year main-context one is the reference.
+                let reference = (try? await TopChartsEngine.fetchYearlyTopRanksOnMainContext(context: container.mainContext, entity: .track, name: entry.track, artist: entry.artist)) ?? []
+                check("the rank chips equal the year-by-year reference (\(reference.count) chips)", model.yearlyTopRanks.map { "\($0.year)#\($0.rank)" } == reference.map { "\($0.year)#\($0.rank)" }, "\(model.yearlyTopRanks.map { "\($0.year)#\($0.rank)" }) vs \(reference.map { "\($0.year)#\($0.rank)" })")
                 print("      loaded in \(String(format: "%.2f", seconds)) s; ranks \(model.yearlyTopRanks.map { "#\($0.rank)·\($0.year)" }.joined(separator: " ")); headline \(headline.map(\.displayText).joined(separator: " | "))")
             }
 

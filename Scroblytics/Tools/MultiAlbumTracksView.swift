@@ -98,9 +98,12 @@ struct MultiAlbumTracksView: View {
     private func reload() async {
         isLoading = true
         errorMessage = nil
+        // The closure must touch no view state (that would pull it onto the main actor, and the whole read with it): copies first.
+        let container = modelContainer
+        let mode = options.matchMode
         do {
             groups = try await offMain {
-                try await MultiAlbumTracksReader(modelContainer: modelContainer).load(mode: options.matchMode)
+                try await MultiAlbumTracksReader(modelContainer: container).load(mode: mode)
             }
             applyFilters()
         } catch {

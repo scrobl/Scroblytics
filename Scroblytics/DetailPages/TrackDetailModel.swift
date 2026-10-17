@@ -81,7 +81,7 @@ final class TrackDetailModel {
     func loadYearlyTopRanks() async {
         guard let context else { return }
         let requested = identity
-        let ranks = (try? await TopChartsEngine.fetchYearlyTopRanks(context: context, entity: .track, name: requested.name, artist: requested.artist)) ?? []
+        let ranks = (try? await TopChartsEngine.fetchYearlyTopRanks(container: context.container, entity: .track, name: requested.name, artist: requested.artist)) ?? []
         guard !Task.isCancelled, identity.id == requested.id else { return }
         yearlyTopRanks = ranks
     }

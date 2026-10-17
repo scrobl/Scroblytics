@@ -763,10 +763,12 @@ struct RabbitHoleView: View {
         if scrobbles != nil, let libraryLoadedAt, Date().timeIntervalSince(libraryLoadedAt) < 300 { return }
         do {
             if scrobbles == nil {
-                let fetched = try await offMain {
-                    try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
+                // Copies first: a closure that touches view state runs on the main actor, and so would the whole read. The shared
+                // cache hands out the artist-merged history it already built, so nothing is recomputed on the main thread.
+                let container = modelContainer
+                let canonical = try await offMain {
+                    try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
                 }
-                let canonical = QueryIdentity.canonicalizingArtists(fetched)
                 scrobbles = canonical
                 library = await offMain { RabbitHoleLibrary.build(scrobbles: canonical) }
             }

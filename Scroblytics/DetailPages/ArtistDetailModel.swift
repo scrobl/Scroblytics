@@ -52,7 +52,7 @@ final class ArtistDetailModel {
     func loadYearlyTopRanks() async {
         guard let context else { return }
         let requested = identity
-        let ranks = (try? await TopChartsEngine.fetchYearlyTopRanks(context: context, entity: .artist, name: requested.name, artist: nil)) ?? []
+        let ranks = (try? await TopChartsEngine.fetchYearlyTopRanks(container: context.container, entity: .artist, name: requested.name, artist: nil)) ?? []
         guard !Task.isCancelled, identity.id == requested.id else { return }
         yearlyTopRanks = ranks
     }

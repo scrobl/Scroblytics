@@ -209,9 +209,12 @@ enum PerfChecks {
             let afterDelete = (try? await realCache.snapshots(container: container))?.count ?? -1
             check("the real reader notices an added play and a removed one by itself", beforeCount >= 0 && withExtra == beforeCount + 1 && afterDelete == beforeCount, "\(beforeCount) \(withExtra) \(afterDelete)")
             // A sync that corrects a play without changing the count or the newest play: only the sync time tells the cache.
-            let syncState = SyncState(username: "cache-check")
+            // On a copy of a real library the account's own row is the one the cache reads; an empty scratch store gets a made-up one.
+            let existingState = try? context.fetch(FetchDescriptor<SyncState>()).first
+            let originalSyncedAt = existingState?.lastSyncedAt
+            let syncState = existingState ?? SyncState(username: "cache-check")
             syncState.lastSyncedAt = Date(timeIntervalSince1970: 1_700_000_000)
-            context.insert(syncState)
+            if existingState == nil { context.insert(syncState) }
             let corrected = Scrobble(artistName: "Cache Check Artist", albumName: "Album", trackName: "Original Title", imageURL: nil, playedAt: Date().addingTimeInterval(172_800), lastConfirmedAt: Date())
             context.insert(corrected)
             try? context.save()
@@ -221,7 +224,7 @@ enum PerfChecks {
             try? context.save()
             let afterFix = (try? await realCache.snapshots(container: container)) ?? []
             context.delete(corrected)
-            context.delete(syncState)
+            if existingState == nil { context.delete(syncState) } else { syncState.lastSyncedAt = originalSyncedAt }
             try? context.save()
             check("a play corrected by a sync (same count, same newest play) is seen once that sync has finished", beforeFix && afterFix.contains { $0.trackName == "Corrected Title" } && !afterFix.contains { $0.trackName == "Original Title" })
 

@@ -548,8 +548,10 @@ enum TopChartsEngine {
         }.value
     }
 
+    /// The same answer as the background version above, computed year by year on the main context. Nothing in the app calls it any
+    /// more (it keeps the main thread busy for seconds on a large library); the real-data check compares the two.
     @MainActor
-    static func fetchYearlyTopRanks(
+    static func fetchYearlyTopRanksOnMainContext(
         context: ModelContext, entity: TopChartsEntity, name: String, artist: String?
     ) async throws -> [YearlyRank] {
         var oldest = FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])

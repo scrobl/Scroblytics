@@ -311,6 +311,17 @@ enum PerfChecks {
                 check("one index pass is far cheaper than looking up the albums one at a time", buildTime < perQuery * Double(max(albums.count, 1)) * 2 || buildTime < 5, "\(buildTime)s vs \(perQuery * Double(albums.count))s")
             }
 
+            // Rabbit Hole's library index (tracks, artists, "plays next" habits) on a big history.
+            if existing >= 50_000 {
+                let snapshots = QueryIdentity.canonicalizingArtists((try? context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)) ?? [])
+                let before = footprintMB()
+                let started = Date()
+                let library = RabbitHoleLibrary.build(scrobbles: snapshots)
+                let seconds = Date().timeIntervalSince(started)
+                print(String(format: "      Rabbit Hole index over %d scrobbles: %d tracks in %.2f s, memory %+.0f MB", snapshots.count, library.tracks.count, seconds, footprintMB() - before))
+                check("the Rabbit Hole index builds in a few seconds even on a huge history", seconds < 10, "\(seconds)s")
+            }
+
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

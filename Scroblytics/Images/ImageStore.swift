@@ -432,6 +432,12 @@ private final class LocalArtworkCache {
         images.removeAllObjects()
     }
 
+    /// What is already decoded, without waiting: a view that is rebuilt (a card that moves from one list to another) shows it at once
+    /// instead of flashing its placeholder.
+    func cachedImage(for url: URL, maxPixelSize: Int) -> NSImage? {
+        images.object(forKey: "\(url.path)#\(maxPixelSize)" as NSString)
+    }
+
     func image(for url: URL, maxPixelSize: Int) async -> NSImage? {
         let cacheKey = "\(url.path)#\(maxPixelSize)" as NSString
         if let cached = images.object(forKey: cacheKey) {
@@ -479,8 +485,8 @@ private struct LocalArtworkImage<Placeholder: View>: View {
 
     var body: some View {
         Group {
-            if let image {
-                Image(nsImage: image)
+            if let shown = image ?? LocalArtworkCache.shared.cachedImage(for: url, maxPixelSize: maxPixelSize) {
+                Image(nsImage: shown)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else {
@@ -494,6 +500,80 @@ private struct LocalArtworkImage<Placeholder: View>: View {
                 for: url,
                 maxPixelSize: maxPixelSize
             )
+        }
+    }
+}
+
+/// Pictures fetched from the web, kept in memory once seen. `AsyncImage` starts from its placeholder every time a view is rebuilt,
+/// even for a picture it just showed, so a card that moves (a suggestion that becomes a step in a path) flashed empty and reloaded.
+@MainActor
+private final class RemoteArtworkCache {
+    static let shared = RemoteArtworkCache()
+
+    private let images = NSCache<NSURL, NSImage>()
+    private var loading: [URL: Task<NSImage?, Never>] = [:]
+
+    private init() {
+        images.countLimit = 300
+        images.totalCostLimit = 96 * 1_024 * 1_024
+    }
+
+    func removeAll() {
+        images.removeAllObjects()
+    }
+
+    func cachedImage(for url: URL) -> NSImage? {
+        images.object(forKey: url as NSURL)
+    }
+
+    /// Views asking for the same picture at once share one download. The system's URL cache still applies underneath.
+    func image(for url: URL) async -> NSImage? {
+        if let cached = cachedImage(for: url) { return cached }
+        let task: Task<NSImage?, Never>
+        if let running = loading[url] {
+            task = running
+        } else {
+            task = Task {
+                guard let (data, response) = try? await URLSession.shared.data(from: url),
+                      (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
+                      let image = NSImage(data: data) else { return nil }
+                return image
+            }
+            loading[url] = task
+        }
+        let image = await task.value
+        loading[url] = nil
+        if let image { images.setObject(image, forKey: url as NSURL, cost: cost(of: image)) }
+        return image
+    }
+
+    private func cost(of image: NSImage) -> Int {
+        let size = image.size
+        return max(1, Int(size.width * size.height * 4))
+    }
+}
+
+private struct RemoteArtworkImage<Placeholder: View>: View {
+    let url: URL
+    let contentMode: ContentMode
+    @ViewBuilder let placeholder: Placeholder
+
+    @State private var loaded: NSImage?
+
+    var body: some View {
+        Group {
+            if let shown = loaded ?? RemoteArtworkCache.shared.cachedImage(for: url) {
+                Image(nsImage: shown)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                placeholder
+            }
+        }
+        .task(id: url) {
+            loaded = nil
+            if RemoteArtworkCache.shared.cachedImage(for: url) != nil { return }
+            loaded = await RemoteArtworkCache.shared.image(for: url)
         }
     }
 }
@@ -523,15 +603,9 @@ struct ArtworkImage<Placeholder: View>: View {
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                     } else {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().aspectRatio(contentMode: contentMode)
-                            } else {
-                                placeholder
-                            }
-                        }
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
+                        RemoteArtworkImage(url: url, contentMode: contentMode) { placeholder }
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
                     }
                 } else {
                     placeholder
@@ -542,6 +616,7 @@ struct ArtworkImage<Placeholder: View>: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in
             LocalArtworkCache.shared.removeAll()
+            RemoteArtworkCache.shared.removeAll()
             refreshID = UUID()
         }
     }

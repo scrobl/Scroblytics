@@ -450,6 +450,23 @@ final class TrackDurationCacheEntry {
     }
 }
 
+/// One Last.fm similarity answer (similar tracks or similar artists), kept so Rabbit Hole doesn't ask again for the same track
+/// within a month. `payload` is the answer as JSON; only a successful answer (including a genuine "nothing similar") is stored,
+/// never a failure. Derived from Last.fm, so it is not part of a backup.
+@Model
+final class SimilarityLookupCacheEntry {
+    /// "track\u{1F}artist\u{1F}title" or "artist\u{1F}artist", lowercased.
+    @Attribute(.unique) var cacheKey: String
+    var payload: Data
+    var cachedAt: Date
+
+    init(cacheKey: String, payload: Data, cachedAt: Date) {
+        self.cacheKey = cacheKey
+        self.payload = payload
+        self.cachedAt = cachedAt
+    }
+}
+
 /// Cached tempo lookup for one track, keyed by `TextNormalization.lovedKey` like `TrackDurationCacheEntry`.
 /// A nil `bpm` is a confirmed miss (neither source has a tempo for it); a temporary failure is never stored.
 /// `timeSignature` and `musicalKey` come back with the same GetSongBPM lookup, so they are kept rather than

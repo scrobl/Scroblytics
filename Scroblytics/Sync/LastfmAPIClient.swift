@@ -661,6 +661,48 @@ actor LastfmAPIClient {
         }
     }
 
+    /// Like `fetchSimilarArtists`, but a failure (offline, rate limit, network) is thrown instead of looking like "nothing similar", so a
+    /// caller that remembers answers never remembers a failure. Last.fm's "artist not found" (error 6) is a real, empty answer.
+    func fetchSimilarArtistsChecked(artist: String, limit: Int = 30) async throws -> [SimilarArtist] {
+        let items: [URLQueryItem] = [
+            .init(name: "method", value: "artist.getSimilar"),
+            .init(name: "artist", value: artist),
+            .init(name: "api_key", value: apiKey),
+            .init(name: "format", value: "json"),
+            .init(name: "limit", value: String(limit)),
+            .init(name: "autocorrect", value: "1"),
+        ]
+        do {
+            let response: SimilarArtistsResponse = try await request(queryItems: items)
+            return response.similarartists.artist
+                .map { SimilarArtist(name: $0.name.trimmingCharacters(in: .whitespaces), match: $0.match.value) }
+                .filter { !$0.name.isEmpty }
+        } catch LastfmAPIError.api(let code, _) where code == 6 {
+            return []
+        }
+    }
+
+    /// The checked form of `fetchSimilarTracks` (see `fetchSimilarArtistsChecked`).
+    func fetchSimilarTracksChecked(artist: String, track: String, limit: Int = 100) async throws -> [SimilarTrack] {
+        let items: [URLQueryItem] = [
+            .init(name: "method", value: "track.getSimilar"),
+            .init(name: "artist", value: artist),
+            .init(name: "track", value: track),
+            .init(name: "api_key", value: apiKey),
+            .init(name: "format", value: "json"),
+            .init(name: "limit", value: String(limit)),
+            .init(name: "autocorrect", value: "1"),
+        ]
+        do {
+            let response: SimilarTracksResponse = try await request(queryItems: items)
+            return response.similartracks.track
+                .map { SimilarTrack(name: $0.name.trimmingCharacters(in: .whitespaces), artist: $0.artist.name.trimmingCharacters(in: .whitespaces), match: $0.match.value) }
+                .filter { !$0.name.isEmpty && !$0.artist.isEmpty }
+        } catch LastfmAPIError.api(let code, _) where code == 6 {
+            return []
+        }
+    }
+
     /// Tracks similar to `artist`/`track` (`track.getSimilar`). Same
     /// blanket-swallow rationale as `fetchSimilarArtists`.
     func fetchSimilarTracks(artist: String, track: String, limit: Int = 50) async -> [SimilarTrack] {

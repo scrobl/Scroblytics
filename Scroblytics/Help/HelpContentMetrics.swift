@@ -174,7 +174,7 @@ extension HelpContent {
                     "Weight: match × (1 + days since last played, up to 365, ÷ 365) × (1 + 0.25 × log₂(plays + 1)). Artist and album rows add up their tracks’ weights.",
                     "Each list keeps its top 10; the card draws one of them at random, weighted. The pool is computed once per sync, so reloading gives a different pick but not new data.",
                 ]),
-                .paragraph("Rabbit Hole uses the same machinery to offer 3 recommended tracks at each step."),
+                .paragraph("[Rabbit Hole](help://tool-rabbit-hole) uses Last.fm’s similar tracks too, but adds more sources (similar artists, shared tags, what you play next) and picks three at each step."),
             ]
         ),
         HelpArticle(

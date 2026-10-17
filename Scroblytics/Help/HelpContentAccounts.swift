@@ -127,7 +127,7 @@ extension HelpContent {
                 .paragraph("Everything you build in Scroblytics (history, edits, saved queries) lives on your Mac. These are the only outside services it contacts. There is no analytics or tracking. [Offline mode](help://offline-mode) stops every one of them."),
                 .paragraph("The full privacy policy is published online: [Scroblytics Privacy Policy](\(AppIdentity.privacyPolicyURLString))."),
                 .table(headers: ["Service", "Used for", "What it receives"], rows: [
-                    ["**Last.fm** (`ws.audioscrobbler.com`)", "Sync, loved tracks, tags, now playing, similar music, tracklists, popularity; and writes if Track Actions is connected", "Your username and API key; artist, album, track and tag names in the request. Writes add a session key and signature."],
+                    ["**Last.fm** (`ws.audioscrobbler.com`)", "Sync, loved tracks, tags, now playing, similar music (Rabbit Hole keeps the answers on your Mac for 30 days), tracklists, popularity; and writes if Track Actions is connected", "Your username and API key; artist, album, track and tag names in the request. Writes add a session key and signature."],
                     ["**Deezer** (`api.deezer.com`, no sign-in)", "Track lengths, tempos (fallback), release dates (fallback), artwork, popularity", "Artist, album and track names as search text"],
                     ["**GetSongBPM** (`api.getsong.co`)", "Track tempo, time signature and key", "Artist and track names as search text, with the app’s (or your own) GetSongBPM key"],
                     ["**MusicBrainz**", "Album release dates", "Artist and album name, with the project’s contact address in the request header, as MusicBrainz asks"],

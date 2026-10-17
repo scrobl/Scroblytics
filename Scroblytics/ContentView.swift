@@ -231,8 +231,6 @@ struct ContentView: View {
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                OfflineToggleButton()
-
                 Button("Search", systemImage: "magnifyingglass") {
                     showingSearch = true
                 }
@@ -254,6 +252,8 @@ struct ContentView: View {
                         onSave: { routeAsked($0, action: .save) }
                     )
                 }
+
+                OfflineToggleButton()
 
                 Menu {
                     Button("Full Resync", systemImage: "arrow.clockwise") {
@@ -279,7 +279,7 @@ struct ContentView: View {
         .environment(flaggedTracksStore)
         .toolRuntime(
             gapBadges: libraryGapBadgeStore, tagWriter: tagWriteRunner, work: backgroundWork, container: modelContainer,
-            askRouter: askSimilarRouter, askSuggestions: askSuggestions, onAskSimilar: { showingAsk = false; selectedTab = .tools },
+            askRouter: askSimilarRouter, askSuggestions: askSuggestions, nowPlaying: nowPlayingStore, onAskSimilar: { showingAsk = false; selectedTab = .tools },
             onAccountConnected: { startSync(full: false) },
             onStopRequested: { stopSync() }
         )

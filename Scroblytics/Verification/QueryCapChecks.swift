@@ -204,6 +204,15 @@ enum QueryCapChecks {
 
         let year = read(reply(target: "album", sorts: playsDescending, caps: #""perArtist":null,"perAlbum":null,"perReleaseYear":1,"#), request: "my most played album from every release year")
         check("albums with perReleaseYear: 1 keep the cap", year?.interpretation.spec.groupLimit == QueryGroupLimit(perReleaseYear: 1))
+        // "Top Album by Release Year" (the reported case): the model sorted by plays and wrote no cap at all.
+        let reported = read(reply(target: "album", sorts: playsDescending), request: "Top Album by Release Year")
+        check("“Top Album by Release Year” with a model that wrote no cap is still one album per release year", reported?.interpretation.spec.groupLimit == QueryGroupLimit(perReleaseYear: 1) && reported?.interpretation.spec.limit == nil, "\(String(describing: reported?.interpretation.spec.groupLimit)) \(String(describing: reported?.interpretation.spec.limit))")
+        let reportedThe = read(reply(target: "album", sorts: playsDescending), request: "the top album by release year")
+        check("…and \"the top album by release year\" is not cut to one album in all", reportedThe?.interpretation.spec.groupLimit == QueryGroupLimit(perReleaseYear: 1) && reportedThe?.interpretation.spec.limit == nil)
+        check("the wordings that mean one per year", ["best track by release year", "top song of each release year", "favorite album for every release year", "most played album in release year"].allSatisfy { AskPatterns.groupLimit(in: $0).perReleaseYear == 1 })
+        check("the plural could mean sorted by year, so it is left to the model", AskPatterns.groupLimit(in: "top albums by release year").isEmpty && AskPatterns.groupLimit(in: "albums sorted by release year").isEmpty && AskPatterns.groupLimit(in: "my top album").isEmpty)
+        let plural = read(reply(target: "album", sorts: playsDescending), request: "top albums by release year")
+        check("…and the plural without a cap from the model stays uncapped", plural?.interpretation.spec.groupLimit == nil)
         let artistTarget = read(reply(target: "artist", sorts: playsDescending, caps: #""perArtist":1,"perAlbum":1,"perReleaseYear":1,"#), request: cappedRequest)
         check("on an artist query all three caps are dropped, each with a reason",
               artistTarget?.interpretation.spec.groupLimit == nil && artistTarget?.interpretation.dropped.count == 3, "\(String(describing: artistTarget?.interpretation.dropped))")

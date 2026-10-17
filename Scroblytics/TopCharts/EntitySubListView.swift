@@ -437,7 +437,10 @@ struct EntitySubListView: View {
         Text(position.map(String.init) ?? "—")
             .font(AppTypography.tableRank)
             .foregroundStyle(.secondary)
-            .frame(width: 24, alignment: .trailing)
+            // Wide enough for four digits (an artist's thousandth track), and never wrapped onto a second line.
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(width: 40, alignment: .trailing)
     }
 
     private func releaseYearPositionLabel(_ entry: TopChartEntry) -> some View {

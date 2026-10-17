@@ -299,6 +299,8 @@ private struct ChartRaceRowView: View {
                 .font(AppTypography.tableRank)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .frame(width: 28, alignment: .trailing)
 
             EntityThumbnail(url: row.entity.imageURL, entity: entity)

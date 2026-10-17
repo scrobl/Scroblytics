@@ -75,6 +75,8 @@ enum AskExamples {
             groups: [[cond("artist", "textIs", text: "Artist A")]], sorts: [.init(field: "plays", direction: "descending")], unsupported: [], perAlbum: 1)),
         Example(request: "my most played album from every release year", target: .album, ordered: true, query: AskWire.Query(
             groups: [], sorts: [.init(field: "plays", direction: "descending")], unsupported: [], perReleaseYear: 1)),
+        Example(request: "best track by release year", target: .track, ordered: true, query: AskWire.Query(
+            groups: [], sorts: [.init(field: "plays", direction: "descending")], unsupported: [], perReleaseYear: 1)),
         Example(request: "top 10 loved songs released in 2001", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("loved", "isTrue"), cond("releaseYear", "equals", value: 2001)]], sorts: [.init(field: "plays", direction: "descending")], limit: 10, unsupported: [])),
         Example(request: "records that came out in the 70s", target: .album, ordered: false, query: AskWire.Query(

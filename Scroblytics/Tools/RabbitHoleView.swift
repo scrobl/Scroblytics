@@ -784,6 +784,9 @@ struct RabbitHoleView: View {
                 lovedKeys: loaded.lovedKeys,
                 flaggedKeys: loaded.flaggedKeys,
                 entityTags: loaded.entityTags,
+                // The conditions editor offers "In Apple Music library"; without the saved status every track has no value and that
+                // condition matches nothing.
+                libraryPresence: loaded.libraryPresence,
                 images: loaded.images
             )
             tagVocabulary = loaded.entityTags.vocabulary.map {

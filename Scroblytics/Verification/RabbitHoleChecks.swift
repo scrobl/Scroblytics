@@ -213,6 +213,38 @@ enum RabbitHoleChecks {
             check("it reports the pool the three came from", (generated?.poolSize ?? 0) >= 3 && (generated?.totalBeforeConditions ?? 0) >= (generated?.poolSize ?? 0))
             check("per-artist limit 1 gives three different artists", Set((generated?.candidates ?? []).map(\.artist)).count == generated?.candidates.count)
 
+            // The "In Apple Music library" condition needs the saved library status; the page used to leave it out, so the condition matched nothing
+            let inLibrary = QueryCondition("inAppleLibrary", .isTrue)
+            var presence = LibraryPresenceSnapshot()
+            for track in library.tracks { presence.entries[LibraryGapsEngine.key(artist: track.artist, track: track.name)] = .init(inLibrary: true, hasNearMatch: false, lastSeenAt: nil) }
+            var withPresence = QuerySnapshots(entityTags: tags); withPresence.libraryPresence = presence
+            var rngL = SeededGenerator(state: 5)
+            let allInLibrary = try? await RabbitHoleEngine.generate(
+                from: node, path: [rootNode], groups: [[inLibrary]], perArtist: 1, perAlbum: 0, knobs: neutral, memory: empty, library: library,
+                scrobbles: history, snapshots: withPresence, provider: stub, now: now, using: &rngL
+            )
+            check("with the library status loaded, “in Apple Music library = yes” keeps the tracks that are in it", allInLibrary?.candidates.count == 3, "\(allInLibrary?.candidates.map(\.track) ?? [])")
+            let onlyOne = library.tracks.first { $0.name != "X" && $0.artist != "Artist A" } ?? library.tracks[0]
+            var oneIn = QuerySnapshots(entityTags: tags)
+            var onePresence = LibraryPresenceSnapshot()
+            for track in library.tracks { onePresence.entries[LibraryGapsEngine.key(artist: track.artist, track: track.name)] = .init(inLibrary: track.key == onlyOne.key, hasNearMatch: false, lastSeenAt: nil) }
+            oneIn.libraryPresence = onePresence
+            var rngM = SeededGenerator(state: 5)
+            let justOne = try? await RabbitHoleEngine.generate(
+                from: node, path: [rootNode], groups: [[inLibrary]], perArtist: 1, perAlbum: 0, knobs: neutral, memory: empty, library: library,
+                scrobbles: history, snapshots: oneIn, provider: stub, now: now, using: &rngM
+            )
+            check("…and only those: when one track is in the library, only it is offered", (justOne?.candidates ?? []).allSatisfy { $0.track == onlyOne.name && $0.artist == onlyOne.artist }, "\(justOne?.candidates.map(\.track) ?? [])")
+            var rngN = SeededGenerator(state: 5)
+            let noStatus = try? await RabbitHoleEngine.generate(
+                from: node, path: [rootNode], groups: [[inLibrary]], perArtist: 1, perAlbum: 0, knobs: neutral, memory: empty, library: library,
+                scrobbles: history, snapshots: snapshots, provider: stub, now: now, using: &rngN
+            )
+            check("without the status loaded nothing has a value, so the condition matches nothing (why the page must supply it)", noStatus?.candidates.isEmpty == true)
+            let source = (try? String(contentsOfFile: #filePath.replacingOccurrences(of: "Verification/RabbitHoleChecks.swift", with: "Tools/RabbitHoleView.swift"), encoding: .utf8)) ?? ""
+            let similarSource = (try? String(contentsOfFile: #filePath.replacingOccurrences(of: "Verification/RabbitHoleChecks.swift", with: "Tools/SimilarSoundsView.swift"), encoding: .utf8)) ?? ""
+            check("the Rabbit Hole and Similar Sounds pages hand the library status to their queries", source.contains("libraryPresence: loaded.libraryPresence") && similarSource.contains("libraryPresence: loaded.libraryPresence"))
+
             // MARK: Starting without searching
             let later = Date(timeIntervalSince1970: 2_300_000_000) // long after every play in the made-up history
             let lovedX: Set<String> = [library.tracks[x].key]

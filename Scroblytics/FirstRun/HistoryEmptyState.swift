@@ -71,8 +71,12 @@ struct PartialDataNoteBar: View {
     var body: some View {
         if let history, history.isPartial {
             HStack(spacing: 8) {
-                Image(systemName: "hourglass").foregroundStyle(.orange)
-                Text("Your history isn’t fully imported yet (\(history.scrobbleCount.formatted()) scrobbles so far), so these numbers are partial.")
+                Image(systemName: history.storeProblem == nil ? "hourglass" : "exclamationmark.triangle").foregroundStyle(.orange)
+                if let problem = history.storeProblem {
+                    Text("Your history isn’t fully imported yet, and the database can’t be read right now. \(problem)")
+                } else {
+                    Text("Your history isn’t fully imported yet (\(history.scrobbleCount.formatted()) scrobbles so far), so these numbers are partial.")
+                }
                 Spacer(minLength: 0)
             }
             .font(.callout)

@@ -14,7 +14,7 @@ actor ScrobbleHistoryLoader {
         var newest = FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
         newest.fetchLimit = 1
         return ScrobbleHistoryCache.Stamp(
-            count: try modelContext.fetchCount(FetchDescriptor<Scrobble>()),
+            count: try modelContext.checkedCount(FetchDescriptor<Scrobble>()),
             newest: try modelContext.fetch(newest).first?.playedAt,
             syncedAt: try modelContext.fetch(FetchDescriptor<SyncState>()).first?.lastSyncedAt
         )

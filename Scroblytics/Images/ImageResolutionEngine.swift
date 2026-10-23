@@ -183,7 +183,7 @@ private actor BackgroundImageResolutionWorker {
         if let index = lastfmArtworkIndex {
             if now.timeIntervalSince(indexCheckedAt) < Self.indexRecheckInterval { return index }
             indexCheckedAt = now
-            let count = try modelContext.fetchCount(FetchDescriptor<Scrobble>())
+            let count = try modelContext.checkedCount(FetchDescriptor<Scrobble>())
             let syncAt = try modelContext.fetch(FetchDescriptor<SyncState>()).first?.lastSyncedAt
             if count == indexedScrobbleCount, syncAt == indexedSyncAt { return index }
         }

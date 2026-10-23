@@ -87,6 +87,15 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     }
 }
 
+/// "For each calendar year": the query is evaluated separately over each year's plays. (One kind of period for now; the struct leaves room
+/// for months or decades.)
+struct QueryBreakdown: Codable, Hashable, Sendable {
+    /// Newest year first. Nil/false: oldest first.
+    var newestFirst: Bool?
+
+    var showsNewestFirst: Bool { newestFirst == true }
+}
+
 /// Diversity caps: at most `perArtist` results may share the same artist, at most `perAlbum` results may
 /// share the same album and/or at most `perReleaseYear` results may share the same release year,
 /// simultaneously — applied after sorting, before the overall `limit` (`QueryEngine.applyGroupLimit`).
@@ -110,7 +119,9 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 2: a field reference may carry a date `scope`. 3: it may also carry a comparison `baseline`.
     /// Older sets decode unchanged (both are optional).
     /// 4: a `playFilter` (only plays on some weekdays / hours). Older sets decode unchanged.
-    static let currentSchemaVersion = 4
+    /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
+    /// evaluation per calendar year). Older sets decode unchanged.
+    static let currentSchemaVersion = 5
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget
@@ -127,6 +138,15 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// Ordered columns to display. Empty = the surface's default columns.
     var columns: [QueryFieldRef] = []
     var groupLimit: QueryGroupLimit?
+    /// The order the surviving results are shown in, applied after the caps and the limit; `sorts` still decides which results survive.
+    /// Empty/nil = automatic: the sorts' own order, except that a per-release-year cap shows its results by release year, oldest first.
+    /// Optional, so a query saved before this existed decodes unchanged.
+    var resultSorts: [QuerySort]?
+    /// Keeps the sorts' own order even where the automatic order would be by release year (a per-release-year cap).
+    var showInRankOrder: Bool?
+    /// Runs the query once for each calendar year of the plays it counts, keeping `limit` results per year ("my top 3 artists of each
+    /// year"). Each row is then an artist, album or track in a year, with that year's plays. Optional, so older queries decode unchanged.
+    var breakdown: QueryBreakdown?
 
     init(target: QueryTarget) { self.target = target }
 }
@@ -167,9 +187,23 @@ struct ValidatedQuery: Sendable {
     let spec: QuerySpec
     let groups: [[ValidatedCondition]]
     let sorts: [ValidatedSort]
+    /// The explicitly chosen display order (see `QuerySpec.resultSorts`).
+    var resultSorts: [ValidatedSort] = []
     let columns: [ResolvedField]
     /// The Release year field, resolved once when the spec sets a per-release-year cap (nil otherwise).
     let releaseYearField: ResolvedField?
+}
+
+extension ValidatedQuery {
+    /// The order the results are shown in once the caps and the limit have picked them: the one chosen, else (with a per-release-year cap)
+    /// release year, oldest first, else none (the order they were picked in).
+    var effectiveResultSorts: [ValidatedSort] {
+        if !resultSorts.isEmpty { return resultSorts }
+        if spec.groupLimit?.perReleaseYear != nil, spec.showInRankOrder != true, let year = releaseYearField {
+            return [ValidatedSort(key: .field(year), direction: .ascending)]
+        }
+        return []
+    }
 }
 
 struct ValidatedCondition: Sendable {
@@ -223,7 +257,7 @@ extension QuerySpec {
             validatedGroups.append(validated)
         }
 
-        let validatedSorts: [ValidatedSort] = try sorts.map { sort in
+        func validateSort(_ sort: QuerySort) throws -> ValidatedSort {
             switch sort.key {
             case .shuffle(let seed):
                 return ValidatedSort(key: .shuffle(seed: seed), direction: sort.direction)
@@ -233,9 +267,14 @@ extension QuerySpec {
                 return ValidatedSort(key: .field(resolved), direction: sort.direction)
             }
         }
+        let validatedSorts = try sorts.map(validateSort)
+        let validatedResultSorts = try (resultSorts ?? []).map(validateSort)
 
         let resolvedColumns = try columns.map { try registry.resolve($0, target: target) }
-        return ValidatedQuery(spec: self, groups: validatedGroups, sorts: validatedSorts, columns: resolvedColumns, releaseYearField: releaseYearField)
+        return ValidatedQuery(
+            spec: self, groups: validatedGroups, sorts: validatedSorts, resultSorts: validatedResultSorts, columns: resolvedColumns,
+            releaseYearField: releaseYearField
+        )
     }
 }
 

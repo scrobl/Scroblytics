@@ -68,6 +68,7 @@ struct ShareCardFooter: View {
         HStack {
             if let name = identity.name, !name.isEmpty {
                 HStack(spacing: 12) {
+                    if let avatar = identity.avatar { ShareAvatarView(data: avatar, size: 44) }
                     LastfmMark(size: 34, style: identity.logo)
                     Text(name)
                         .font(.system(size: 28, weight: .semibold))

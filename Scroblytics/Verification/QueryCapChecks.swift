@@ -12,6 +12,7 @@ enum QueryCapChecks {
             print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty || ok ? "" : "  [\(detail)]"))
             if !ok { failures += 1 }
         }
+        breakdownChecks(check)
         engineChecks(check)
         modelChecks(check)
         askChecks(check)
@@ -74,13 +75,135 @@ enum QueryCapChecks {
         return QueryEngine.evaluate(validated, run: run)
     }
 
-    private static func spec(_ target: QueryTarget, caps: QueryGroupLimit?, limit: Int? = nil) -> QuerySpec {
+    /// `rankOrder`: show the results in the order the sorts picked them (the checks of what the caps keep read them that way). False is the
+    /// automatic display order, by release year where a per-release-year cap is set.
+    private static func spec(_ target: QueryTarget, caps: QueryGroupLimit?, limit: Int? = nil, rankOrder: Bool = true) -> QuerySpec {
         var spec = QuerySpec(target: target)
         spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
         spec.columns = [QueryFieldRef("plays")]
         spec.groupLimit = caps
         spec.limit = limit
+        if rankOrder { spec.showInRankOrder = true }
         return spec
+    }
+
+    // MARK: - Break down by calendar year
+
+    /// Plays per (artist, calendar year), the way the checks below work their answers out by hand.
+    private static let yearlyPlays: [(artist: String, year: Int, plays: Int)] = [
+        ("A", 2019, 5), ("A", 2020, 2), ("A", 2021, 6),
+        ("B", 2019, 3), ("B", 2020, 9), ("B", 2021, 6), ("B", 2022, 4),
+        ("C", 2020, 4), ("C", 2021, 1), ("C", 2022, 4),
+    ]
+
+    private static func yearlyScrobbles() -> [ScrobbleSnapshot] {
+        let calendar = AppCalendars.listening
+        var out: [ScrobbleSnapshot] = []
+        for entry in yearlyPlays {
+            let base = calendar.date(from: DateComponents(year: entry.year, month: 6, day: 15, hour: 12))!
+            for i in 0..<entry.plays {
+                out.append(ScrobbleSnapshot(artistName: entry.artist, albumName: "Album \(entry.artist)", trackName: "Track \(entry.artist)", imageURL: nil, playedAt: base.addingTimeInterval(Double(i) * 600)))
+            }
+        }
+        return out.sorted { $0.playedAt < $1.playedAt }
+    }
+
+    private static func runYearly(_ spec: QuerySpec) throws -> QueryResult {
+        let validated = try spec.validate(against: .standard)
+        let all = yearlyScrobbles()
+        let run = QueryRun(target: spec.target, asOf: Date(timeIntervalSince1970: 1_800_000_000), scrobbles: spec.countedPlays(all), allTimeScrobbles: all, snapshots: QuerySnapshots())
+        return QueryEngine.evaluate(validated, run: run)
+    }
+
+    private static func breakdownChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func spec(_ target: QueryTarget = .artist, limit: Int?, newestFirst: Bool? = nil) -> QuerySpec {
+            var spec = QuerySpec(target: target)
+            spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+            spec.columns = [QueryFieldRef("plays")]
+            spec.limit = limit
+            spec.breakdown = QueryBreakdown(newestFirst: newestFirst)
+            return spec
+        }
+        // Independent answer: per year, the artists by plays (descending), ties by name, the first `n`.
+        func expected(_ n: Int, newestFirst: Bool = false, minimum: Int = 0) -> [String] {
+            let years = Set(yearlyPlays.map(\.year)).sorted(by: newestFirst ? (>) : (<))
+            return years.flatMap { year in
+                yearlyPlays.filter { $0.year == year && $0.plays >= minimum }
+                    .sorted { $0.plays != $1.plays ? $0.plays > $1.plays : $0.artist < $1.artist }
+                    .prefix(n).map { "\(year) \($0.artist) \($0.plays)" }
+            }
+        }
+        func shown(_ result: QueryResult) -> [String] {
+            let key = result.columns.first?.cacheKey ?? ""
+            return result.rows.map { row in
+                var plays = -1
+                if case .value(.number(let n))? = row.cells[key] { plays = Int(n) }
+                return "\(row.period.map(String.init) ?? "-") \(row.entity.name) \(plays)"
+            }
+        }
+        do {
+            let one = try runYearly(spec(limit: 1))
+            check("the top artist of each year, with that year's own plays", shown(one) == expected(1), "\(shown(one)) vs \(expected(1))")
+            let two = try runYearly(spec(limit: 2))
+            check("the top two of each year (a year with fewer than two artists keeps what it has)", shown(two) == expected(2), "\(shown(two)) vs \(expected(2))")
+            let newest = try runYearly(spec(limit: 1, newestFirst: true))
+            check("newest year first when asked", shown(newest) == expected(1, newestFirst: true), "\(shown(newest))")
+            check("a year's tie goes to the name that sorts first, as everywhere else", shown(one).contains("2021 A 6") && shown(one).contains("2022 B 4"))
+            check("every year of the plays appears, oldest first by default", one.rows.compactMap(\.period) == [2019, 2020, 2021, 2022])
+            check("the matched count adds up the years' (2 + 3 + 3 + 2 artists)", try runYearly(spec(limit: nil)).matchedCount == 10 && one.matchedCount == 10, "\(one.matchedCount)")
+
+            var conditioned = spec(limit: 5)
+            conditioned.groups = [[QueryCondition("plays", .greaterThanOrEqual, [.number(4)])]]
+            check("a condition is tested against each year's plays, not the total", shown(try runYearly(conditioned)) == expected(5, minimum: 4), "\(shown(try runYearly(conditioned))) vs \(expected(5, minimum: 4))")
+
+            let displayRows = QueryDisplayRow.make(from: try runYearly(spec(limit: 2)), imageLookup: [:])
+            check("the same artist in several years is several rows with their own identities", Set(displayRows.map(\.id)).count == displayRows.count && Set(displayRows.map(\.entityID)).count < displayRows.count)
+
+            var windowed = spec(limit: 1)
+            windowed.period = QueryPeriod(from: AppCalendars.listening.date(from: DateComponents(year: 2020, month: 1, day: 1))!, to: AppCalendars.listening.date(from: DateComponents(year: 2021, month: 12, day: 31, hour: 23))!)
+            check("with a period chosen, only its years are broken down", try runYearly(windowed).rows.compactMap(\.period) == [2020, 2021])
+
+            var plain = spec(limit: 1)
+            plain.breakdown = nil
+            let plainResult = try runYearly(plain)
+            check("without a breakdown nothing changes: one list over all the plays, no years", plainResult.rows.count == 1 && plainResult.rows[0].period == nil && shown(plainResult) == ["- B 22"], "\(shown(plainResult))")
+
+            let albums = try runYearly(spec(.album, limit: 1))
+            let tracks = try runYearly(spec(.track, limit: 1))
+            check("albums and tracks break down the same way", albums.rows.compactMap(\.period) == [2019, 2020, 2021, 2022] && tracks.rows.map(\.entity.name) == ["Track A", "Track B", "Track A", "Track B"], "\(tracks.rows.map(\.entity.name))")
+        } catch {
+            check("the engine runs a query broken down by year", false, "\(error)")
+        }
+        let breakdown = QueryBreakdown(newestFirst: true)
+        check("a breakdown survives saving, and an older query has none", {
+            var s = QuerySpec(target: .artist); s.breakdown = breakdown
+            let back = try? QuerySpec.decode(s.encoded())
+            let older = try? QuerySpec.decode(Data(#"{"schemaVersion":4,"target":"artist","groups":[],"sorts":[],"columns":[]}"#.utf8))
+            return back?.breakdown == breakdown && older?.breakdown == nil
+        }())
+        let switched = QueryBuilderModel.switching({ var s = QuerySpec(target: .album); s.breakdown = QueryBreakdown(); return s }(), to: .artist, registry: .standard)
+        check("switching target keeps the breakdown", switched.spec.breakdown != nil)
+
+        // Ask
+        func read(_ request: String, limit: String = "null", target: String = "artist", unsupported: String = "[]") -> AskTranslation? {
+            try? AskModelEngine.read(reply(target: target, sorts: playsDescending, limit: limit, unsupported: unsupported), request: request, registry: .standard, context: .none, now: Date(), engine: "test", seconds: 0)
+        }
+        let top3 = read("my top 3 artists of each year", limit: "3")
+        check("“my top 3 artists of each year” runs once per year, 3 each", top3?.interpretation.spec.breakdown != nil && top3?.interpretation.spec.limit == 3)
+        let one = read("my top album each year", limit: "null", target: "album")
+        check("“my top album each year” with no number from the model means one per year", one?.interpretation.spec.breakdown != nil && one?.interpretation.spec.limit == 1, "\(String(describing: one?.interpretation.spec.limit))")
+        let named = read("my top 5 tracks per year", limit: "null", target: "track")
+        check("a count in the request is used when the model left it out", named?.interpretation.spec.limit == 5, "\(String(describing: named?.interpretation.spec.limit))")
+        let newestFirst = read("top artist every year, newest first", limit: "1")
+        check("“newest first” flips the years", newestFirst?.interpretation.spec.breakdown?.showsNewestFirst == true)
+        let chips = top3.map { AskChips.describe($0.interpretation.spec, registry: .standard).map(\.text) } ?? []
+        check("the chips say it: for each calendar year, top 3 per year", chips.contains("For each calendar year") && chips.contains("Top 3 per year"), "\(chips)")
+        let releaseYear = read("my most played album from each release year", limit: "null", target: "album")
+        check("“each release year” is the cap, not a breakdown", releaseYear?.interpretation.spec.breakdown == nil)
+        check("the wordings", ["top artist each year", "most played song every year", "my top albums per year", "best track for each year", "top 10 artists by year", "year by year"].allSatisfy { AskPatterns.breakdownByYear(in: $0) } && !["my top albums", "albums by release year", "top album by release year", "plays this year", "songs from last year"].contains { AskPatterns.breakdownByYear(in: $0) })
+        let noted = read("my top artist of each year", limit: "1", unsupported: #"["grouping results by each year isn't supported"]"#)
+        check("a model's note that per-year isn't supported is removed, since the app does it", noted?.interpretation.unsupported.isEmpty == true && noted?.interpretation.spec.breakdown != nil, "\(String(describing: noted?.interpretation.unsupported))")
     }
 
     // MARK: - Engine
@@ -127,6 +250,48 @@ enum QueryCapChecks {
             let albums = try run(spec(.album, caps: QueryGroupLimit(perReleaseYear: 1)))
             check("albums, 1 per release year (no-date and not-yet-looked-up albums are never capped)",
                   names(albums) == ["B Three", "A One", "A Three", "B Two"], "\(names(albums))")
+
+            // The display order: the sorts pick who survives, the results are then shown by release year (oldest first) unless told otherwise.
+            let yearOf = Dictionary(uniqueKeysWithValues: rows.map { ($0.track, $0.year) })
+            func byYear(_ tracks: [String], ascending: Bool) -> [String] {
+                // Stable: tracks of one year (or with no year) keep the order they were picked in; no year goes last either way.
+                tracks.enumerated().sorted { a, b in
+                    switch (yearOf[a.element] ?? nil, yearOf[b.element] ?? nil) {
+                    case (let x?, let y?): return x != y ? (ascending ? x < y : x > y) : a.offset < b.offset
+                    case (_?, nil): return true
+                    case (nil, _?): return false
+                    default: return a.offset < b.offset
+                    }
+                }.map(\.element)
+            }
+            let auto = try run(spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false))
+            check("with a per-release-year cap the results are shown by release year, oldest first, by default", names(auto) == byYear(expected(perYear: 1), ascending: true), "\(names(auto)) vs \(byYear(expected(perYear: 1), ascending: true))")
+            check("…and the same tracks survive as when shown in rank order", Set(names(auto)) == Set(names(one)))
+            check("…with the tracks that have no known year last", names(auto) == ["a1 x", "a3 x", "b3 x", "b2 x", "b2 y"], "\(names(auto))")
+            var newest = spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false)
+            newest.resultSorts = [QuerySort(key: .field(QueryFieldRef("releaseYear")), direction: .descending)]
+            let newestFirst = try run(newest)
+            check("a chosen display order replaces the automatic one (newest first), and still keeps the same tracks", names(newestFirst) == byYear(expected(perYear: 1), ascending: false) && Set(names(newestFirst)) == Set(names(one)), "\(names(newestFirst))")
+            var byPlays = spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false)
+            byPlays.showInRankOrder = true
+            check("“in rank order” keeps the sorts' order", names(try run(byPlays)) == expected(perYear: 1))
+            var byName = spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false)
+            byName.resultSorts = [QuerySort(key: .field(QueryFieldRef("name")), direction: .ascending)]
+            check("any field can be the display order (here the name)", names(try run(byName)) == names(one).sorted { $0.localizedStandardCompare($1) == .orderedAscending }, "\(names(try run(byName)))")
+            let limitedAuto = try run(spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), limit: 2, rankOrder: false))
+            check("the limit still takes the top of the rank order, then those are shown by year", names(limitedAuto) == byYear(Array(expected(perYear: 1).prefix(2)), ascending: true), "\(names(limitedAuto))")
+            let artistCap = try run(spec(.track, caps: QueryGroupLimit(perArtist: 1), rankOrder: false))
+            check("a cap on something other than release year leaves the order alone", names(artistCap) == expected(perArtist: 1), "\(names(artistCap))")
+            check("no cap leaves it alone too", names(try run(spec(.track, caps: nil, rankOrder: false))) == rows.map(\.track))
+            let albumsAuto = try run(spec(.album, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false))
+            check("albums, one per release year, shown by year", names(albumsAuto) == ["A One", "A Three", "B Three", "B Two"], "\(names(albumsAuto))")
+
+            // Saved queries
+            let oldJSON = Data(#"{"schemaVersion":4,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8)
+            let decodedOld = try? QuerySpec.decode(oldJSON)
+            check("a query saved before the display order existed still decodes, with none", decodedOld != nil && decodedOld?.resultSorts == nil && decodedOld?.showInRankOrder == nil)
+            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 5)
+            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":6,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
         } catch {
             check("the engine runs a per-release-year cap", false, "\(error)")
         }
@@ -213,6 +378,21 @@ enum QueryCapChecks {
         check("the plural could mean sorted by year, so it is left to the model", AskPatterns.groupLimit(in: "top albums by release year").isEmpty && AskPatterns.groupLimit(in: "albums sorted by release year").isEmpty && AskPatterns.groupLimit(in: "my top album").isEmpty)
         let plural = read(reply(target: "album", sorts: playsDescending), request: "top albums by release year")
         check("…and the plural without a cap from the model stays uncapped", plural?.interpretation.spec.groupLimit == nil)
+        // The display order Ask gives a per-release-year query
+        let reportedChips = reported.map { AskChips.describe($0.interpretation.spec, registry: .standard).map(\.text) } ?? []
+        check("“Top Album by Release Year” is shown by release year (automatic), and says so in its chips", reported?.interpretation.spec.resultSorts == nil && reportedChips.contains("Shown by release year ↑") && reportedChips.contains("≤1 per release year"), "\(reportedChips)")
+        let newestFirst = read(reply(target: "album", sorts: playsDescending), request: "top album by release year, newest first")
+        check("“newest first” makes the years newest first", newestFirst?.interpretation.spec.resultSorts == [QuerySort(key: .field(QueryFieldRef("releaseYear")), direction: .descending)] && newestFirst?.interpretation.spec.sorts.first?.direction == .descending, "\(String(describing: newestFirst?.interpretation.spec.resultSorts))")
+        let oldestFirst = read(reply(target: "album", sorts: playsDescending), request: "my most played album from each release year, oldest first")
+        check("“oldest first” makes them oldest first", oldestFirst?.interpretation.spec.resultSorts?.first?.direction == .ascending)
+        check("the plays sort that picks the winners is kept either way", reported?.interpretation.spec.sorts.first?.direction == .descending && oldestFirst?.interpretation.spec.sorts.first?.direction == .descending)
+        let noCapNewest = read(reply(target: "album", sorts: playsDescending), request: "my top albums, newest first")
+        check("a direction for the years without a per-year cap changes nothing", noCapNewest?.interpretation.spec.resultSorts == nil)
+        check("the wordings for the direction", ["newest first", "latest to earliest", "most recent first", "reverse chronological"].allSatisfy { AskPatterns.yearOrder(in: $0) == .descending } && ["oldest first", "earliest first", "chronologically", "oldest to newest"].allSatisfy { AskPatterns.yearOrder(in: $0) == .ascending } && AskPatterns.yearOrder(in: "top album by release year") == nil)
+        let rankChips = AskChips.describe({ var s = QuerySpec(target: .album); s.groupLimit = QueryGroupLimit(perReleaseYear: 1); s.showInRankOrder = true; return s }(), registry: .standard).map(\.text)
+        check("“in rank order” has no “shown by” chip", !rankChips.contains { $0.hasPrefix("Shown by") })
+        let switched = QueryBuilderModel.switching({ var s = QuerySpec(target: .album); s.resultSorts = [QuerySort(key: .field(QueryFieldRef("releaseYear")), direction: .ascending)]; return s }(), to: .artist, registry: .standard)
+        check("switching to artists drops a display order by a field artists don't have, and says so", switched.spec.resultSorts == nil && switched.removed == 1)
         let artistTarget = read(reply(target: "artist", sorts: playsDescending, caps: #""perArtist":1,"perAlbum":1,"perReleaseYear":1,"#), request: cappedRequest)
         check("on an artist query all three caps are dropped, each with a reason",
               artistTarget?.interpretation.spec.groupLimit == nil && artistTarget?.interpretation.dropped.count == 3, "\(String(describing: artistTarget?.interpretation.dropped))")

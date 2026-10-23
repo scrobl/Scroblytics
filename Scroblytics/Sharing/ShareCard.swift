@@ -236,6 +236,8 @@ struct ShareIdentity: Equatable, Sendable {
     var showsFooter = false
     /// The mark in front of the name.
     var logo = LastfmLogoStyle.circle
+    /// Their Last.fm profile picture, shown in front of the name; only ever set together with `name`.
+    var avatar: Data?
 
     static let anonymous = ShareIdentity(name: nil, showsFooter: false)
 }

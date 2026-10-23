@@ -58,6 +58,7 @@ private struct SharePopover: View {
 
     @Environment(\.modelContext) private var modelContext
     @AppStorage(ShareSettings.showsNameKey) private var showsName = false
+    @AppStorage(ShareSettings.showsAvatarKey) private var showsAvatar = false
     @AppStorage(ShareSettings.showsFooterKey) private var showsFooter = false
     @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
     @State private var options = ShareOptions()
@@ -65,11 +66,15 @@ private struct SharePopover: View {
     @State private var imagesLoaded = false
     @State private var preview: NSImage?
     @State private var accountName: String?
+    @State private var avatar: Data?
+    /// The picture is on but couldn't be fetched (offline, Last.fm unreachable) and none is saved.
+    @State private var avatarMissing = false
     @State private var status: String?
     @State private var renderTask: Task<Void, Never>?
 
     private var identity: ShareIdentity {
-        ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsFooter, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
+        ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsFooter, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle,
+                      avatar: showsName && showsAvatar ? avatar : nil)
     }
 
     /// Rows whose picture exists but could not be loaded (Offline mode, or the picture is not saved on this Mac).
@@ -88,6 +93,12 @@ private struct SharePopover: View {
                      : "\(missingPictures) picture\(missingPictures == 1 ? "" : "s") couldn’t be loaded.")
                     .font(AppTypography.supportingDense).foregroundStyle(.orange)
             }
+            if showsName && showsAvatar && avatarMissing {
+                Text(Connectivity.shared.isOffline
+                     ? "Offline mode is on: your profile picture isn’t saved on this Mac yet, so the card goes without it."
+                     : "Your profile picture couldn’t be loaded from Last.fm, so the card goes without it.")
+                    .font(AppTypography.supportingDense).foregroundStyle(.orange)
+            }
             Divider()
             actions
             if let status {
@@ -99,18 +110,32 @@ private struct SharePopover: View {
         .task {
             options = ShareSettings.options(for: card.kindID, fallback: card.defaultOptions)
             accountName = ShareSettings.accountName(context: modelContext)
+            // The saved picture shows at once; Last.fm is asked only if it is missing or about a week old.
+            if showsName, showsAvatar, let name = accountName { avatar = ShareAvatar.cached(username: name)?.data }
             images = await ShareArtwork.load(ShareRenderer.imageURLs(card: card, options: ShareOptions(rowCount: ShareOptions.rowCounts.max() ?? 20)))
             imagesLoaded = true
             renderPreview()
+            await refreshAvatar()
         }
         .onChange(of: options) { _, new in
             ShareSettings.save(new, for: card.kindID)
             scheduleRender()
         }
-        .onChange(of: showsName) { scheduleRender() }
+        .onChange(of: showsName) { scheduleRender(); Task { await refreshAvatar() } }
+        .onChange(of: showsAvatar) { scheduleRender(); Task { await refreshAvatar() } }
+        .onChange(of: avatar) { scheduleRender() }
         .onChange(of: showsFooter) { scheduleRender() }
         .onChange(of: logoRaw) { scheduleRender() }
         .onDisappear { renderTask?.cancel() }
+    }
+
+    @MainActor
+    private func refreshAvatar() async {
+        guard showsName, showsAvatar, let name = accountName else { avatarMissing = false; return }
+        if avatar == nil { avatar = ShareAvatar.cached(username: name)?.data }
+        let fresh = await ShareAvatar.loadFromLastfm(username: name)
+        if let fresh { avatar = fresh }
+        avatarMissing = avatar == nil
     }
 
     // MARK: Preview
@@ -239,6 +264,9 @@ private struct SharePopover: View {
                 Text(accountName.map { "Show my Last.fm name (\($0))" } ?? "Show my Last.fm name")
             }
             .disabled(accountName == nil)
+            Toggle("Include my profile picture", isOn: $showsAvatar)
+                .disabled(accountName == nil || !showsName)
+                .padding(.leading, 18)
             Toggle("Show “Scroblytics” on the card", isOn: $showsFooter)
         }
         .toggleStyle(.checkbox)

@@ -284,12 +284,12 @@ struct SimilarSoundsView: View {
     private var playlistTracks: [AppleMusicPlaylistTrack] {
         displayRows.compactMap { row in
             guard row.entity.target == .track, !row.entity.artist.isEmpty else { return nil }
-            return AppleMusicPlaylistTrack(artist: row.entity.artist, track: row.entity.name, album: result?.entityInfo[row.id]?.album ?? "")
+            return AppleMusicPlaylistTrack(artist: row.entity.artist, track: row.entity.name, album: result?.entityInfo[row.entityID]?.album ?? "")
         }
     }
 
     private func open(_ row: QueryDisplayRow) {
-        navigation.goToTrack(TrackIdentity(artist: row.entity.artist, name: row.entity.name, album: result?.entityInfo[row.id]?.album, imageURL: row.imageURL))
+        navigation.goToTrack(TrackIdentity(artist: row.entity.artist, name: row.entity.name, album: result?.entityInfo[row.entityID]?.album, imageURL: row.imageURL))
     }
 
     private func moveColumn(_ movingKey: String, before targetKey: String) {

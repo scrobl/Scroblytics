@@ -18,12 +18,16 @@ struct QueryResultsTable: View {
     let onMoveColumn: (_ moving: String, _ before: String) -> Void
     let onOpen: (QueryDisplayRow) -> Void
 
-    private static let identityWidth: CGFloat = 300
+    private static let baseIdentityWidth: CGFloat = 300
+    /// The year column, when the results are broken down by year.
+    private static let yearWidth: CGFloat = 56
+    private var hasYears: Bool { rows.first?.period != nil }
+    private var identityWidth: CGFloat { Self.baseIdentityWidth + (hasYears ? Self.yearWidth : 0) }
     private static let rowHeight = AppArtworkSizing.thumbnail + 8
     private static let headerHeight: CGFloat = 30
 
     private var contentWidth: CGFloat {
-        Self.identityWidth + columns.reduce(0) { $0 + Self.width(of: $1) }
+        identityWidth + columns.reduce(0) { $0 + Self.width(of: $1) }
     }
 
     /// The spec's width, widened when needed so a header never truncates its title.
@@ -55,7 +59,7 @@ struct QueryResultsTable: View {
             HStack(spacing: 0) {
                 Text(identityTitle)
                     .padding(.horizontal, 12)
-                    .frame(width: Self.identityWidth, height: Self.headerHeight, alignment: .leading)
+                    .frame(width: identityWidth, height: Self.headerHeight, alignment: .leading)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .overlay(alignment: .trailing) { Divider() }
                     .stickyLeading()
@@ -90,7 +94,7 @@ struct QueryResultsTable: View {
         } label: {
             HStack(spacing: 0) {
                 identityCell(row)
-                    .frame(width: Self.identityWidth, height: Self.rowHeight, alignment: .leading)
+                    .frame(width: identityWidth, height: Self.rowHeight, alignment: .leading)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .overlay(alignment: .trailing) { Divider() }
                     .stickyLeading()
@@ -112,6 +116,13 @@ struct QueryResultsTable: View {
 
     private func identityCell(_ row: QueryDisplayRow) -> some View {
         HStack(spacing: 10) {
+            if let period = row.period {
+                Text(String(period))
+                    .font(AppTypography.tableRank)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: Self.yearWidth - 14, alignment: .leading)
+            }
             EntityThumbnail(url: row.imageURL, entity: entityKind(row.entity.target))
                 .frame(width: AppArtworkSizing.thumbnail, height: AppArtworkSizing.thumbnail)
             VStack(alignment: .leading, spacing: 1) {

@@ -92,7 +92,7 @@ struct ImportStatusStrips: View {
 
     private func showDone() {
         let context = container.mainContext
-        let count = (try? context.fetchCount(FetchDescriptor<Scrobble>())) ?? 0
+        guard let count = try? context.checkedCount(FetchDescriptor<Scrobble>()) else { return }
         var oldest = FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])
         oldest.fetchLimit = 1
         let year = (try? context.fetch(oldest).first?.playedAt).map { Calendar.current.component(.year, from: $0) }

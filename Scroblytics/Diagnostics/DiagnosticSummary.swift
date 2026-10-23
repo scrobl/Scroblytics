@@ -17,6 +17,11 @@ struct DiagnosticSummary: Sendable {
         var appMemoryPeakMB: Int?
         var scrobbles = 0
         var artists = 0
+        /// Plain words (with error codes, no data) when the database could not be counted; the counts above are then not real.
+        var storeProblem: String?
+        /// Free space on the disk holding the database, and the size of the database files (MB): a full disk is the first suspect when saving fails.
+        var freeDiskMB: Int?
+        var databaseMB: Int?
         var accountConnected = false
         /// The macOS status when the Keychain wouldn't give up the saved account (so "not connected" would be untrue).
         var keychainProblem: OSStatus?
@@ -54,7 +59,13 @@ struct DiagnosticSummary: Sendable {
         } else {
             lines.append("  Last.fm account: \(i.accountConnected ? "connected" : "not connected")")
         }
-        lines.append("  Imported: \(i.scrobbles) scrobbles, \(i.artists) artists")
+        if let problem = i.storeProblem {
+            lines.append("  Imported: unknown (the database could not be read: \(clean(problem)))")
+        } else {
+            lines.append("  Imported: \(i.scrobbles) scrobbles, \(i.artists) artists")
+        }
+        if let size = i.databaseMB { lines.append("  Database size: \(size) MB" + (i.freeDiskMB.map { ", free space on that disk: \($0) MB" } ?? "")) }
+        else if let free = i.freeDiskMB { lines.append("  Free space on the disk: \(free) MB") }
         if let last = i.lastSyncedAt {
             lines.append("  Last completed sync: \(ISO8601DateFormatter().string(from: last))")
         } else {
@@ -110,8 +121,13 @@ struct DiagnosticSummary: Sendable {
         i.memoryGB = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
         (i.appMemoryMB, i.appMemoryPeakMB) = Self.appMemory()
         let context = container.mainContext
-        i.scrobbles = (try? context.fetchCount(FetchDescriptor<Scrobble>())) ?? 0
-        i.artists = (try? context.fetchCount(FetchDescriptor<Artist>())) ?? 0
+        do {
+            i.scrobbles = try context.checkedCount(FetchDescriptor<Scrobble>())
+            i.artists = try context.checkedCount(FetchDescriptor<Artist>())
+        } catch {
+            i.storeProblem = StoreProblem.describe(error) ?? "The database could not be read."
+        }
+        (i.freeDiskMB, i.databaseMB) = Self.diskFacts(container: container)
         if let state = try? context.fetch(FetchDescriptor<SyncState>()).first {
             i.lastSyncedAt = state.lastSyncedAt
             i.resumePage = state.backfillNextPage
@@ -133,6 +149,21 @@ struct DiagnosticSummary: Sendable {
             if let value = credentials.sessionKey { secrets.append(.init(value: value, label: "key")) }
         }
         return (render(i, secrets: secrets, now: now), i)
+    }
+
+    /// Free space on the volume holding the database and the combined size of its files (the store plus its -wal and -shm files), in MB.
+    /// Sizes only: no path leaves this function.
+    static func diskFacts(container: ModelContainer) -> (freeMB: Int?, databaseMB: Int?) {
+        guard let url = container.configurations.first?.url else { return (nil, nil) }
+        let free = (try? url.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage
+        var bytes: Int64 = 0
+        var found = false
+        for suffix in ["", "-wal", "-shm"] {
+            let file = URL(fileURLWithPath: url.path + suffix)
+            if let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize { bytes += Int64(size); found = true }
+        }
+        return (free.map { Int($0 / 1_048_576) }, found ? Int(bytes / 1_048_576) : nil)
     }
 
     /// The app's own memory footprint now and at its peak, in MB (what Activity Monitor's Memory column is based on).

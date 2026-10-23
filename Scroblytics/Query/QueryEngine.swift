@@ -4,6 +4,8 @@ struct QueryRow: Identifiable, Sendable {
     let entity: QueryEntity
     /// Column values, keyed by `ResolvedField.cacheKey`.
     let cells: [String: QueryCell]
+    /// The calendar year this row is for, when the query is broken down by year (the same entity then appears once per year).
+    var period: Int? = nil
     var id: QueryEntityID { entity.id }
 }
 
@@ -39,6 +41,7 @@ struct QueryResult: Sendable {
 /// `evaluate`; none re-implement matching.
 enum QueryEngine {
     static func evaluate(_ query: ValidatedQuery, run: QueryRun) -> QueryResult {
+        if query.spec.breakdown != nil { return evaluateByYear(query, run: run) }
         let universe = run.evaluationEntities
         var matched = universe
         var cellsByField: [String: [QueryEntityID: QueryCell]] = [:]
@@ -68,7 +71,9 @@ enum QueryEngine {
 
         let ordered = sorted(matched, by: query.sorts, run: run)
         let capped = applyGroupLimit(query.spec.groupLimit, releaseYear: query.releaseYearField, to: ordered, run: run)
-        let limited = query.spec.limit.map { Array(capped.prefix($0)) } ?? capped
+        let picked = query.spec.limit.map { Array(capped.prefix($0)) } ?? capped
+        // The sorts and caps chose these; the result order may be a different one (by release year, say). Ties keep the order they were picked in.
+        let limited = sorted(picked, by: query.effectiveResultSorts, run: run)
 
         var columnCells: [String: [QueryEntityID: QueryCell]] = [:]
         for column in query.columns {
@@ -91,6 +96,46 @@ enum QueryEngine {
         return QueryResult(
             rows: rows, columns: query.columns, matchedCount: matched.count, universeCount: universe.count,
             pending: report.summary, pendingEntities: report.entities, entityInfo: info
+        )
+    }
+
+    // MARK: - Break down by calendar year
+
+    /// The query run separately over each calendar year of the plays it counts: each year's own plays decide its plays, its sorts and its caps,
+    /// and `limit` keeps that many per year. Fields that look at all of history (first played, turnover…) still do, via the all-time plays.
+    private static func evaluateByYear(_ query: ValidatedQuery, run: QueryRun) -> QueryResult {
+        var spec = query.spec
+        spec.breakdown = nil
+        let single = ValidatedQuery(
+            spec: spec, groups: query.groups, sorts: query.sorts, resultSorts: query.resultSorts, columns: query.columns, releaseYearField: query.releaseYearField
+        )
+        let calendar = run.calendar
+        let byYear = Dictionary(grouping: run.scrobbles) { calendar.component(.year, from: $0.playedAt) }
+        let years = byYear.keys.sorted(by: query.spec.breakdown?.showsNewestFirst == true ? (>) : (<))
+
+        var rows: [QueryRow] = []
+        var info: [QueryEntityID: QueryResult.EntityInfo] = [:]
+        var matched = 0
+        var pending: [String: (field: String, count: Int, resolver: QueryResolverKind?)] = [:]
+        var pendingEntities: [QueryResolverKind: Set<QueryEntityID>] = [:]
+        for year in years {
+            let yearRun = QueryRun(
+                target: run.target, asOf: run.asOf, calendar: calendar, scrobbles: byYear[year] ?? [], allTimeScrobbles: run.allTimeScrobbles,
+                snapshots: run.snapshots, entityScope: run.entityScope
+            )
+            let result = evaluate(single, run: yearRun)
+            matched += result.matchedCount
+            rows += result.rows.map { QueryRow(entity: $0.entity, cells: $0.cells, period: year) }
+            for (id, value) in result.entityInfo where info[id] == nil { info[id] = value }
+            for item in result.pending {
+                let key = item.field + "|" + (item.resolver.map { "\($0)" } ?? "")
+                pending[key] = (item.field, (pending[key]?.count ?? 0) + item.count, item.resolver)
+            }
+            for (kind, ids) in result.pendingEntities { pendingEntities[kind, default: []].formUnion(ids) }
+        }
+        return QueryResult(
+            rows: rows, columns: query.columns, matchedCount: matched, universeCount: run.evaluationEntities.count,
+            pending: pending.values.sorted { $0.field < $1.field }, pendingEntities: pendingEntities, entityInfo: info
         )
     }
 

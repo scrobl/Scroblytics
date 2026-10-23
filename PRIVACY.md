@@ -22,7 +22,10 @@ comfortable with that. The same information is available inside the app under **
   The app changes Music only when you ask it to: *Create Apple Music Playlist* (which creates a playlist, or adds tracks to one
   you pick, from tracks already in your library) and the Loved Status Audit's *Remove from Favorites…* (after you confirm).
 - **Shared images and text.** The Share button makes an image or text on your Mac. It contains your name only if you turn that
-  on, nothing is sent anywhere by the app, and what you copy, save or send from the Share menu is your choice.
+  on, and your Last.fm profile picture only if you also turn that on. Nothing is sent anywhere by the app, and what you copy,
+  save or send from the Share menu is your choice. If you turn the picture on, the app asks Last.fm for its address (an ordinary
+  request with your username and API key, like a sync) and downloads it from Last.fm's image server, then keeps it in the
+  Scroblytics folder on your Mac and refreshes it about once a week.
 - **Backups and exports** you create are files you choose the location of. They contain your listening history and are not
   encrypted, so store them as carefully as you would any personal file. They never contain your keys.
 
@@ -38,7 +41,7 @@ The app only contacts these services, and only the ones for features you use. Tu
 | **Deezer** (no sign-in) | Track lengths, tempos and release dates as a fallback, artwork, popularity | Artist, album and track names as search text |
 | **GetSongBPM** | Tempo, time signature and musical key | Artist and track names as search text, with a GetSongBPM key |
 | **MusicBrainz** | Album release dates | Artist and album names. As MusicBrainz asks, requests identify the app and a project contact address. |
-| **Image servers** (Last.fm, Deezer) | Downloading artwork | An ordinary image request (your IP address is visible to the server, as with any download) |
+| **Image servers** (Last.fm, Deezer) | Downloading artwork, and your Last.fm profile picture if you turn it on for shared cards | An ordinary image request (your IP address is visible to the server, as with any download) |
 | **Apple's public catalogue** (`itunes.apple.com`) | *View in Apple Music*, only when you choose it | Artist, album or track name as search text |
 | **GitHub** (no sign-in) | Once a day, checking whether a newer version of Scroblytics has been released. You can turn this off in Settings. | An ordinary web request: your IP address and the app's name and version (for example "Scroblytics/0.9.0"). Nothing about you or your library. The app never downloads or installs anything by itself. |
 | **The Ask provider you choose** (optional) | Turning a sentence into a query | See below |

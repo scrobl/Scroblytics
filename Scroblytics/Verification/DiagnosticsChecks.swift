@@ -165,6 +165,83 @@ enum DiagnosticsChecks {
             }
             check("no log call interpolates an artist, album, track, tag, query, title or account name (\(scanned) calls read)", scanned > 5 && offenders.isEmpty, offenders.joined(separator: "; "))
 
+            // MARK: An unreadable database
+            func sqliteError(_ code: Int, cocoa: Int = 256) -> NSError {
+                NSError(domain: NSCocoaErrorDomain, code: cocoa, userInfo: [NSUnderlyingErrorKey: NSError(domain: "NSSQLiteErrorDomain", code: code)])
+            }
+            let full = StoreProblem.classify(sqliteError(13))
+            check("SQLite 'disk full' is reported as a full disk with its codes", full?.kind == .diskFull && full?.codes == "NSCocoaErrorDomain 256, SQLite 13", "\(String(describing: full))")
+            check("an extended SQLite code (disk I/O error, 4874) is still an I/O error", StoreProblem.classify(sqliteError(4874))?.kind == .ioError)
+            check("database locked and busy are 'locked'", StoreProblem.classify(sqliteError(5))?.kind == .locked && StoreProblem.classify(sqliteError(6))?.kind == .locked)
+            check("a malformed database is 'corrupt'", StoreProblem.classify(sqliteError(11))?.kind == .corrupt)
+            check("a missing file is 'missing'", StoreProblem.classify(NSError(domain: NSCocoaErrorDomain, code: 260))?.kind == .missing)
+            check("a plain store-open failure with no SQLite code is 'unreadable'", StoreProblem.classify(NSError(domain: NSCocoaErrorDomain, code: 256))?.kind == .unreadable)
+            check("errors that are not about the database are not classified", StoreProblem.classify(URLError(.notConnectedToInternet)) == nil && StoreProblem.classify(LastfmAPIError.http(500)) == nil && StoreProblem.describe(CancellationError()) == nil)
+            let described = describeSyncError(sqliteError(13))
+            check("the sync error text for a full disk says so in plain words and keeps the codes", described.contains("disk is full") && described.contains("SQLite 13"), described)
+            check("…and contains no path or name", !described.contains("/") && !described.contains(NSUserName()))
+            check("Last.fm errors keep their own wording", describeSyncError(LastfmAPIError.api(code: 10, message: "x")).contains("doesn’t recognise this API key"))
+            check("the 'couldn't count' answer is an error with plain words", StoreProblem.describe(StoreUnreadableError()) != nil)
+            check("a real count is never the 'not found' value", ((try? container.mainContext.checkedCount(FetchDescriptor<Scrobble>())) ?? NSNotFound) != NSNotFound)
+            var broken = inputs
+            broken.storeProblem = "Your disk is full, so Scroblytics can’t save. (SQLite 13)"
+            broken.scrobbles = 0; broken.freeDiskMB = 12; broken.databaseMB = 840
+            let brokenText = DiagnosticSummary.render(broken, secrets: secrets)
+            check("the summary says the database could not be read instead of giving a count", brokenText.contains("Imported: unknown") && brokenText.contains("SQLite 13") && !brokenText.contains("0 scrobbles"))
+            check("the summary shows the database size and the free space", brokenText.contains("Database size: 840 MB, free space on that disk: 12 MB"))
+            check("a healthy summary has no 'unknown' count", !text.contains("Imported: unknown"))
+            let facts = DiagnosticSummary.diskFacts(container: container)
+            check("the free space and database size can be read for this store", (facts.freeMB ?? 0) > 0, "\(facts)")
+
+            // MARK: Personal tag sync survives one artist Last.fm can't answer for
+            let tagStub = URLSessionConfiguration.ephemeral
+            tagStub.protocolClasses = [FirstRunChecks.StubTransport.self]
+            let tagSession = URLSession(configuration: tagStub)
+            func method(_ request: URLRequest) -> String? {
+                request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?.queryItems?.first { $0.name == "method" }?.value
+            }
+            func artistName(_ request: URLRequest) -> String? {
+                request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?.queryItems?.first { $0.name == "artist" }?.value
+            }
+            let artists = (1...6).map { "Artist \($0)" }
+            func tagAnswer(failing: Set<String>, status: Int = 200, body: String = #"{"error": 6, "message": "Artist not found"}"#) -> (URLRequest) -> (status: Int, body: String)? {
+                { request in
+                    switch method(request) {
+                    case "user.getTopTags": return (200, #"{"toptags": {"tag": [{"name": "calm", "count": "9"}]}}"#)
+                    case "user.getPersonalTags":
+                        let kind = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "taggingtype" }?.value
+                        guard kind == "artist" else { return (200, #"{"taggings": ""}"#) }
+                        let list = artists.map { #"{"name": "\#($0)"}"# }.joined(separator: ",")
+                        return (200, #"{"taggings": {"artists": {"artist": [\#(list)]}, "@attr": {"totalPages": "1"}}}"#)
+                    case "artist.getTags":
+                        if let name = artistName(request), failing.contains(name) { return (status == 200 ? 404 : status, body) }
+                        return (200, #"{"tags": {"tag": [{"name": "calm"}]}}"#)
+                    default: return (200, "{}")
+                    }
+                }
+            }
+            let tagClient = LastfmAPIClient(apiKey: key32, username: "listener42", session: tagSession)
+            let tagContext = container.mainContext
+            FirstRunChecks.StubTransport.requests = 0
+            FirstRunChecks.StubTransport.responder = tagAnswer(failing: ["Artist 3"])
+            var tagFailure: Error?
+            do { try await EntityTagsEngine.syncPersonalTags(client: tagClient, context: tagContext) } catch { tagFailure = error }
+            check("one artist Last.fm can't answer for no longer aborts the personal tag sync", tagFailure == nil, tagFailure.map { describeSyncError($0) } ?? "")
+            let cached = ((try? tagContext.fetch(FetchDescriptor<UserEntityTagCacheEntry>())) ?? []).count
+            check("…and the other five artists' tags are kept", cached == 5, "\(cached)")
+            FirstRunChecks.StubTransport.responder = tagAnswer(failing: Set(artists))
+            var allFailed: Error?
+            do { try await EntityTagsEngine.syncPersonalTags(client: tagClient, context: tagContext) } catch { allFailed = error }
+            check("when most artists fail it is still a failure (so a broken connection is not cached as 'no tags')", allFailed != nil)
+            check("…and the cache from the earlier good run is untouched", ((try? tagContext.fetch(FetchDescriptor<UserEntityTagCacheEntry>())) ?? []).count == 5)
+            FirstRunChecks.StubTransport.responder = tagAnswer(failing: ["Artist 2"], status: 403, body: #"{"error": 10, "message": "Invalid API key"}"#)
+            var badKey: Error?
+            do { try await EntityTagsEngine.syncPersonalTags(client: tagClient, context: tagContext) } catch { badKey = error }
+            check("an invalid key stops the tag sync at once instead of skipping", badKey != nil)
+            for row in (try? tagContext.fetch(FetchDescriptor<UserEntityTagCacheEntry>())) ?? [] { tagContext.delete(row) }
+            for row in (try? tagContext.fetch(FetchDescriptor<PersonalTagSyncState>())) ?? [] { tagContext.delete(row) }
+            try? tagContext.save()
+
             // MARK: This Mac's real reports folder (read-only)
             let onDisk = CrashReports.find(limit: 50)
             check("the real reports folder lists in date order", zip(onDisk, onDisk.dropFirst()).allSatisfy { $0.date >= $1.date })

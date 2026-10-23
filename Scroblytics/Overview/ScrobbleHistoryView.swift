@@ -30,7 +30,7 @@ private struct ScrobbleHistoryPage: Sendable {
 @ModelActor
 private actor ScrobbleHistoryReader {
     func count() throws -> Int {
-        try modelContext.fetchCount(FetchDescriptor<Scrobble>())
+        try modelContext.checkedCount(FetchDescriptor<Scrobble>())
     }
 
     func page(

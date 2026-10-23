@@ -530,10 +530,65 @@ struct QueryView: View {
                 .menuStyle(.borderlessButton).fixedSize().font(AppTypography.metadata)
                 .help("Order the results by a field, or shuffle them. Later sorts break ties in earlier ones.")
             Text("Rows with no value always sort last.").font(AppTypography.supportingDense).foregroundStyle(.tertiary)
+            resultOrderRow
             }
             .padding(.top, 6)
         }
         .font(AppTypography.sectionTitle)
+    }
+
+    // Show results by
+
+    private var hasYearCap: Bool { model.spec.groupLimit?.perReleaseYear != nil }
+
+    /// What the results are shown by once the sorts and caps have picked them.
+    private var resultOrderTitle: String {
+        if let sorts = model.spec.resultSorts, let first = sorts.first {
+            switch first.key {
+            case .shuffle: return "Random"
+            case .field(let ref):
+                let title = (try? model.registry.resolve(ref, target: model.spec.target).title) ?? ref.id
+                return "\(title) \(first.direction == .ascending ? "↑" : "↓")"
+            }
+        }
+        if model.spec.showInRankOrder == true { return "The sort order" }
+        return hasYearCap ? "Release year ↑ (automatic)" : "The sort order (automatic)"
+    }
+
+    private var resultOrderRow: some View {
+        HStack(spacing: 8) {
+            Text("Show results by").font(AppTypography.metadata).foregroundStyle(.secondary)
+            Menu {
+                Button("Automatic") { model.spec.resultSorts = nil; model.spec.showInRankOrder = nil }
+                    .help("The order the sorts give, except that a per-release-year cap shows its results by release year, oldest first.")
+                Button("The sort order") { model.spec.resultSorts = nil; model.spec.showInRankOrder = true }
+                    .help("Show the results in the order the sorts above ranked them, even with a per-release-year cap.")
+                Divider()
+                ForEach(QueryFieldGroup.allCases, id: \.self) { group in
+                    let fields = model.registry.fields(for: model.spec.target, in: group).filter { $0.type != .tags }
+                    if !fields.isEmpty {
+                        Section(group.title) {
+                            ForEach(fields, id: \.id) { field in
+                                Button(field.name) {
+                                    model.spec.showInRankOrder = nil
+                                    model.spec.resultSorts = [QuerySort(key: .field(QueryFieldRef.starting(field)), direction: field.id == "releaseYear" || field.type == .text ? .ascending : .descending)]
+                                }
+                                .help(field.help)
+                            }
+                        }
+                    }
+                }
+            } label: { Text(resultOrderTitle) }
+                .menuStyle(.borderlessButton).fixedSize().font(AppTypography.metadata)
+                .help("The order the results appear in. The sorts above decide which results are kept (for example, the most played album of each release year); this only puts the kept ones in order.")
+            if let first = model.spec.resultSorts?.first, case .field = first.key {
+                Button {
+                    model.spec.resultSorts?[0].direction = first.direction == .ascending ? .descending : .ascending
+                } label: { Image(systemName: first.direction == .ascending ? "arrow.up" : "arrow.down") }
+                    .buttonStyle(.borderless)
+                    .help(first.direction == .ascending ? "Ascending" : "Descending")
+            }
+        }
     }
 
     private func moveSort(from source: Int, to destination: Int) {
@@ -553,7 +608,7 @@ struct QueryView: View {
     // Scope
 
     private var scopeSettingCount: Int {
-        [model.spec.limit != nil, model.spec.period != nil, model.spec.playFilter != nil, model.spec.asOf != nil,
+        [model.spec.limit != nil, model.spec.breakdown != nil, model.spec.period != nil, model.spec.playFilter != nil, model.spec.asOf != nil,
          model.spec.groupLimit?.perArtist != nil, model.spec.groupLimit?.perAlbum != nil,
          model.spec.groupLimit?.perReleaseYear != nil]
             .count(where: { $0 })
@@ -609,10 +664,26 @@ struct QueryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Limit results", isOn: Binding(get: { model.spec.limit != nil }, set: { model.spec.limit = $0 ? 100 : nil }))
                     .help("Keep only the first N rows after sorting — “top 25”, or one random song with a shuffle.")
+                Toggle("Break down by calendar year", isOn: Binding(
+                    get: { model.spec.breakdown != nil },
+                    set: { on in
+                        model.spec.breakdown = on ? QueryBreakdown() : nil
+                        // "Top N per year" needs a small N: a limit of 100 per year (or none) would list every year in full.
+                        if on, (model.spec.limit ?? 100) >= 100 { model.spec.limit = 1 }
+                    }
+                ))
+                .help("Run the query separately over each year of your listening and keep the limit below for each one — “my top 3 artists of every year”. Each row shows its year and that year’s plays.")
+                if let breakdown = model.spec.breakdown {
+                    Toggle("Newest year first", isOn: Binding(
+                        get: { breakdown.showsNewestFirst },
+                        set: { model.spec.breakdown?.newestFirst = $0 ? true : nil }
+                    ))
+                    .font(AppTypography.metadata)
+                }
                 if model.spec.limit != nil {
                     Stepper(onIncrement: incrementResultLimit, onDecrement: decrementResultLimit) {
                         HStack {
-                            Text("Top")
+                            Text(model.spec.breakdown != nil ? "Top (per year)" : "Top")
                             NumberEntryField(title: "Result limit", value: intBinding(resultLimit))
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 80)
@@ -864,7 +935,7 @@ struct QueryView: View {
                 } else if let result = model.result {
                     QueryResultsTable(
                         rows: model.displayRows, columns: result.columns,
-                        identityTitle: model.spec.target.rawValue.capitalized,
+                        identityTitle: (model.spec.breakdown != nil ? "Year · " : "") + model.spec.target.rawValue.capitalized,
                         onMoveColumn: { model.moveColumn($0, before: $1) },
                         onOpen: openEntity
                     )
@@ -877,7 +948,15 @@ struct QueryView: View {
 
     private var resultsHeader: some View {
         HStack(spacing: 10) {
-            if let result = model.result, model.validationError == nil {
+            if let result = model.result, model.validationError == nil, model.spec.breakdown != nil {
+                // Each year is its own list, so "N of M match" would add them up across years; say what is shown instead.
+                let years = Set(result.rows.compactMap(\.period)).count
+                Text("\(result.rows.count.formatted()) \(model.spec.target.rawValue)s across \(years.formatted()) year\(years == 1 ? "" : "s")")
+                    .font(AppTypography.contentTitle)
+                if let limit = model.spec.limit {
+                    Text("· top \(limit.formatted()) of each year").foregroundStyle(.secondary)
+                }
+            } else if let result = model.result, model.validationError == nil {
                 Text("\(result.matchedCount.formatted()) of \(result.universeCount.formatted()) \(model.spec.target.rawValue)s match")
                     .font(AppTypography.contentTitle)
                 if let limit = model.spec.limit, result.matchedCount > limit {
@@ -974,7 +1053,7 @@ struct QueryView: View {
             return AppleMusicPlaylistTrack(
                 artist: row.entity.artist,
                 track: row.entity.name,
-                album: result.entityInfo[row.id]?.album ?? ""
+                album: result.entityInfo[row.entityID]?.album ?? ""
             )
         }
     }
@@ -986,7 +1065,7 @@ struct QueryView: View {
             return (
                 artist: row.entity.artist,
                 track: row.entity.name,
-                album: result.entityInfo[row.id]?.album
+                album: result.entityInfo[row.entityID]?.album
             )
         }
     }
@@ -1014,7 +1093,7 @@ struct QueryView: View {
             navigation.goToTrack(TrackIdentity(
                 artist: entity.artist,
                 name: entity.name,
-                album: model.result?.entityInfo[row.id]?.album,
+                album: model.result?.entityInfo[row.entityID]?.album,
                 imageURL: row.imageURL
             ))
         }

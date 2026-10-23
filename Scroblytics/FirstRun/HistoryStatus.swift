@@ -64,6 +64,8 @@ final class HistoryStatus {
     }
 
     private(set) var scrobbleCount = 0
+    /// Plain words when the database couldn't be counted (disk full, locked, damaged…); the count above then keeps its last good value.
+    private(set) var storeProblem: String?
     private(set) var hasAccount = false
     /// Set when the Keychain wouldn't give up the saved account (locked, access refused): the macOS status. Not the same as having
     /// no account.
@@ -121,7 +123,16 @@ final class HistoryStatus {
     /// Reads the facts from the store and the Keychain. A count and one row.
     func refresh() {
         let context = container.mainContext
-        scrobbleCount = (try? context.fetchCount(FetchDescriptor<Scrobble>())) ?? 0
+        // An unreadable database must never turn into a count: keep the last good number and note the problem for the log.
+        do {
+            scrobbleCount = try context.checkedCount(FetchDescriptor<Scrobble>())
+            if storeProblem != nil { ActivityLog.record(.sync, "The database can be read again") }
+            storeProblem = nil
+        } catch {
+            let message = StoreProblem.describe(error) ?? "Couldn't count scrobbles"
+            if storeProblem != message { ActivityLog.record(.sync, "Couldn't read the database: \(message)") }
+            storeProblem = message
+        }
         let before = credentialsProblem
         switch LastfmCredentialsStore.read() {
         case .connected: hasAccount = true; credentialsProblem = nil

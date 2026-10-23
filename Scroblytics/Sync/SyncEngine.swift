@@ -139,7 +139,7 @@ actor SyncEngine {
         let nowUts = Int(runStartedAt.timeIntervalSince1970)
 
         let state = try fetchOrCreateSyncState(username: credentials.username)
-        let existingCount = try modelContext.fetchCount(FetchDescriptor<Scrobble>())
+        let existingCount = try modelContext.checkedCount(FetchDescriptor<Scrobble>())
         let remotePlaycount = try await client.fetchUserPlaycount()
         let expectedNew = max(0, remotePlaycount - existingCount)
         let initialMode: SyncProgress.Mode
@@ -231,7 +231,7 @@ actor SyncEngine {
         if let previousTotal {
             shouldEscalate = added < (remotePlaycount - previousTotal) || remotePlaycount < previousTotal
         } else {
-            let currentCount = try modelContext.fetchCount(FetchDescriptor<Scrobble>())
+            let currentCount = try modelContext.checkedCount(FetchDescriptor<Scrobble>())
             shouldEscalate = currentCount < remotePlaycount
         }
 

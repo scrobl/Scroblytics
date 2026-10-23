@@ -74,6 +74,15 @@ struct AskModelEngine: AskEngine {
             interpretation.spec.columns = AskInterpreter.columns(for: interpretation.spec, target: target, registry: registry)
             resolvedTerms.append(AskResolvedTerm(phrase: "by \(artist)", meaning: "the artist is \(artist)"))
         }
+        if let request {
+            AskPatterns.applyBreakdown(to: &interpretation.spec, request: request)
+            AskPatterns.applyYearOrder(to: &interpretation.spec, request: request)
+            // A note that only restates the breakdown ("per year isn't supported") is removed: the app does it.
+            if interpretation.spec.breakdown != nil {
+                interpretation.unsupported = interpretation.unsupported.filter { !AskPatterns.restatesBreakdown($0) }
+                interpretation.spec.columns = AskInterpreter.columns(for: interpretation.spec, target: target, registry: registry)
+            }
+        }
         return AskTranslation(
             target: target, interpretation: interpretation, raw: String(data: reply.json, encoding: .utf8) ?? "", intro: "",
             engine: engine, resolvedTerms: resolvedTerms,

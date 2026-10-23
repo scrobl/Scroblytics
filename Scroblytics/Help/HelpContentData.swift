@@ -11,6 +11,7 @@ extension HelpContent {
                 .table(headers: ["What", "Where"], rows: [
                     ["Your history and everything the app computes or caches (scrobbles, loved tracks, tags, popularity, durations, tempos, release dates, your edits, saved queries)", "`~/Library/Application Support/default.store` (with its `-shm` and `-wal` companion files)"],
                     ["Your own images and downloaded artwork", "`~/Library/Application Support/Scroblytics/CustomImages` and `…/CachedImages`"],
+                    ["Your Last.fm profile picture, only if you turned on **Include my profile picture** for shared cards", "`~/Library/Application Support/Scroblytics/ProfilePicture`"],
                     ["A small log of what the app did, for [Report a Problem](help://report-a-problem) (no music, account name or keys; the newest few hundred lines)", "`~/Library/Application Support/Scroblytics/activity.log`"],
                     ["Preferences and screen settings (date range, Ask engine choice and model names, and so on)", "The app’s preferences file"],
                     ["Last.fm credentials, Ask API keys and the GetSongBPM key", "The macOS Keychain, never in the database"],

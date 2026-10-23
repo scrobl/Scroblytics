@@ -36,7 +36,19 @@ enum AskChips {
                 chips.append(AskChip(kind: .sort, text: "Sorted by \(title) \(sort.direction == .descending ? "↓" : "↑")"))
             }
         }
-        if let limit = spec.limit { chips.append(AskChip(kind: .limit, text: "Top \(limit.formatted())")) }
+        if spec.breakdown != nil { chips.append(AskChip(kind: .limit, text: "For each calendar year" + (spec.breakdown?.showsNewestFirst == true ? " (newest first)" : ""))) }
+        if let limit = spec.limit { chips.append(AskChip(kind: .limit, text: "Top \(limit.formatted())" + (spec.breakdown != nil ? " per year" : ""))) }
+        // How the picked results are shown, when it differs from the sort order above.
+        if let order = spec.resultSorts?.first {
+            switch order.key {
+            case .shuffle: chips.append(AskChip(kind: .sort, text: "Shown in random order"))
+            case .field(let ref):
+                let title = (try? registry.resolve(ref, target: spec.target).title) ?? ref.id
+                chips.append(AskChip(kind: .sort, text: "Shown by \(title) \(order.direction == .descending ? "↓" : "↑")"))
+            }
+        } else if spec.groupLimit?.perReleaseYear != nil, spec.showInRankOrder != true {
+            chips.append(AskChip(kind: .sort, text: "Shown by release year ↑"))
+        }
         if let perArtist = spec.groupLimit?.perArtist { chips.append(AskChip(kind: .limit, text: "≤\(perArtist) per artist")) }
         if let perAlbum = spec.groupLimit?.perAlbum { chips.append(AskChip(kind: .limit, text: "≤\(perAlbum) per album")) }
         if let perYear = spec.groupLimit?.perReleaseYear { chips.append(AskChip(kind: .limit, text: "≤\(perYear) per release year")) }

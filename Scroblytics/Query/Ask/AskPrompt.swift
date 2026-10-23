@@ -35,7 +35,7 @@ enum AskPrompt {
         each album", "one track per album" → perAlbum 1 (each / every / one per means 1). "one album from each release year", \
         "top album by release year" (a singular "top / best / most played" thing, then "by release year") → perReleaseYear 1. A cap is fully supported, so NEVER put it in "unsupported". With "top" or "most played", also sort by plays \
         descending, and leave "limit" null unless the request also asks for a total ("top 10 songs, 1 per artist" → limit 10, perArtist 1). \
-        All three caps are null when the request names none. "each year" about when something was played is a period, not a cap.
+        All three caps are null when the request names none. "each year" about when something was played is NOT a cap and NOT unsupported: the app runs the query once per calendar year, so just set "limit" to how many per year the request asks for ("my top 3 artists of each year" → limit 3, "my most played album every year" → limit 1) and sort by plays descending.
         - Say each thing once. Do not add conditions the request didn't ask for. Do not add a "plays greater than 0" condition.
         - A field that "can take a date scope" can be measured over a period instead of all time. scope kinds: allTime, upToNow, \
         trailing (the last N days), calendar (this day/week/month/quarter/year so far), absolute (from/to dates). shiftCount with \

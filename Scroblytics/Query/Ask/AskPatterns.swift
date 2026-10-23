@@ -263,9 +263,53 @@ enum AskPatterns {
             )
         }
 
+        applyBreakdown(to: &spec, request: request)
+        applyYearOrder(to: &spec, request: request)
         spec.columns = AskInterpreter.columns(for: spec, target: target, registry: registry)
         result.spec = spec
         return result
+    }
+
+    /// The direction a request puts a per-release-year result in: "newest first", "latest to earliest" (newest first) or "oldest first",
+    /// "chronologically" (oldest first). Nil when it says nothing, which leaves the automatic order (oldest first).
+    static func yearOrder(in request: String) -> QuerySortDirection? {
+        let text = request.lowercased()
+        if matches(text, #"\b(?:newest|latest|most recent|recent)\s+(?:year\s+)?first\b|\b(?:newest|latest|most recent)\s+to\s+(?:oldest|earliest)\b|\b(?:reverse chronological|descending)\b|\bby year,?\s+(?:newest|latest)\b"#) { return .descending }
+        if matches(text, #"\b(?:oldest|earliest)\s+(?:year\s+)?first\b|\b(?:oldest|earliest)\s+to\s+(?:newest|latest)\b|\bchronolog\w*\b|\bascending\b"#) { return .ascending }
+        return nil
+    }
+
+    /// "my top 3 artists of each year", "most played album every year", "top song per year": the best of each calendar year of listening.
+    /// "Each release year" is the other thing (the cap), and bare "by year" is as likely to mean sorted by year, so only the wordings that
+    /// say each/every/per year (or a top thing "by year") count.
+    static func breakdownByYear(in request: String) -> Bool {
+        let text = request.lowercased()
+        guard !matches(text, #"\b(?:release|released)\s+year\b|\byear\s+of\s+release\b"#) else { return false }
+        return matches(text, #"\b(?:each|every|per)\s+(?:calendar\s+)?year\b|\byear\s+by\s+year\b|\bfor\s+each\s+year\b|\byearly\b|\bannual(?:ly)?\b"#)
+            || matches(text, #"\b(?:top|best|most[- ]played|favou?rite)\s+(?:\d+\s+|\w+\s+)?(?:artist|album|track|song|tune)s?\s+(?:by|for|of|in)\s+(?:each\s+)?year\b"#)
+    }
+
+    /// An "unsupported" note that only restates "for each year".
+    static func restatesBreakdown(_ note: String) -> Bool {
+        matches(note.lowercased(), #"\b(?:each|every|per)\s+(?:calendar\s+)?year\b|\byear\s+by\s+year\b|\byearly\b|\bannual|\bby\s+year\b|\bgroup\w*\s+by\s+year\b"#)
+    }
+
+    /// A breakdown by calendar year stated in the request: the query runs once per year and the limit counts per year. With no number the
+    /// request means the one ("my top artist each year") when it says a singular top thing, else a handful.
+    static func applyBreakdown(to spec: inout QuerySpec, request: String) {
+        guard breakdownByYear(in: request) else { return }
+        spec.breakdown = QueryBreakdown(newestFirst: yearOrder(in: request) == .descending ? true : nil)
+        if spec.limit == nil {
+            let singular = matches(request.lowercased(), #"\b(?:my|the)?\s*(?:most[- ]played|top|favou?rite|best)\s+(?:song|track|album|artist|tune)\b(?!s)"#)
+            spec.limit = singular ? 1 : (read(request, knownTags: nil).count ?? 10)
+        }
+        if spec.sorts.isEmpty { spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)] }
+    }
+
+    /// With a per-release-year cap, a stated direction for the years becomes the display order (the sorts still pick the winners).
+    static func applyYearOrder(to spec: inout QuerySpec, request: String) {
+        guard spec.groupLimit?.perReleaseYear != nil, spec.breakdown == nil, let direction = yearOrder(in: request) else { return }
+        spec.resultSorts = [QuerySort(key: .field(QueryFieldRef("releaseYear")), direction: direction)]
     }
 
     /// Wording that asks for an order without the words "top" or "sorted": "longest", "newest", "most recent".

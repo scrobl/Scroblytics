@@ -145,6 +145,86 @@ enum ShareChecks {
             check("the four marks draw four different cards", logoCircle != nil && Set([logoCircle, logoWordmark, logoBadge, logoNone]).count == 4)
             check("the wordmark keeps its proportions", abs(LastfmMark.wordmarkAspect - 352.0 / 96.0) < 0.001 && (NSImage(named: "LastfmWordmark").map { abs($0.size.width / $0.size.height - LastfmMark.wordmarkAspect) < 0.01 } ?? false))
 
+            // MARK: The profile picture beside the name
+            func info(_ images: String) -> Data { Data(#"{"user": {"name": "someone", "playcount": "10", "image": \#(images)}}"#.utf8) }
+            let sized = ##"[{"#text": "https://img.example/s.png", "size": "small"}, {"#text": "https://img.example/xl.png", "size": "extralarge"}, {"#text": "https://img.example/l.png", "size": "large"}]"##
+            check("the biggest listed picture is the one used", LastfmAPIClient.avatarURL(inUserInfo: info(sized))?.absoluteString == "https://img.example/xl.png")
+            check("with only smaller sizes the biggest of those is used", LastfmAPIClient.avatarURL(inUserInfo: info(##"[{"#text": "https://img.example/m.png", "size": "medium"}, {"#text": "https://img.example/s.png", "size": "small"}]"##))?.absoluteString == "https://img.example/m.png")
+            check("an account with no picture (empty addresses) has none", LastfmAPIClient.avatarURL(inUserInfo: info(##"[{"#text": "", "size": "large"}, {"#text": "", "size": "extralarge"}]"##)) == nil)
+            check("a missing or oddly shaped image list gives none, not an error", LastfmAPIClient.avatarURL(inUserInfo: info("[]")) == nil && LastfmAPIClient.avatarURL(inUserInfo: info(#""none""#)) == nil && LastfmAPIClient.avatarURL(inUserInfo: Data(#"{"user": {"playcount": "3"}}"#.utf8)) == nil)
+            check("an address that isn't https is refused", LastfmAPIClient.avatarURL(inUserInfo: info(##"[{"#text": "http://img.example/xl.png", "size": "extralarge"}]"##)) == nil)
+
+            let avatarBase = FileManager.default.temporaryDirectory.appending(path: "scroblytics-avatar-check-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: avatarBase) }
+            func pictureData(_ color: NSColor) -> Data {
+                let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                color.setFill(); NSRect(x: 0, y: 0, width: 64, height: 64).fill()
+                NSGraphicsContext.restoreGraphicsState()
+                return rep.representation(using: .png, properties: [:])!
+            }
+            let redPicture = pictureData(.red)
+            final class Counter: @unchecked Sendable { var fetches = 0; var downloads = 0 }
+            let counter = Counter()
+            let address = URL(string: "https://img.example/xl.png")!
+            func loadAvatar(at now: Date, address: URL? = address, bytes: Data? = redPicture, failing: Bool = false) async -> Data? {
+                await ShareAvatar.load(username: "SomeOne", base: avatarBase, now: now, fetchURL: { counter.fetches += 1; if failing { throw URLError(.notConnectedToInternet) }; return address }, download: { _ in counter.downloads += 1; if failing { throw URLError(.notConnectedToInternet) }; return bytes ?? Data() })
+            }
+            let day0 = Date()
+            let first = await loadAvatar(at: day0)
+            check("the first load asks Last.fm and keeps the picture", first == redPicture && counter.fetches == 1 && counter.downloads == 1)
+            check("the saved file name does not contain the account name", !ShareAvatar.fileURL(username: "SomeOne", base: avatarBase).lastPathComponent.lowercased().contains("someone") && ShareAvatar.fileURL(username: "SomeOne", base: avatarBase) == ShareAvatar.fileURL(username: "someone", base: avatarBase))
+            let withinWeek = await loadAvatar(at: day0.addingTimeInterval(3 * 86_400))
+            check("within a week the saved picture is used with no request", withinWeek == redPicture && counter.fetches == 1 && counter.downloads == 1)
+            let blue = pictureData(.blue)
+            let week = await loadAvatar(at: day0.addingTimeInterval(8 * 86_400), bytes: blue)
+            check("after a week it is refreshed", week == blue && counter.fetches == 2)
+            let offlineLater = await loadAvatar(at: day0.addingTimeInterval(20 * 86_400), failing: true)
+            check("when the refresh fails (offline) the older saved picture is still used", offlineLater == blue)
+            let notAPicture = await loadAvatar(at: day0.addingTimeInterval(40 * 86_400), bytes: Data("<html>not a picture</html>".utf8))
+            check("an answer that isn't a picture is not saved over the good one", notAPicture == blue && ShareAvatar.cached(username: "someone", base: avatarBase, now: day0)?.data == blue)
+            let noPicture = await loadAvatar(at: day0.addingTimeInterval(60 * 86_400), address: nil)
+            check("an account with no picture keeps the saved one rather than blanking it", noPicture == blue)
+            let strangerBase = avatarBase.appending(path: "other")
+            let stranger = await ShareAvatar.load(username: "nobody", base: strangerBase, fetchURL: { throw URLError(.notConnectedToInternet) }, download: { _ in Data() })
+            check("with nothing saved and no network there is no picture", stranger == nil && ShareAvatar.cached(username: "nobody", base: strangerBase) == nil)
+
+            let avatarSuite = UserDefaults(suiteName: "share-avatar-\(UUID().uuidString)")!
+            check("the picture switch starts off", !ShareSettings.showsAvatar(defaults: avatarSuite))
+            let nameRow = SyncState(username: "SomeOne")
+            let avatarContainer = try! ModelContainer(for: Schema([SyncState.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            avatarContainer.mainContext.insert(nameRow)
+            try? avatarContainer.mainContext.save()
+            @MainActor func identityWith(name: Bool, picture: Bool) -> ShareIdentity {
+                avatarSuite.set(name, forKey: ShareSettings.showsNameKey); avatarSuite.set(picture, forKey: ShareSettings.showsAvatarKey)
+                return ShareSettings.identity(context: avatarContainer.mainContext, defaults: avatarSuite, base: avatarBase)
+            }
+            check("name and picture on: the identity carries the saved picture", identityWith(name: true, picture: true).avatar == blue)
+            check("the picture alone never shows (it goes with the name)", identityWith(name: false, picture: true).avatar == nil && identityWith(name: false, picture: true).name == nil)
+            check("name on, picture off: just the name", identityWith(name: true, picture: false).avatar == nil && identityWith(name: true, picture: false).name == "SomeOne")
+
+            var avatarOptions = ShareOptions(); avatarOptions.size = .square
+            let withoutPicture = ShareRenderer.png(card: card, options: avatarOptions, identity: ShareIdentity(name: "someone", showsFooter: false), images: [:])
+            let withPicture = ShareRenderer.png(card: card, options: avatarOptions, identity: ShareIdentity(name: "someone", showsFooter: false, avatar: redPicture), images: [:])
+            check("a card with the picture differs from one with just the name, at the same size",
+                  withoutPicture != nil && withPicture != nil && withoutPicture != withPicture
+                    && NSBitmapImageRep(data: withPicture!)?.pixelsWide == NSBitmapImageRep(data: withoutPicture!)?.pixelsWide
+                    && NSBitmapImageRep(data: withPicture!)?.pixelsHigh == NSBitmapImageRep(data: withoutPicture!)?.pixelsHigh)
+            let pictureOnly = ShareRenderer.png(card: card, options: avatarOptions, identity: ShareIdentity(name: nil, showsFooter: false, avatar: redPicture), images: [:])
+            check("a picture without a name draws nothing", pictureOnly == ShareRenderer.png(card: card, options: avatarOptions, identity: .anonymous, images: [:]))
+            check("the picture does not enter the text forms", ShareText.plain(card, options: options, identity: ShareIdentity(name: "someone", showsFooter: false, avatar: redPicture)) == ShareText.plain(card, options: options, identity: ShareIdentity(name: "someone", showsFooter: false)))
+            check("the picture is a circle: its corners are the card's, its middle is the picture",
+                  { () -> Bool in
+                      guard let data = withPicture, let rep = NSBitmapImageRep(data: data) else { return false }
+                      // The footer's picture sits at the bottom left; find red pixels there and none in the far corner.
+                      var red = 0
+                      for y in stride(from: rep.pixelsHigh - 160, to: rep.pixelsHigh, by: 2) { for x in stride(from: 0, to: 400, by: 2) {
+                          if let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), c.redComponent > 0.8, c.greenComponent < 0.25, c.blueComponent < 0.25 { red += 1 }
+                      } }
+                      return red > 20
+                  }())
+
             // A square card can't hold twenty rows readably: it shows at most fifteen, however many were asked for
             var twenty = ShareOptions(); twenty.rowCount = 20
             var squareTwenty = twenty; squareTwenty.size = .square
@@ -237,6 +317,17 @@ enum ShareChecks {
                 } else {
                     check("the plays field resolves for tracks", false)
                 }
+            }
+
+            // A query broken down by year: each row says its year, and the rows are not numbered 1…N across the years
+            if let column = try? QueryFieldRegistry.standard.resolve(QueryFieldRef("plays"), target: .artist) {
+                func yearRow(_ name: String, _ year: Int, _ plays: Double) -> QueryDisplayRow {
+                    QueryDisplayRow(row: QueryRow(entity: QueryEntity(id: QueryEntityID(target: .artist, artist: name, name: name)), cells: [column.cacheKey: .value(.number(plays))], period: year), imageURL: nil, subtitle: nil)
+                }
+                let yearly = ShareCards.queryResult(title: "my top artists of each year", target: .artist, measure: "", rows: [yearRow("Artist A", 2019, 5), yearRow("Artist B", 2019, 3), yearRow("Artist A", 2020, 9)], columns: [column], sortedColumn: 0)
+                check("rows of a yearly query say their year and are not numbered across years", yearly.rows.map(\.subtitle) == ["2019", "2019", "2020"] && !yearly.numbered, "\(yearly.rows.map(\.subtitle))")
+                check("…and the text keeps the year beside each name", ShareText.markdownTable(yearly, options: ShareOptions()).contains("| Artist A | 2020 | 9 |") && !ShareText.markdownTable(yearly, options: ShareOptions()).contains("| # |"), ShareText.markdownTable(yearly, options: ShareOptions()))
+                check("…and it renders", ShareRenderer.png(card: yearly, options: ShareOptions(), identity: .anonymous, images: [:]) != nil)
             }
 
             // MARK: A Rabbit Hole path
@@ -711,10 +802,12 @@ enum ShareChecks {
                 let last = own.map(\.playedAt).max()
                 check("query card #\(row.rank): plays equal an independent count (\(own.count)) and last played is the latest play", row.value == own.count.formatted() && row.values[0] == last.map { QueryCellText.date($0, fieldID: "lastPlayed") }, "\(row.value) / \(row.values[0])")
             }
-            check("the rows are in falling order of plays", zip(realRows, realRows.dropFirst()).allSatisfy { a, b in
-                (realResult.rows.first { $0.id == a.id }.flatMap { realResult.columns.isEmpty ? nil : $0.cells[realResult.columns[1].cacheKey] }.map { cell -> Double in if case .value(.number(let n)) = cell { n } else { 0 } } ?? 0)
-                    >= (realResult.rows.first { $0.id == b.id }.flatMap { $0.cells[realResult.columns[1].cacheKey] }.map { cell -> Double in if case .value(.number(let n)) = cell { n } else { 0 } } ?? 0)
-            })
+            let realPlaysKey = realResult.columns.count > 1 ? realResult.columns[1].cacheKey : ""
+            let realPlays: [Double] = realResult.rows.map { row in
+                if case .value(.number(let n))? = row.cells[realPlaysKey] { return n }
+                return 0
+            }
+            check("the rows are in falling order of plays", zip(realPlays, realPlays.dropFirst()).allSatisfy { $0 >= $1 })
             let urls = realCard.pictureURLs(for: ShareOptions())
             let images = await ShareArtwork.load(urls)
             for size in ShareSize.allCases {
@@ -785,6 +878,78 @@ enum ShareChecks {
                 let seconds = Date().timeIntervalSince(start)
                 if let png { try? png.write(to: URL(fileURLWithPath: folder).appending(path: "real-recap-\(size.rawValue).png")) }
                 check("recap, \(size.label): rendered in \(String(format: "%.2f", seconds)) s", png != nil && seconds < 3)
+            }
+        }
+        // A per-release-year query on the real library: the most played album of each release year, shown oldest first, against an independent walk.
+        do {
+            var spec = QuerySpec(target: .album)
+            spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+            spec.groupLimit = QueryGroupLimit(perReleaseYear: 1)
+            spec.columns = [QueryFieldRef("plays"), QueryFieldRef("releaseYear")]
+            if let validated = try? spec.validate(against: .standard) {
+                let all = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+                let loaded = await QuerySnapshotReader.loadAll(container: container)
+                let snapshots = QuerySnapshots(durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, images: loaded.images)
+                let result = QueryEngine.evaluate(validated, run: QueryRun(target: .album, asOf: Date(), scrobbles: all, allTimeScrobbles: all, snapshots: snapshots))
+                let yearIndex = result.columns.firstIndex { $0.field.id == "releaseYear" } ?? 0
+                let years: [Int?] = result.rows.map { row in
+                    if case .value(.number(let n))? = row.cells[result.columns[yearIndex].cacheKey] { Int(n) } else { nil }
+                }
+                let dated = years.compactMap { $0 }
+                check("per-year query on the library: \(result.rows.count) albums, the dated ones in non-decreasing year order", dated == dated.sorted(), "\(dated.prefix(12))")
+                check("…each dated year appears once", Set(dated).count == dated.count)
+                // Independent: the most played album of each year, from the same rank-order run (showing it in rank order instead).
+                var rankSpec = spec; rankSpec.showInRankOrder = true
+                if let rankValidated = try? rankSpec.validate(against: .standard) {
+                    let ranked = QueryEngine.evaluate(rankValidated, run: QueryRun(target: .album, asOf: Date(), scrobbles: all, allTimeScrobbles: all, snapshots: snapshots))
+                    check("…and the same albums as when shown in rank order", Set(ranked.rows.map(\.id)) == Set(result.rows.map(\.id)) && ranked.rows.count == result.rows.count)
+                    let playsKey = result.columns.first { $0.field.id == "plays" }?.cacheKey ?? ""
+                    func plays(_ row: QueryRow) -> Double { if case .value(.number(let n))? = row.cells[playsKey] { n } else { 0 } }
+                    let rankPlays = ranked.rows.map(plays)
+                    check("…and in rank order they fall in plays (so the year order is a reordering, not a different pick)", rankPlays == rankPlays.sorted(by: >))
+                }
+            } else {
+                check("the per-year query validates", false)
+            }
+        }
+        // The top artists, albums and tracks of each calendar year of the real library, against independent counts, and how long it takes.
+        do {
+            let all = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+            let calendar = AppCalendars.listening
+            for target in [QueryTarget.artist, .album, .track] {
+                var spec = QuerySpec(target: target)
+                spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+                spec.columns = [QueryFieldRef("plays")]
+                spec.limit = 3
+                spec.breakdown = QueryBreakdown()
+                guard let validated = try? spec.validate(against: .standard) else { check("the \(target.rawValue) breakdown validates", false); continue }
+                let start = Date()
+                let result = QueryEngine.evaluate(validated, run: QueryRun(target: target, asOf: Date(), scrobbles: all, allTimeScrobbles: all, snapshots: QuerySnapshots()))
+                let seconds = Date().timeIntervalSince(start)
+                // Independent: count each year's plays by entity with plain dictionaries and take the top three.
+                var counts: [Int: [String: Int]] = [:]
+                for play in all {
+                    let year = calendar.component(.year, from: play.playedAt)
+                    let key: String
+                    switch target {
+                    case .artist: key = play.artistName
+                    case .album: if play.albumName.isEmpty { continue }; key = play.artistName + "\u{0}" + play.albumName
+                    case .track: key = play.artistName + "\u{0}" + play.trackName
+                    }
+                    counts[year, default: [:]][key, default: 0] += 1
+                }
+                var mismatches: [String] = []
+                var checkedYears = 0
+                let playsKey = result.columns.first?.cacheKey ?? ""
+                for (year, byEntity) in counts {
+                    let rows = result.rows.filter { $0.period == year }
+                    let got: [Int] = rows.map { row in if case .value(.number(let n))? = row.cells[playsKey] { Int(n) } else { -1 } }
+                    let want = Array(byEntity.values.sorted(by: >).prefix(3))
+                    checkedYears += 1
+                    if got != want { mismatches.append("\(year): \(got) vs \(want)") }
+                }
+                let periods = result.rows.compactMap(\.period)
+                check("\(target.rawValue)s by year: \(checkedYears) years, the top three's plays equal an independent count each year, in \(String(format: "%.2f", seconds)) s", mismatches.isEmpty && periods == periods.sorted() && seconds < 20, "\(mismatches.prefix(3))")
             }
         }
         // Milestones and Timeline, from the same engines the pages use, against plain counts over the history.
@@ -1124,6 +1289,20 @@ enum ShareChecks {
 
     // MARK: Snapshots
 
+    /// A made-up profile picture (a diagonal gradient with a light figure) for the snapshots.
+    @MainActor
+    static func sampleAvatar() -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 300, pixelsHigh: 300, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGradient(starting: .systemTeal, ending: .systemIndigo)?.draw(in: NSRect(x: 0, y: 0, width: 300, height: 300), angle: 45)
+        NSColor.white.withAlphaComponent(0.85).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 105, y: 150, width: 90, height: 90)).fill()
+        NSBezierPath(ovalIn: NSRect(x: 60, y: 30, width: 180, height: 140)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])!
+    }
+
     @MainActor
     private static func writeSnapshots(into folder: String) {
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -1138,7 +1317,7 @@ enum ShareChecks {
             let hue = CGFloat(index) / 4
             return (entry.imageURL ?? "", NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in NSColor(hue: hue, saturation: 0.55, brightness: 0.8, alpha: 1).setFill(); rect.fill(); return true })
         })
-        for (name, c, count, images, identity) in [("album4", card, 4, swatches, ShareIdentity(name: "someone", showsFooter: false)), ("long20", long, 20, [:], ShareIdentity(name: "someone", showsFooter: true)), ("long5", long, 5, [:], ShareIdentity.anonymous), ("one", card, 1, swatches, ShareIdentity.anonymous)] {
+        for (name, c, count, images, identity) in [("album4", card, 4, swatches, ShareIdentity(name: "someone", showsFooter: false)), ("long20", long, 20, [:], ShareIdentity(name: "someone", showsFooter: true, avatar: sampleAvatar())), ("long5", long, 5, [:], ShareIdentity.anonymous), ("one", card, 1, swatches, ShareIdentity.anonymous)] {
             for size in ShareSize.allCases {
                 var o = ShareOptions(); o.size = size; o.rowCount = count
                 if let png = ShareRenderer.png(card: c, options: o, identity: identity, images: images, scale: 1) {
@@ -1158,7 +1337,7 @@ enum ShareChecks {
         var noPicture = sampleProfileCard(imageURL: nil)
         noPicture.profile?.kind = "Artist"
         noPicture.profile?.subtitle = ""
-        for (name, c, images, identity) in [("page-album", sampleProfileCard(), ["file:///art/a.jpg": hero], ShareIdentity(name: "someone", showsFooter: true)), ("page-longtrack", longTrack, ["file:///art/a.jpg": hero], ShareIdentity.anonymous), ("page-artist", noPicture, [:], ShareIdentity.anonymous)] {
+        for (name, c, images, identity) in [("page-album", sampleProfileCard(), ["file:///art/a.jpg": hero], ShareIdentity(name: "someone", showsFooter: true, avatar: sampleAvatar())), ("page-longtrack", longTrack, ["file:///art/a.jpg": hero], ShareIdentity.anonymous), ("page-artist", noPicture, [:], ShareIdentity.anonymous)] {
             for size in ShareSize.allCases {
                 var o = ShareOptions(); o.size = size
                 if let png = ShareRenderer.png(card: c, options: o, identity: identity, images: images, scale: 1) {
@@ -1288,7 +1467,7 @@ enum ShareChecks {
         let collageItems = (1...9).map { CollageItem(id: "c\($0)", name: "Album \($0)", artist: "Artist \($0)", album: nil, metricValue: 100 - $0, imageURL: nil, periodLabel: nil) }
         let collageFooter = CollageFooter(
             details: CollageCaption.make(source: .top, entity: .album, metric: .scrobbles, period: .year, rangeLabel: "Last 365 days").text(date: Date()),
-            identity: ShareIdentity(name: "someone", showsFooter: true)
+            identity: ShareIdentity(name: "someone", showsFooter: true, avatar: sampleAvatar())
         )
         for (name, grid) in [("collage-3x3", CollageGrid.three), ("collage-wide", CollageGrid.widescreen)] {
             if let png = CollageGeneratorView.renderPNG(items: collageItems, images: [:], grid: grid, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: false, footer: collageFooter) {

@@ -131,7 +131,7 @@ extension HelpContent {
                     ["**Deezer** (`api.deezer.com`, no sign-in)", "Track lengths, tempos (fallback), release dates (fallback), artwork, popularity", "Artist, album and track names as search text"],
                     ["**GetSongBPM** (`api.getsong.co`)", "Track tempo, time signature and key", "Artist and track names as search text, with the app’s (or your own) GetSongBPM key"],
                     ["**MusicBrainz**", "Album release dates", "Artist and album name, with the project’s contact address in the request header, as MusicBrainz asks"],
-                    ["**Image servers** (Last.fm, Deezer)", "Downloading artwork", "An ordinary image request"],
+                    ["**Image servers** (Last.fm, Deezer)", "Downloading artwork, and your Last.fm profile picture if you turn on **Include my profile picture** for shared cards (the address of the picture comes from Last.fm’s `user.getInfo`)", "An ordinary image request"],
                     ["**Apple Music catalogue** (`itunes.apple.com`, no sign-in)", "**View in Apple Music**, only when you choose it", "Artist, album or track name as search text; the answer is the page to open in the Music app"],
                     ["**GitHub** (`api.github.com`, no sign-in)", "The daily check for a newer version of Scroblytics (turn it off in Settings › General › Updates)", "An ordinary web request: your IP address and the app’s name and version, such as “Scroblytics/0.9.0”. Nothing about you or your library."],
                     ["**Your Ask provider** (if you pick one)", "Ask", "See [Ask engines](help://ask-keys)"],

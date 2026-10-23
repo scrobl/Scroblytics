@@ -167,7 +167,7 @@ final class TagStore {
             } catch {
                 // Leave it flagged so the next launch/sync tries again; the community sweep carries on.
                 needsPersonalSync = false
-                fail("Couldn't sync your tags: \(error)")
+                fail("Couldn’t sync your tags: \(describeSyncError(error))")
             }
             report()
         }

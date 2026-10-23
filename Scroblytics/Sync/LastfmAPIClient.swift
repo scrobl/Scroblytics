@@ -101,6 +101,7 @@ extension LastfmAPIError: LocalizedError {
 /// The text to show a person for any error from the sync, Last.fm or Keychain code paths.
 func describeSyncError(_ error: Error) -> String {
     if error is CancellationError { return "Cancelled." }
+    if let storeProblem = StoreProblem.describe(error) { return storeProblem }
     if let described = (error as? LocalizedError)?.errorDescription { return described }
     return error.localizedDescription
 }
@@ -363,6 +364,32 @@ actor LastfmAPIClient {
             throw LastfmAPIError.malformedField("user.playcount non-numeric: \(response.user.playcount)")
         }
         return (response.user.name ?? username, playcount)
+    }
+
+    /// The address of the account's profile picture (`user.getInfo`), the biggest size Last.fm lists, or nil when the account has none
+    /// (Last.fm sends an empty address then).
+    func fetchUserAvatarURL() async throws -> URL? {
+        let items: [URLQueryItem] = [
+            .init(name: "method", value: "user.getInfo"),
+            .init(name: "user", value: username),
+            .init(name: "api_key", value: apiKey),
+            .init(name: "format", value: "json"),
+        ]
+        let response: UserInfoResponse = try await waitingOutRateLimits(onWait: nil) { try await request(queryItems: items, foreground: true) }
+        return Self.avatarURL(in: response.user.image ?? [])
+    }
+
+    private static func avatarURL(in images: [UserInfoResponse.UserImage]) -> URL? {
+        for size in ["extralarge", "large", "medium", "small"] {
+            if let text = images.first(where: { $0.size == size })?.url?.trimmingCharacters(in: .whitespaces),
+               !text.isEmpty, let url = URL(string: text), url.scheme == "https" { return url }
+        }
+        return nil
+    }
+
+    /// The profile picture address from a raw `user.getInfo` answer (for checks).
+    static func avatarURL(inUserInfo data: Data) -> URL? {
+        (try? JSONDecoder().decode(UserInfoResponse.self, from: data)).flatMap { avatarURL(in: $0.user.image ?? []) }
     }
 
     /// Account-wide playcount, used to detect backdated plays after an
@@ -934,6 +961,21 @@ private struct UserInfoResponse: Decodable {
     struct UserField: Decodable {
         let playcount: String
         let name: String?
+        /// The profile pictures by size. Read leniently: a shape Last.fm changes must never break the playcount this response is also used for.
+        let image: [UserImage]?
+
+        private enum CodingKeys: String, CodingKey { case playcount, name, image }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            playcount = try c.decode(String.self, forKey: .playcount)
+            name = try c.decodeIfPresent(String.self, forKey: .name)
+            image = try? c.decodeIfPresent([UserImage].self, forKey: .image)
+        }
+    }
+    struct UserImage: Decodable {
+        let size: String?
+        let url: String?
+        private enum CodingKeys: String, CodingKey { case size; case url = "#text" }
     }
     let user: UserField
 }

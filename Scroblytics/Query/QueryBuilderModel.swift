@@ -2,14 +2,24 @@ import Foundation
 import Observation
 import SwiftData
 
+/// A row's identity in the table: the entity, and the year when the results are broken down by year (an entity then has a row per year).
+struct QueryRowKey: Hashable, Sendable {
+    let entity: QueryEntityID
+    let period: Int?
+}
+
 /// A result row plus what the table needs to draw the pinned identity cell.
 struct QueryDisplayRow: Identifiable, Sendable {
     let row: QueryRow
     let imageURL: String?
+    /// The calendar year, when the results are broken down by year.
+    var period: Int? { row.period }
     /// Context line under the name: the artist for albums/tracks, plus the
     /// album for tracks.
     let subtitle: String?
-    var id: QueryEntityID { row.id }
+    var id: QueryRowKey { QueryRowKey(entity: row.id, period: row.period) }
+    /// The entity's own id (what the result's per-entity info is keyed by).
+    var entityID: QueryEntityID { row.id }
     var entity: QueryEntity { row.entity }
 
     /// Resolves each row's artwork the same way Top Charts does (custom overrides first, then the scrobble's own
@@ -357,6 +367,13 @@ final class QueryBuilderModel {
         next.sorts = next.sorts.filter { sort in
             if case .field(let ref) = sort.key, !applicable.contains(ref.id) { removed += 1; return false }
             return true
+        }
+        if let shown = next.resultSorts {
+            let kept = shown.filter { sort in
+                if case .field(let ref) = sort.key, !applicable.contains(ref.id) { removed += 1; return false }
+                return true
+            }
+            next.resultSorts = kept.isEmpty ? nil : kept
         }
         next.columns = next.columns.filter { let keep = applicable.contains($0.id); if !keep { removed += 1 }; return keep }
         if next.columns.isEmpty { next.columns = [QueryFieldRef("plays"), QueryFieldRef("lastPlayed")] }

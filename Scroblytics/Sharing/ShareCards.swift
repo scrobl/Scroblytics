@@ -292,8 +292,10 @@ enum ShareCards {
         // A result can run to tens of thousands of rows; a card shows at most the largest row choice, so that is all it is made from.
         let shareRows = rows.prefix(ShareOptions.rowCounts.max() ?? 20).enumerated().map { index, row -> ShareRow in
             let values = columns.map { QueryCellText.string(row.row.cells[$0.cacheKey] ?? .missing, column: $0) }
+            // A row of a query broken down by year says its year first ("2023 · Artist A").
+            let subtitle = row.period.map { year in [String(year), row.subtitle].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") } ?? row.subtitle
             return ShareRow(
-                rank: index + 1, title: row.entity.name, subtitle: row.subtitle,
+                rank: index + 1, title: row.entity.name, subtitle: subtitle,
                 value: values.indices.contains(defaultColumn) ? values[defaultColumn] : "",
                 change: .none, imageURL: row.imageURL, values: values
             )
@@ -307,6 +309,7 @@ enum ShareCards {
             hasMovement: false,
             generatedAt: now,
             kindID: "query.\(target.rawValue)",
+            numbered: !rows.contains { $0.period != nil },
             valueColumns: titles,
             defaultValueColumn: defaultColumn
         )

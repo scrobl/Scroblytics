@@ -200,6 +200,16 @@ enum EntityTagsEngine {
         cacheUserTags(context: context, kind: kind, artist: artist, name: name, tags: tags)
     }
 
+    /// Errors that mean "nothing will work right now" rather than "this one lookup failed".
+    private static func isWholeSyncFailure(_ error: Error) -> Bool {
+        if error is CancellationError || error is OfflineError || ConnectivityGate.isConnectivityError(error) { return true }
+        if let api = error as? LastfmAPIError {
+            if api.isRateLimit { return true }
+            if case .api(let code, _) = api { return [4, 9, 10, 26, 8, 11, 16].contains(code) }
+        }
+        return false
+    }
+
     /// Pulls EVERY personal tag in full: the user's tag list, then everything tagged with each, per
     /// kind. Afterwards an entity with no cached row genuinely has no personal tags. Computed in
     /// full before anything is written, so a failure part-way leaves the old cache untouched.
@@ -227,15 +237,30 @@ enum EntityTagsEngine {
                 done += 1
             }
         }
+        var skipped = 0
+        var lastFailure: Error?
         for (index, candidate) in artistCandidates.values.sorted().enumerated() {
             progress("artists \(index + 1) of \(artistCandidates.count)")
             var tags: [String]?
             for attempt in 0..<3 where tags == nil {
-                tags = try? await client.fetchUserTags(entity: .artist, artist: candidate)
-                if tags == nil { try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000) }
+                do {
+                    tags = try await client.fetchUserTags(entity: .artist, artist: candidate)
+                } catch {
+                    // Being offline, cancelled, rate limited or told the account is wrong affects every artist, so it stops the sync.
+                    if isWholeSyncFailure(error) { throw error }
+                    lastFailure = error
+                    try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
+                }
             }
-            guard let direct = tags else { throw LastfmAPIError.malformedField("artist.getTags failed for \(candidate)") }
+            // One artist Last.fm can't answer for (a name it chokes on) must not abort the sync every launch: its tags are
+            // left out this time and the count is reported.
+            guard let direct = tags else { skipped += 1; continue }
             if !direct.isEmpty { byEntity[EntityTagKey.make(kind: .artist, artist: candidate, name: nil)] = direct }
+        }
+        // Skipping a few is fine; failing for most of them is a real problem, and caching that would hide it.
+        if skipped > 0 {
+            ActivityLog.record(.sync, "Personal tag sync skipped \(skipped) of \(artistCandidates.count) artists Last.fm couldn't answer for")
+            if skipped * 2 > artistCandidates.count, let lastFailure { throw lastFailure }
         }
         for row in (try? context.fetch(FetchDescriptor<UserEntityTagCacheEntry>())) ?? [] { context.delete(row) }
         for (key, tags) in byEntity {

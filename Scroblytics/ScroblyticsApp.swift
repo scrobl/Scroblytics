@@ -445,12 +445,18 @@ enum SettingsTab: String {
 /// Settings › General › Sharing: what a shared card says about you, by default nothing.
 struct SharingSettingsSection: View {
     @AppStorage(ShareSettings.showsNameKey) private var showsName = false
+    @AppStorage(ShareSettings.showsAvatarKey) private var showsAvatar = false
     @AppStorage(ShareSettings.showsFooterKey) private var showsFooter = false
     @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
 
     var body: some View {
         Section("Sharing") {
             Toggle("Show my Last.fm name on shared cards", isOn: $showsName)
+            Toggle("Include my Last.fm profile picture with my name", isOn: $showsAvatar)
+                .disabled(!showsName)
+            Text("The picture is fetched from Last.fm once, kept on this Mac and refreshed about once a week. It appears only on cards you share, in front of your name.")
+                .font(AppTypography.supporting)
+                .foregroundStyle(.secondary)
             Picker("Last.fm logo", selection: $logoRaw) {
                 ForEach(LastfmLogoStyle.allCases) { Text($0.label).tag($0.rawValue) }
             }

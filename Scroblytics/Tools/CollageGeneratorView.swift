@@ -35,10 +35,12 @@ struct CollageGeneratorView: View {
     @State private var hasLoadedOptions = false
     @State private var zoom = 1.0
     @State private var accountName: String?
+    @State private var avatar: Data?
     /// The caption under the collage (what it shows and when) and the two identity lines. Kept in the app's preferences, not in the
     /// saved tool options, so options saved by earlier versions still load. The two identity switches are the Share popover's.
     @AppStorage("collage.showsDetails") private var showsDetails = false
     @AppStorage(ShareSettings.showsNameKey) private var showsName = false
+    @AppStorage(ShareSettings.showsAvatarKey) private var showsAvatar = false
     @AppStorage(ShareSettings.showsFooterKey) private var showsTag = false
     @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
 
@@ -56,8 +58,15 @@ struct CollageGeneratorView: View {
             details: showsDetails ? CollageCaption.make(
                 source: options.source, entity: entity, metric: metric, period: options.period, rangeLabel: rangeLabel
             ).text(date: Date()) : nil,
-            identity: ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsTag, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle)
+            identity: ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsTag, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle, avatar: showsName && showsAvatar ? avatar : nil)
         )
+    }
+
+    /// The saved picture straight away, then a refresh from Last.fm if it is missing or about a week old (only while the picture is on).
+    private func refreshAvatar() async {
+        guard showsName, showsAvatar, let name = accountName else { avatar = nil; return }
+        avatar = ShareAvatar.cached(username: name)?.data
+        avatar = await ShareAvatar.loadFromLastfm(username: name) ?? avatar
     }
 
     private var rangeLabel: String {
@@ -102,6 +111,7 @@ struct CollageGeneratorView: View {
                     showPeriod: $options.showPeriod,
                     showsDetails: $showsDetails,
                     showsName: $showsName,
+                    showsAvatar: $showsAvatar,
                     showsTag: $showsTag,
                     accountName: accountName,
                     periodAvailable: options.source == .period,
@@ -122,6 +132,7 @@ struct CollageGeneratorView: View {
         .navigationTitle("Collage Generator")
         .task {
             accountName = ShareSettings.accountName(context: modelContext)
+            Task { await refreshAvatar() }
             let oldest = try? await TopChartsEngine.fetchOldestScrobbleDate(container: modelContainer)
             rangeOptions = DateRangePresets.build(oldestScrobbleDate: oldest)
             options = ToolFilterSettingsStore.load(
@@ -138,6 +149,8 @@ struct CollageGeneratorView: View {
                 await reload()
             }
         }
+        .onChange(of: showsName) { Task { await refreshAvatar() } }
+        .onChange(of: showsAvatar) { Task { await refreshAvatar() } }
         .onChange(of: options) { _, newValue in
             guard hasLoadedOptions else { return }
             ToolFilterSettingsStore.save(newValue, toolId: Self.toolID, context: modelContext)
@@ -459,6 +472,7 @@ private struct CollageDisplayControls: View {
     @Binding var showPeriod: Bool
     @Binding var showsDetails: Bool
     @Binding var showsName: Bool
+    @Binding var showsAvatar: Bool
     @Binding var showsTag: Bool
     let accountName: String?
     let periodAvailable: Bool
@@ -490,6 +504,9 @@ private struct CollageDisplayControls: View {
         Toggle("My Last.fm name", isOn: $showsName)
             .disabled(accountName == nil)
             .help(accountName.map { "Adds “\($0)” under the collage" } ?? "No Last.fm account is saved")
+        Toggle("My picture", isOn: $showsAvatar)
+            .disabled(accountName == nil || !showsName)
+            .help("Adds your Last.fm profile picture in front of your name (turn on “My Last.fm name” first)")
         Toggle("Scroblytics", isOn: $showsTag)
             .help("Adds “Scroblytics” under the collage")
         HStack {
@@ -736,6 +753,7 @@ private struct CollageFooterView: View {
             Spacer(minLength: 0)
             if let name = footer.identity.name, !name.isEmpty {
                 HStack(spacing: font * 0.45) {
+                    if let avatar = footer.identity.avatar { ShareAvatarView(data: avatar, size: font * 1.6) }
                     LastfmMark(size: font * 1.25, style: footer.identity.logo)
                     Text(name)
                         .font(.system(size: font, weight: .semibold))

@@ -85,6 +85,8 @@ struct ShareProfile: Sendable, Equatable {
     var highlights: [ShareHighlight] = []
     /// Plays per bucket over the period, oldest first; fewer than two points draws no line.
     var trend: [Int]
+    /// The weather this is played in more than usual. Kept apart from `stats` because it is shown only when the person turns it on.
+    var weather: ShareStat? = nil
 }
 
 struct ShareHighlight: Sendable, Equatable {
@@ -195,6 +197,8 @@ struct ShareOptions: Codable, Equatable, Sendable {
     var icon = ShareIcon.trophy
     /// Whether a row's note (why a track was chosen) is shown after its artist, on the image and in the text.
     var showNotes = true
+    /// Whether a page card (artist, album or track) includes the weather it is played in. Off unless chosen.
+    var showWeather = false
     /// List or tree, for a card that has both.
     var layout = ShareLayout.list
     /// A title the person typed to replace the card's own (a list card); empty keeps the card's. Not remembered: it belongs to one share.
@@ -202,7 +206,7 @@ struct ShareOptions: Codable, Equatable, Sendable {
     /// Which value column of a query card the image shows. Not remembered: the columns differ from one query to the next.
     var valueColumn: Int? = nil
 
-    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, layout }
+    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, showWeather, layout }
 
     init(size: ShareSize = .square, rowCount: Int = 10, showValues: Bool = true, showMovement: Bool = true, showDate: Bool = true, icon: ShareIcon = .trophy) {
         self.size = size
@@ -223,6 +227,7 @@ struct ShareOptions: Codable, Equatable, Sendable {
         showDate = try c.decodeIfPresent(Bool.self, forKey: .showDate) ?? true
         icon = try c.decodeIfPresent(ShareIcon.self, forKey: .icon) ?? .trophy
         showNotes = try c.decodeIfPresent(Bool.self, forKey: .showNotes) ?? true
+        showWeather = try c.decodeIfPresent(Bool.self, forKey: .showWeather) ?? false
         layout = try c.decodeIfPresent(ShareLayout.self, forKey: .layout) ?? .list
     }
 
@@ -250,8 +255,14 @@ extension ShareCard {
 
     /// The stat tiles a profile card shows at this size.
     func visibleStats(for options: ShareOptions) -> [ShareStat] {
-        Array((profile?.stats ?? []).prefix(options.size.statLimit))
+        let limit = options.size.statLimit
+        // Weather, when chosen, takes the last place, so a card that is already full gives up its last ordinary tile for it.
+        if options.showWeather, let weather = profile?.weather { return Array((profile?.stats ?? []).prefix(limit - 1)) + [weather] }
+        return Array((profile?.stats ?? []).prefix(limit))
     }
+
+    /// Whether the card has weather to offer, so the popover shows its switch.
+    var hasWeather: Bool { profile?.weather != nil }
 
     /// The pictures a card with these options draws, for the renderer to load first: a list's visible rows (the first one is also the
     /// background), a profile's one hero picture.

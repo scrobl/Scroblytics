@@ -256,6 +256,9 @@ private struct SharePopover: View {
             if card.hasNotes && !card.drawsTree(for: options) {
                 Toggle("Show why each track was chosen", isOn: $options.showNotes)
             }
+            if card.hasWeather {
+                Toggle("Include the weather it’s played in", isOn: $options.showWeather)
+            }
             Toggle("Show today’s date", isOn: $options.showDate)
             if card.hasMovement {
                 Toggle("Show movement", isOn: $options.showMovement)

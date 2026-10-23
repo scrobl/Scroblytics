@@ -20,6 +20,7 @@ enum WeatherChecks {
             fields(check)
             trends(check)
             await tripChecks(check)
+            leanChecks(check)
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }
@@ -660,6 +661,59 @@ enum WeatherChecks {
         check("a restore puts the home place and trips back", WeatherSettings.place(defaults: restoreDefaults) == oslo && WeatherTripStore.load(file: restoreFile) == book.trips)
         NativeBackupEngine.restoreWeatherLocations(nil, tripsFile: restoreFile, defaults: restoreDefaults)
         check("restoring an older backup (without them) leaves the current ones alone", WeatherSettings.place(defaults: restoreDefaults) == oslo && WeatherTripStore.load(file: restoreFile) == book.trips)
+    }
+
+    // MARK: - What an artist or album leans into
+
+    private static func leanChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-6) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        let jan1 = date(2025, 1, 1)
+        let start = WeatherSeries.hour(of: jan1)
+        var series = WeatherSeries(startHour: start, count: 240)
+        for h in start..<(start + 240) {
+            let hod = h % 24
+            series.set(hour: h, WeatherSample(temperature: Double(hod), precipitation: nil, rain: nil, snowfall: nil, code: (6...8).contains(hod) ? 61 : ((20...21).contains(hod) ? 71 : 0)))
+        }
+        let weather = WeatherSnapshot(series: series, placeName: "Test", percentiles: (20, 80))
+        let range = DateRange(from: jan1, to: jan1.addingTimeInterval(10 * 86_400 - 1))
+        func plays(_ artist: String, hour: Int, count: Int) -> [ScrobbleSnapshot] {
+            (0..<count).map { i in
+                ScrobbleSnapshot(artistName: artist, albumName: "Album \(artist)", trackName: "Track \(artist)", imageURL: nil,
+                                 playedAt: jan1.addingTimeInterval(Double(i % 10) * 86_400 + Double(hour) * 3600 + Double(i / 10) * 60))
+            }
+        }
+        func lean(_ all: [ScrobbleSnapshot], _ artist: String = "A", weather: WeatherSnapshot = weather) -> EntityWeatherLean.Result {
+            EntityWeatherLean.compute(plays: all, range: range, weather: weather) { $0.artistName == artist }
+        }
+        // A: 20 plays in rain, 10 in clear weather. Everyone else (B): 10 in rain, 90 in clear. All at mild temperatures.
+        let busy = plays("A", hour: 7, count: 20) + plays("A", hour: 12, count: 10) + plays("B", hour: 7, count: 10) + plays("B", hour: 12, count: 90)
+        let result = lean(busy)
+        if case .leans(let l) = result {
+            check("an artist with 20 of its 30 plays in rain, when 30 of everyone's 130 are, leans into rain 2.89 times (+189%)", l.name == "Rain" && near(l.lift, (20.0 / 30) / (30.0 / 130)) && l.count == 20 && l.total == 30 && !l.isTemperature, "\(l)")
+            let fact = EntityWeatherLean.fact(for: result)
+            check("the tile reads 'Rain +189%' with '20 of 30 plays' under it", fact?.label == "Weather" && fact?.displayText == "Rain +189%" && fact?.detail == "20 of 30 plays")
+        } else {
+            check("an artist that plays more in rain leans into rain", false, "\(result)")
+        }
+        check("fewer than 20 plays with weather is not enough to say anything (and shows no tile)", lean(plays("A", hour: 7, count: 19) + plays("B", hour: 12, count: 100)) == .notEnough && EntityWeatherLean.fact(for: .notEnough) == nil)
+        let flat = lean(plays("A", hour: 7, count: 3) + plays("A", hour: 12, count: 27) + plays("B", hour: 7, count: 10) + plays("B", hour: 12, count: 90))
+        check("plays that follow the weather like everyone's are 'no standout'", flat == .even(total: 30) && EntityWeatherLean.fact(for: flat)?.displayText == "No standout", "\(flat)")
+        check("a weather in fewer than 5 of its plays can't be a lean, however big the share", lean(plays("A", hour: 7, count: 4) + plays("A", hour: 12, count: 21) + plays("B", hour: 12, count: 200)) == .even(total: 25))
+        let cold = lean(plays("A", hour: 2, count: 25) + plays("B", hour: 12, count: 100))
+        if case .leans(let l) = cold {
+            check("an artist played at cold hours (relative to the place) leans into Cold: 25 of 25 against 25 of 125 is 5 times", l.name == "Cold" && l.isTemperature && near(l.lift, 5) && l.count == 25, "\(l)")
+            check("…and says so in words: '25 of 25 plays when it was cold'", EntityWeatherLean.fact(for: cold)?.detail == "25 of 25 plays when it was cold" && EntityWeatherLean.fact(for: cold)?.displayText == "Cold +400%")
+        } else {
+            check("an artist played at cold hours leans into Cold", false, "\(cold)")
+        }
+        check("with weather off there is no tile", lean(busy, weather: .empty) == .unavailable)
+        check("plays before the downloaded weather give no tile at all", EntityWeatherLean.compute(plays: busy, range: DateRange(from: date(2020, 1, 1), to: date(2020, 12, 31)), weather: weather, isEntity: { $0.artistName == "A" }) == .unavailable)
+        let outside = busy.map { ScrobbleSnapshot(artistName: $0.artistName, albumName: $0.albumName, trackName: $0.trackName, imageURL: nil, playedAt: $0.playedAt.addingTimeInterval(20 * 86_400)) }
+        check("plays outside the period are left out", EntityWeatherLean.compute(plays: busy + outside, range: range, weather: weather, isEntity: { $0.artistName == "A" }) == result)
+        // Album matching follows the page's own rule: the album's exact name and its artist (collab credits count).
+        let credited = ScrobbleSnapshot(artistName: "Artist A & Artist B", albumName: "Album", trackName: "T", imageURL: nil, playedAt: jan1.addingTimeInterval(7 * 3600))
+        check("the album rule counts a collab-credited track toward the artist's own album", TextNormalization.trackMatchesArtistContext(trackArtist: credited.artistName, context: "Artist A") && credited.albumName == "Album")
     }
 
     // MARK: - The Query fields

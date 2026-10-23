@@ -52,12 +52,12 @@ enum DetailSnapshots {
     }
 
     @MainActor
-    static func artistCard(stats: EntityStats?) -> some View {
+    static func artistCard(stats: EntityStats?, facts: [DetailFact] = []) -> some View {
         DetailHeaderCard(
             entity: .artist, name: "Artist A", subtitle: nil, tertiary: nil, imageURL: nil, stats: stats,
             errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 300 * 3600,
             yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 4), TopChartsEngine.YearlyRank(year: 2023, rank: 7)],
-            sharePeriodLabel: "Last 12 months"
+            facts: facts, sharePeriodLabel: "Last 12 months"
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)
@@ -67,13 +67,13 @@ enum DetailSnapshots {
     }
 
     @MainActor
-    static func albumCard(stats: EntityStats?, turnover: AlbumTurnoverState, title: String = "Album Name") -> some View {
+    static func albumCard(stats: EntityStats?, turnover: AlbumTurnoverState, title: String = "Album Name", extraFacts: [DetailFact] = []) -> some View {
         let released = DetailFact(id: "released", label: "Released", value: .text("Sep 12, 2018"), systemImage: "calendar", onEdit: {})
         return DetailHeaderCard(
             entity: .album, name: title, subtitle: "Artist A", tertiary: nil, imageURL: nil, stats: stats,
             errorMessage: nil, metric: .scrobbles, timeListenedSeconds: 78 * 3600,
             yearlyTopRanks: [TopChartsEngine.YearlyRank(year: 2024, rank: 2)],
-            onFixAlbumMatch: {}, facts: [released] + AlbumDetailModel.turnoverFacts(turnover, onFixAlbumMatch: {}), sharePeriodLabel: "Last 12 months"
+            onFixAlbumMatch: {}, facts: [released] + AlbumDetailModel.turnoverFacts(turnover, onFixAlbumMatch: {}) + extraFacts, sharePeriodLabel: "Last 12 months"
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Community tags").font(AppTypography.statLabel).foregroundStyle(.secondary)
@@ -282,6 +282,14 @@ enum DetailSnapshots {
                     await render(albumCard(stats: nil, turnover: .loading), width: width, dark: dark, container: container, to: base.appending(path: "album-loading-\(Int(width))-\(mode).png"))
                 }
             }
+            let weatherTile = EntityWeatherLean.fact(for: .leans(EntityWeatherLean.Lean(name: "Rain", lift: 1.34, count: 41, total: 120, isTemperature: false)))
+            let coldTile = EntityWeatherLean.fact(for: .leans(EntityWeatherLean.Lean(name: "Cold", lift: 1.21, count: 66, total: 150, isTemperature: true)))
+            for width in [900, 440] as [CGFloat] {
+                for dark in [true, false] {
+                    await render(artistCard(stats: sampleStats(loved: false), facts: [weatherTile].compactMap { $0 }), width: width, dark: dark, container: container, to: base.appending(path: "artist-weather-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+            }
+            await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover()), extraFacts: [coldTile].compactMap { $0 }), width: 900, dark: true, container: container, to: base.appending(path: "album-weather-900-dark.png"))
             for width in [1200, 700, 440] as [CGFloat] {
                 await render(artistCard(stats: sampleStats(loved: false)), width: width, dark: true, container: container, to: base.appending(path: "artist-\(Int(width))-dark.png"))
                 await render(artistCard(stats: nil), width: width, dark: false, container: container, to: base.appending(path: "artist-loading-\(Int(width))-light.png"))

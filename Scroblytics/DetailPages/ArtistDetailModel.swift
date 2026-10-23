@@ -21,6 +21,16 @@ final class ArtistDetailModel {
     var communityTags: TagsLoadState = .loading
     var yourTags: TagsLoadState = .loading
     var timeListenedSeconds: Int?
+    /// What weather this artist is played in more than usual (Settings › Weather); no tile unless there is something to say.
+    var weatherLean = EntityWeatherLean.Result.unavailable
+
+    func loadWeatherLean(range: DateRange) async {
+        guard let context else { return }
+        let requested = identity
+        let result = await EntityWeatherLeanLoader.artist(container: context.container, name: requested.name, range: range)
+        guard !Task.isCancelled, identity.id == requested.id else { return }
+        weatherLean = result
+    }
 
     func bind(identity: ArtistIdentity, context: ModelContext) {
         self.identity = identity
@@ -31,6 +41,7 @@ final class ArtistDetailModel {
         communityTags = .loading
         yourTags = .loading
         timeListenedSeconds = nil
+        weatherLean = .unavailable
     }
 
     func loadOldestScrobbleDate() {

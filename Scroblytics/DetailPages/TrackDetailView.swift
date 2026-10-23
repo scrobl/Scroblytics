@@ -51,6 +51,7 @@ struct TrackDetailView: View {
                         onEditDuration: { showingDurationEdit = true },
                         onEditTempo: { showingBPMEdit = true }
                     ),
+                    shareWeather: EntityWeatherLean.fact(for: model.weatherLean),
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -76,7 +77,7 @@ struct TrackDetailView: View {
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
             // The weather may have changed meanwhile (a trip added, a download finished): that alone is read again.
-            if model.isLoaded(for: identity.id) { await model.loadWeather(); return }
+            if model.isLoaded(for: identity.id) { await model.loadWeather(); await model.loadWeatherLean(range: range); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
@@ -88,7 +89,8 @@ struct TrackDetailView: View {
             async let duration: Void = model.loadDuration()
             async let release: Void = model.loadReleaseDate()
             async let weather: Void = model.loadWeather()
-            _ = await (ranks, tags, duration, release, weather)
+            async let lean: Void = model.loadWeatherLean(range: current)
+            _ = await (ranks, tags, duration, release, weather, lean)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
@@ -98,7 +100,7 @@ struct TrackDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             Task { await refreshAfterSync() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await model.loadWeather() } }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await model.loadWeather(); await model.loadWeatherLean(range: range) } }
         .onReceive(NotificationCenter.default.publisher(for: BPMEngine.progressNotification)) { _ in model.loadBPM() }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await model.loadDuration() }
@@ -136,6 +138,7 @@ struct TrackDetailView: View {
         let current = range
         model.loadStats(range: current)
         model.loadScrobbleHistory(range: current)
+        Task { await model.loadWeatherLean(range: current) }
     }
 
     private func refreshAfterSync() async {

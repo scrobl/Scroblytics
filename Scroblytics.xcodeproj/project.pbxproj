@@ -200,9 +200,11 @@
 		ABBEF4A5205BAEE92B4443AF /* ProgressSimulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0328B78CFB93B824047A02 /* ProgressSimulator.swift */; };
 		AC667636E07C5FC94EAA5D3B /* QueryTagEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE63B47C264BA549EBBE5014 /* QueryTagEditor.swift */; };
 		AC80F4A07062716115C3231A /* QueryTagFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 987AE608977939DBD5B25786 /* QueryTagFields.swift */; };
+		ACBAB2C10533C8A423691F5A /* PlayWeatherCells.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB459A6CB13639BF161AFECD /* PlayWeatherCells.swift */; };
 		ACDB22969E47971A65D0FA51 /* TrendsTagsChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAEA2C056891362820B0F54F /* TrendsTagsChart.swift */; };
 		ACF9CC4C8FF2569822E2C311 /* QueryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C8FB10260276624EFF098B /* QueryView.swift */; };
 		AD010A73536DAB0D9B5CA919 /* AskEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FACE231380F1F6202CFA35E /* AskEngine.swift */; };
+		AD1DB27AF6B0F099960EE1C1 /* EntityWeatherLean.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9FFC2A1C91F5446D42B12A /* EntityWeatherLean.swift */; };
 		AD54651221DCC38B69DED23E /* QueryLovedFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAD89386DF824DE44CF98BA7 /* QueryLovedFields.swift */; };
 		AE543DE3FA28B4FE1086F41C /* LovedAuditChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B06CEAED8F01F1FD9E41A70 /* LovedAuditChecks.swift */; };
 		AEC9610DCD6A14E09DF79495 /* HelpFieldDefinitions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06DEEAC5457CFF1B1564055F /* HelpFieldDefinitions.swift */; };
@@ -546,7 +548,9 @@
 		B9AAC988737BE932C561DC23 /* ColorWashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorWashView.swift; sourceTree = "<group>"; };
 		BA6C0E5B1D25236DC042F59D /* EntityIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityIdentity.swift; sourceTree = "<group>"; };
 		BA816F71AF0F9963F6257EED /* WeatherModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WeatherModel.swift; sourceTree = "<group>"; };
+		BB459A6CB13639BF161AFECD /* PlayWeatherCells.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlayWeatherCells.swift; sourceTree = "<group>"; };
 		BBEEA1F768CBEFC4F69FD27A /* TrendsDiscoveryChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsDiscoveryChart.swift; sourceTree = "<group>"; };
+		BC9FFC2A1C91F5446D42B12A /* EntityWeatherLean.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EntityWeatherLean.swift; sourceTree = "<group>"; };
 		BF02C22253766E074CD188D0 /* AlbumScopeWarningEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumScopeWarningEngine.swift; sourceTree = "<group>"; };
 		BF2A82A15900AAB1A3F8B798 /* AlbumDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AlbumDetailView.swift; sourceTree = "<group>"; };
 		C1CAA97BD6C70DC68F155BA6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -1125,6 +1129,8 @@
 				448A30AC2DAA2A278BF2068A /* WeatherStore.swift */,
 				E799C4805DA9F1D11A928E2C /* WeatherSettingsView.swift */,
 				B6FC2918D272CDA0BC32E9DB /* WeatherTripsView.swift */,
+				BC9FFC2A1C91F5446D42B12A /* EntityWeatherLean.swift */,
+				BB459A6CB13639BF161AFECD /* PlayWeatherCells.swift */,
 			);
 			name = Weather;
 			path = Weather;
@@ -1619,6 +1625,8 @@
 				B843671AE8FD249626553938 /* TrendsWeather.swift in Sources */,
 				FB6E02A1337A0B87D524A3FB /* TrendsWeatherChart.swift in Sources */,
 				C3FD085727D24472321DF53A /* WeatherTripsView.swift in Sources */,
+				AD1DB27AF6B0F099960EE1C1 /* EntityWeatherLean.swift in Sources */,
+				ACBAB2C10533C8A423691F5A /* PlayWeatherCells.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

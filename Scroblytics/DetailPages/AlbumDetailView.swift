@@ -45,7 +45,8 @@ struct AlbumDetailView: View {
                     imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
                     onFixAlbumMatch: { showingFixSheet = true },
-                    facts: model.facts(onEditReleaseDate: { showingReleaseDateEdit = true }, onFixAlbumMatch: { showingFixSheet = true }),
+                    facts: model.facts(onEditReleaseDate: { showingReleaseDateEdit = true }, onFixAlbumMatch: { showingFixSheet = true })
+                        + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -89,7 +90,8 @@ struct AlbumDetailView: View {
             async let time: Void = model.loadTimeListened(range: current)
             async let release: Void = model.loadReleaseDate()
             async let ranks: Void = model.loadYearlyTopRanks()
-            _ = await (turnover, stats, tags, time, release, ranks)
+            async let lean: Void = model.loadWeatherLean(range: current)
+            _ = await (turnover, stats, tags, time, release, ranks, lean)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
@@ -104,6 +106,9 @@ struct AlbumDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in
             Task { await model.loadReleaseDate() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in
+            Task { await model.loadWeatherLean(range: range) }
         }
         .sheet(isPresented: $showingFixSheet) {
             if let group = model.currentGroup {
@@ -130,6 +135,7 @@ struct AlbumDetailView: View {
         Task {
             await model.loadStats(range: current, rangeID: rangeID)
             await model.loadTimeListened(range: current)
+            await model.loadWeatherLean(range: current)
         }
     }
 

@@ -107,8 +107,14 @@ struct ScrobbleHistoryView: View {
     @State private var upperBound: Date?
     @State private var showsDatePicker = false
     @State private var listIdentity = UUID()
+    /// The weather where you were for each play, when weather is turned on and downloaded (Settings › Weather).
+    @State private var weather = WeatherSnapshot.empty
+    @State private var availableWidth: CGFloat = 1000
 
     private let pageSize = 200
+    /// Below these widths the Location column goes first, then the Weather column, so a title is never squeezed to nothing.
+    private static let locationMinimumWidth: CGFloat = 940
+    private static let weatherMinimumWidth: CGFloat = 760
 
     var body: some View {
         Group {
@@ -132,11 +138,14 @@ struct ScrobbleHistoryView: View {
         }
         .navigationTitle("Scrobble History")
         .background(Color(nsColor: .windowBackgroundColor))
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { availableWidth = $0 }
         .task {
             if rows.isEmpty {
                 await loadInitialData()
             }
         }
+        .task { await loadWeather() }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await loadWeather() } }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             Task {
                 await resetAndLoad()
@@ -193,7 +202,11 @@ struct ScrobbleHistoryView: View {
                         imageURL: row.imageURL
                     )
                 ) {
-                    ScrobbleHistoryListRow(row: row)
+                    ScrobbleHistoryListRow(
+                        row: row, weather: weather, unit: WeatherSettings.temperatureUnit(),
+                        showsWeather: !weather.isEmpty && availableWidth >= Self.weatherMinimumWidth,
+                        showsLocation: availableWidth >= Self.locationMinimumWidth
+                    )
                 }
                 .drillDownHighlight()
                 .entityContextMenu(
@@ -246,6 +259,13 @@ struct ScrobbleHistoryView: View {
             return "\(totalCount.formatted()) scrobbles"
         }
         return "Scrobbles"
+    }
+
+    @MainActor
+    private func loadWeather() async {
+        let snapshot = await offMain { WeatherSnapshot.load() }
+        guard !Task.isCancelled else { return }
+        weather = snapshot
     }
 
     @MainActor
@@ -312,6 +332,10 @@ struct ScrobbleHistoryView: View {
 
 private struct ScrobbleHistoryListRow: View {
     let row: ScrobbleHistoryRow
+    var weather = WeatherSnapshot.empty
+    var unit = TemperatureUnit.celsius
+    var showsWeather = false
+    var showsLocation = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -344,6 +368,10 @@ private struct ScrobbleHistoryListRow: View {
             }
 
             Spacer(minLength: 12)
+
+            if showsWeather {
+                PlayWeatherCells(date: row.playedAt, weather: weather, unit: unit, showsLocation: showsLocation)
+            }
 
             Text(row.playedAt, format: .dateTime.month(.abbreviated).day().year().hour().minute())
                 .font(AppTypography.metadata)

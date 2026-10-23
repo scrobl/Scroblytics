@@ -249,6 +249,10 @@ struct WeatherSeries: Sendable, Equatable {
     /// Every hour up to and including this one has been asked for (hours the service had no value for stay empty and are not asked
     /// again). `Int.min` when nothing has been.
     var coveredThroughHour = Int.min
+    /// Every hour up to and including this one came from the archive, whose values are settled. Hours after it (up to `coveredThroughHour`)
+    /// came from the recent-history source, whose values can still change, so they are asked for again until the archive reaches them.
+    /// `Int.min` when none have.
+    var settledThroughHour = Int.min
 
     var count: Int { temperature.count }
     var endHour: Int { startHour + count - 1 }
@@ -315,29 +319,40 @@ struct WeatherSeries: Sendable, Equatable {
 
     // MARK: Saving
 
-    private static let magic: [UInt8] = Array("SWX1".utf8)
+    /// "SWX1" files have no settled marker (the archive and recent hours were not told apart); they read as nothing settled, so the next
+    /// update asks the archive for the whole history once. "SWX2" adds it.
+    private static let magic: [UInt8] = Array("SWX2".utf8)
+    private static let legacyMagic: [UInt8] = Array("SWX1".utf8)
 
     func encoded() -> Data {
         var data = Data(Self.magic)
         func put<T: FixedWidthInteger>(_ value: T) { var little = value.littleEndian; withUnsafeBytes(of: &little) { data.append(contentsOf: $0) } }
         put(Int64(startHour)); put(UInt32(count)); put(Int64(coveredThroughHour == Int.min ? Int64.min : Int64(coveredThroughHour)))
+        put(Int64(settledThroughHour == Int.min ? Int64.min : Int64(settledThroughHour)))
         for array in [temperature, precipitation, rain, snowfall, code] { for value in array { put(value) } }
         return data
     }
 
     init?(data: Data) {
         let bytes = [UInt8](data)
-        guard bytes.count >= 24, Array(bytes[0..<4]) == Self.magic else { return nil }
+        guard bytes.count >= 24 else { return nil }
+        let isLegacy = Array(bytes[0..<4]) == Self.legacyMagic
+        guard isLegacy || Array(bytes[0..<4]) == Self.magic else { return nil }
+        let headerSize = isLegacy ? 24 : 32
         func read<T: FixedWidthInteger>(_ offset: Int, as: T.Type) -> T {
             var value: T = 0
             withUnsafeMutableBytes(of: &value) { $0.copyBytes(from: bytes[offset..<offset + MemoryLayout<T>.size]) }
             return T(littleEndian: value)
         }
         let start = Int(read(4, as: Int64.self)), count = Int(read(12, as: UInt32.self)), covered = read(16, as: Int64.self)
-        guard count >= 0, count <= 24 * 366 * 2, bytes.count == 24 + count * 5 * 2 else { return nil }
+        guard count >= 0, count <= 24 * 366 * 2, bytes.count == headerSize + count * 5 * 2 else { return nil }
         self.init(startHour: start, count: count)
         coveredThroughHour = covered == Int64.min ? Int.min : Int(covered)
-        var offset = 24
+        if !isLegacy {
+            let settled = read(24, as: Int64.self)
+            settledThroughHour = settled == Int64.min ? Int.min : Int(settled)
+        }
+        var offset = headerSize
         func array() -> [Int16] {
             var out = [Int16](repeating: 0, count: count)
             for i in 0..<count { out[i] = read(offset + i * 2, as: Int16.self) }

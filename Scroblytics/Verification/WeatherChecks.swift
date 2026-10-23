@@ -210,10 +210,12 @@ enum WeatherChecks {
             if let special = log.statusOn, special.call == call { return (special.status, special.body) }
             let query = Dictionary(uniqueKeysWithValues: URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
             let from: Int, to: Int
+            var isRecent = false
             if let start = query["start_date"], let end = query["end_date"] {
                 from = WeatherClient.hourNumber(start + "T00:00")!
                 to = WeatherClient.hourNumber(end + "T23:00")!
             } else {
+                isRecent = true
                 let days = Int(query["past_days"]!)!
                 to = (currentNow / 24) * 24 + 23
                 from = (currentNow / 24) * 24 - days * 24
@@ -224,7 +226,7 @@ enum WeatherChecks {
                 let p = utc.dateComponents([.year, .month, .day, .hour], from: date)
                 times.append(String(format: "\"%04d-%02d-%02dT%02d:00\"", p.year!, p.month!, p.day!, p.hour!))
                 let sample = weather(atHour: h)
-                temps.append(sample.temperature.map { String($0) } ?? "null")
+                temps.append(sample.temperature.map { String($0 + (isRecent ? recentBias : 0)) } ?? "null")
                 precip.append(String(sample.precipitation ?? 0))
                 snow.append(String(sample.snowfall ?? 0))
                 codes.append(String(sample.code ?? 0))
@@ -236,6 +238,8 @@ enum WeatherChecks {
 
     /// The "now" the stand-in uses to answer a request for the last few days.
     nonisolated(unsafe) private static var currentNow = hour(2025, 3, 10, 12)
+    /// Degrees the stand-in's recent-history source is off from the archive (the real two disagree by a few degrees until the archive settles).
+    nonisolated(unsafe) private static var recentBias = 0.0
 
     private static func client() -> WeatherClient {
         let configuration = URLSessionConfiguration.ephemeral
@@ -269,6 +273,7 @@ enum WeatherChecks {
             check("a full year in the middle is asked for whole", q[1]["start_date"] == "2024-01-01" && q[1]["end_date"] == "2024-12-31")
             check("the current year's archive stops a week before now", q[2]["start_date"] == "2025-01-01" && q[2]["end_date"] == "2025-03-03", "\(q[2])")
             check("the days after that come from the recent-history source", log.urls[3].host == "api.open-meteo.com" && q[3]["past_days"] == "8", "\(q[3])")
+            check("a download from the archive and the recent source marks what the archive has settled (through Mar 3)", files.load(place, year: 2025)?.settledThroughHour == hour(2025, 3, 3, 23) && files.load(place, year: 2025)?.coveredThroughHour == WeatherSeries.hour(of: now1), "\(String(describing: files.load(place, year: 2025)?.settledThroughHour))")
             check("the archive requests go to the archive host", log.urls[0].host == "archive-api.open-meteo.com" && log.urls[2].host == "archive-api.open-meteo.com")
 
             let timeline = files.timeline(place)
@@ -286,7 +291,7 @@ enum WeatherChecks {
             let now2 = date(2025, 3, 13, 12, 30)
             currentNow = WeatherSeries.hour(of: now2)
             let top = try await WeatherUpdater.update(place: place, firstPlay: firstPlay, now: now2, client: service, files: files, pause: .zero)
-            check("three days later only the new days are asked for, in one request", top.requests == 1 && log.urls.count == 1 && log.urls[0].host == "api.open-meteo.com" && query(log.urls[0])["past_days"] == "4", "\(log.urls.map(\.absoluteString))")
+            check("three days later the days the archive now has (Mar 4–6) come from it, then the recent days from the first hour it hasn't settled", top.requests == 2 && log.urls.count == 2 && log.urls[0].host == "archive-api.open-meteo.com" && query(log.urls[0])["start_date"] == "2025-03-04" && query(log.urls[0])["end_date"] == "2025-03-06" && log.urls[1].host == "api.open-meteo.com" && query(log.urls[1])["past_days"] == "8", "\(log.urls.map(\.absoluteString))")
             let continued = files.timeline(place)
             check("the weather continues without a gap", [hour(2025, 3, 10, 13), hour(2025, 3, 12, 5), hour(2025, 3, 13, 12)].allSatisfy { continued?.sample(hour: $0) == weather(atHour: $0) })
 
@@ -296,7 +301,7 @@ enum WeatherChecks {
             currentNow = WeatherSeries.hour(of: now3)
             let later = try await WeatherUpdater.update(place: place, firstPlay: firstPlay, now: now3, client: service, files: files, pause: .zero)
             let laterQuery = log.urls.map(query)
-            check("three weeks later the archive request picks up where the last one ended, then the recent days", later.requests == 2 && laterQuery[0]["start_date"] == "2025-03-13" && laterQuery[0]["end_date"] == "2025-03-26" && log.urls[1].host == "api.open-meteo.com", "\(laterQuery)")
+            check("three weeks later the archive request picks up where the last one ended, then the recent days", later.requests == 2 && laterQuery[0]["start_date"] == "2025-03-07" && laterQuery[0]["end_date"] == "2025-03-26" && log.urls[1].host == "api.open-meteo.com", "\(laterQuery)")
 
             // Everything that was ever sent.
             let allowedHosts: Set<String> = ["archive-api.open-meteo.com", "api.open-meteo.com", "geocoding-api.open-meteo.com"]
@@ -309,6 +314,35 @@ enum WeatherChecks {
         } catch {
             check("a download from a stand-in service completes", false, "\(error)")
         }
+
+        // Hours first taken from the recent source are replaced by the archive's settled values once it has them.
+        let revised = WeatherFiles(directory: folder.appending(path: "revised"))
+        standIn(Log())
+        recentBias = 2
+        do {
+            currentNow = WeatherSeries.hour(of: now1)
+            _ = try await WeatherUpdater.update(place: place, firstPlay: firstPlay, now: now1, client: service, files: revised, pause: .zero)
+            func temperature(_ h: Int) -> Double? { revised.timeline(place)?.sample(hour: h)?.temperature }
+            let settled = hour(2025, 3, 2, 10), recentHour = hour(2025, 3, 5, 10), newest = hour(2025, 3, 9, 10)
+            check("an archive hour is the archive's value, and an hour after it is the recent source's (here 2° off)", temperature(settled) == weather(atHour: settled).temperature && temperature(recentHour) == (weather(atHour: recentHour).temperature ?? 0) + 2)
+            let later = date(2025, 3, 13, 12, 30)
+            currentNow = WeatherSeries.hour(of: later)
+            _ = try await WeatherUpdater.update(place: place, firstPlay: firstPlay, now: later, client: service, files: revised, pause: .zero)
+            check("once the archive reaches that day its settled value replaces the recent source's (Mar 5)", temperature(recentHour) == weather(atHour: recentHour).temperature, "\(String(describing: temperature(recentHour)))")
+            check("a day the archive still doesn't have stays the recent source's (Mar 9)", temperature(newest) == (weather(atHour: newest).temperature ?? 0) + 2)
+            // A file saved before the archive and recent hours were told apart: nothing settled, so the history is asked of the archive again.
+            var old = WeatherSeries(startHour: 100, count: 4)
+            old.coveredThroughHour = 103; old.settledThroughHour = 101
+            for h in 100..<104 { old.set(hour: h, weather(atHour: h)) }
+            var legacy = old.encoded()
+            legacy.replaceSubrange(0..<4, with: Array("SWX1".utf8))
+            legacy.removeSubrange(24..<32)
+            let read = WeatherSeries(data: legacy)
+            check("a file saved by the earlier format still reads, with nothing settled", read?.coveredThroughHour == 103 && read?.settledThroughHour == Int.min && read?.sample(hour: 102) == old.sample(hour: 102) && WeatherSeries(data: old.encoded())?.settledThroughHour == 101)
+        } catch {
+            check("recent hours are replaced by settled ones", false, "\(error)")
+        }
+        recentBias = 0
 
         // A limit part-way: what was fetched is kept, and the next run only asks for the rest.
         let limited = WeatherFiles(directory: folder.appending(path: "limit"))

@@ -110,13 +110,16 @@ enum WeatherUpdater {
 
             // Settled history from the archive.
             let archiveTarget = min(yearEnd, limit, nowHour)
-            let fromHour = max(series.coveredThroughHour == Int.min ? yearStart : series.coveredThroughHour + 1, yearStart, firstPlayDayStart)
-            if archiveTarget >= fromHour, archiveTarget > series.coveredThroughHour {
+            // From the end of what the archive has already given, not of what was asked for at all: the last days of an earlier update came
+            // from the recent source, whose values the archive later replaces.
+            let fromHour = max(series.settledThroughHour == Int.min ? yearStart : series.settledThroughHour + 1, yearStart, firstPlayDayStart)
+            if archiveTarget >= fromHour, archiveTarget > series.settledThroughHour {
                 if summary.requests > 0 { try await Task.sleep(for: pause) }
                 let hours = try await client.fetchArchive(place: place, from: WeatherSeries.date(ofHour: fromHour), to: WeatherSeries.date(ofHour: archiveTarget))
                 summary.requests += 1
                 for (hour, sample) in hours where hour >= fromHour && hour <= archiveTarget { series.set(hour: hour, sample) }
-                series.coveredThroughHour = archiveTarget
+                series.settledThroughHour = archiveTarget
+                series.coveredThroughHour = max(series.coveredThroughHour, archiveTarget)
                 changed = true
             }
 
@@ -125,7 +128,8 @@ enum WeatherUpdater {
                 // From the end of what is covered, or (nothing yet) from the first day wanted: not from January, which for a trip begun
                 // last week made the request look 300 days long and be skipped.
                 let wantedFrom = max(yearStart, firstPlayDayStart)
-                let recentFrom = series.coveredThroughHour == Int.min ? wantedFrom : max(series.coveredThroughHour + 1, wantedFrom)
+                // From the first hour the archive has not settled, so the recent source's earlier answers are asked for again.
+                let recentFrom = series.settledThroughHour == Int.min ? wantedFrom : max(series.settledThroughHour + 1, wantedFrom)
                 let days = (realNowHour - recentFrom) / 24 + 2
                 if days <= 92 {
                     if summary.requests > 0 { try await Task.sleep(for: pause) }

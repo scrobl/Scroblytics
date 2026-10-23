@@ -172,6 +172,10 @@ final class WeatherStatus {
         observers.append(NotificationCenter.default.addObserver(forName: .scrobbleSyncDidFinish, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.update(force: false) }
         })
+        // Back online after Offline mode: carry on with a download that was waiting, without needing a sync to start it.
+        observers.append(NotificationCenter.default.addObserver(forName: .connectivityDidResume, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.update(force: false) }
+        })
         refreshCoverage()
         // A little after launch, so the window comes up first.
         Task { @MainActor [weak self] in

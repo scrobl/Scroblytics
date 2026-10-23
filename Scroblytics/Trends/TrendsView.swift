@@ -24,6 +24,7 @@ struct TrendsView: View {
     @State private var hasAnyPlaysInRange: Bool?
     @State private var volumeInputs: TrendsVolumeChart.Inputs?
     @State private var heatmapInputs: TrendsHeatmapChart.Inputs?
+    @State private var weatherInputs: TrendsWeatherGroup.Inputs?
     @State private var tagsInputs: TrendsTagsChart.Inputs?
     @State private var discoveryInputs: TrendsDiscoveryChart.Inputs?
     @State private var canonicalScrobbles: [ScrobbleSnapshot]?
@@ -132,6 +133,9 @@ struct TrendsView: View {
                                 TrendsDiscoveryChart(inputs: discoveryInputs, openQuery: openQuery)
                             }
                         }
+                        if group == .listening, let weatherInputs {
+                            TrendsWeatherGroup(inputs: weatherInputs, openQuery: openQuery)
+                        }
                         if group == .sequence, let rankBumpInputs {
                             TrendsSection(title: "Rankings", subtitle: "How the leaders of this period rose and fell") {
                                 TrendsRankBumpChart(inputs: rankBumpInputs, openQuery: openQuery)
@@ -177,6 +181,11 @@ struct TrendsView: View {
             applyOverviewFocus()
         }
         .environment(\.trendsShareInfo, shareInfo)
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in
+            // Weather was downloaded, removed or its unit or hot/cold percentages changed: read it again.
+            querySnapshots = nil
+            requestReload()
+        }
         .onChange(of: settings.selectedRangeId) { requestReload() }
         .onChange(of: groupRaw) { requestReload() }
         .onChange(of: trends.compareMode) { requestReload() }
@@ -275,7 +284,7 @@ struct TrendsView: View {
                 guard latestRequestID == requestID else { return }
                 snapshots = QuerySnapshots(
                     durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover,
-                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, images: loaded.images
+                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, weather: loaded.weather, images: loaded.images
                 )
                 querySnapshots = snapshots
                 dataVersion += 1
@@ -294,6 +303,7 @@ struct TrendsView: View {
             canonicalScrobbles = canonical
             volumeInputs = TrendsVolumeChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             heatmapInputs = TrendsHeatmapChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
+            weatherInputs = TrendsWeatherGroup.Inputs(scrobbles: all, durations: snapshots.durations, weather: snapshots.weather, range: range, compareRange: compareRange, version: dataVersion)
             discoveryInputs = TrendsDiscoveryChart.Inputs(scrobbles: canonical, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             tagsInputs = TrendsTagsChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             flowInputs = TrendsFlowChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)

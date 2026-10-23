@@ -59,11 +59,15 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// Only plays made when it was one of these for the place (`TemperatureBand` names: "Cold", "Mild", "Hot"). Combined with
     /// `weatherConditions` as "and": cold rain or cold snow.
     var temperatureBands: [String]?
+    /// Only plays made when the temperature was at least `temperatureFrom` and below `temperatureTo` (°C, either may be left out). What
+    /// a Trends weather cell opens: its own range of temperatures, which the three bands can't say. Not in the builder's chips.
+    var temperatureFrom: Double?
+    var temperatureTo: Double?
 
     var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather }
 
     /// Whether the filter looks at the weather, so counting plays needs it.
-    var usesWeather: Bool { !(weatherConditions ?? []).isEmpty || !(temperatureBands ?? []).isEmpty }
+    var usesWeather: Bool { !(weatherConditions ?? []).isEmpty || !(temperatureBands ?? []).isEmpty || temperatureFrom != nil || temperatureTo != nil }
 
     /// Whether a play at `date` passes. A weather filter needs the weather for that hour: with none (weather off, not downloaded, or an
     /// hour before the downloaded years) the play does not match, rather than being counted as if it did.
@@ -78,6 +82,11 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
             if let bands = temperatureBands, !bands.isEmpty {
                 guard let band = weather.band(for: sample), bands.contains(band.rawValue) else { return false }
             }
+            if temperatureFrom != nil || temperatureTo != nil {
+                guard let temperature = sample.temperature else { return false }
+                if let temperatureFrom, temperature < temperatureFrom { return false }
+                if let temperatureTo, temperature >= temperatureTo { return false }
+            }
         }
         if let from = fromHour, let to = toHour {
             let hour = calendar.component(.hour, from: date)
@@ -91,6 +100,9 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         if let months, months.contains(where: { !(1...12).contains($0) }) { throw QueryError.unsupported("a month outside January–December") }
         if let weatherConditions, weatherConditions.contains(where: { WeatherCondition(rawValue: $0) == nil }) { throw QueryError.unsupported("a kind of weather that isn’t Clear, Cloudy, Fog, Rain, Snow or Thunderstorm") }
         if let temperatureBands, temperatureBands.contains(where: { TemperatureBand(rawValue: $0) == nil }) { throw QueryError.unsupported("a temperature band that isn’t Cold, Mild or Hot") }
+        if let temperatureFrom, !temperatureFrom.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
+        if let temperatureTo, !temperatureTo.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
+        if let temperatureFrom, let temperatureTo, temperatureFrom >= temperatureTo { throw QueryError.unsupported("a temperature range that ends before it starts") }
         if (fromHour == nil) != (toHour == nil) { throw QueryError.unsupported("an hour range needs both a start and an end") }
         if let fromHour, let toHour, !(0...23).contains(fromHour) || !(0...23).contains(toHour) { throw QueryError.unsupported("hours run from 0 to 23") }
     }
@@ -125,6 +137,15 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         if let bands = temperatureBands, !bands.isEmpty {
             let ordered = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains).map { $0.lowercased() }
             parts.append("when " + ordered.joined(separator: " or "))
+        }
+        if temperatureFrom != nil || temperatureTo != nil {
+            let unit = WeatherSettings.temperatureUnit()
+            switch (temperatureFrom, temperatureTo) {
+            case (let from?, let to?): parts.append("from \(unit.text(celsius: from)) to \(unit.text(celsius: to))")
+            case (let from?, nil): parts.append("at \(unit.text(celsius: from)) or warmer")
+            case (nil, let to?): parts.append("below \(unit.text(celsius: to))")
+            case (nil, nil): break
+            }
         }
         return parts.joined(separator: ", ")
     }
@@ -166,9 +187,9 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 4: a `playFilter` (only plays on some weekdays / hours). Older sets decode unchanged.
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
-    /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. Older sets
-    /// decode unchanged.
-    static let currentSchemaVersion = 7
+    /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. 8: and a range of
+    /// temperatures. Older sets decode unchanged.
+    static let currentSchemaVersion = 8
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget

@@ -18,6 +18,7 @@ enum WeatherChecks {
             basics(check)
             await download(check)
             fields(check)
+            trends(check)
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }
@@ -370,6 +371,141 @@ enum WeatherChecks {
         check("a search returns the places, and a one-letter search sends nothing", hits?.first?.place.key == place.key && shortSearch?.isEmpty == true)
     }
 
+    // MARK: - Trends
+
+    private static func trends(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-6) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        // Everything is worked out in UTC so the numbers do not depend on the time zone of the Mac running the check.
+        let calendar = utc
+        func play(_ day: Date, _ hod: Int, _ minute: Int = 10) -> ScrobbleSnapshot {
+            let when = calendar.date(byAdding: .minute, value: hod * 60 + minute, to: day)!
+            return ScrobbleSnapshot(artistName: "A", albumName: "Album A", trackName: "Track A", imageURL: nil, playedAt: when)
+        }
+        /// The stand-in weather: temperature is the hour of the day, rain at 6–8, snow at 20–21, clear otherwise; only inside `days`.
+        func series(windows: [(from: Date, days: Int)], rainOnly: [Int]? = nil) -> WeatherSeries {
+            let start = windows.map { WeatherSeries.hour(of: $0.from) }.min()!
+            let end = windows.map { WeatherSeries.hour(of: $0.from) + $0.days * 24 }.max()!
+            var s = WeatherSeries(startHour: start, count: end - start)
+            for (index, window) in windows.enumerated() {
+                let first = WeatherSeries.hour(of: window.from)
+                for h in first..<(first + window.days * 24) {
+                    let hod = h % 24
+                    let isRain = (6...8).contains(hod), isSnow = (20...21).contains(hod) && (rainOnly == nil || !rainOnly!.contains(index))
+                    s.set(hour: h, WeatherSample(temperature: Double(hod), precipitation: nil, rain: nil, snowfall: nil, code: isRain ? 61 : (isSnow ? 71 : 0)))
+                }
+            }
+            return s
+        }
+        func snapshot(_ s: WeatherSeries) -> WeatherSnapshot { WeatherSnapshot(series: s, placeName: "Test", percentiles: (20, 80)) }
+        func lifts(_ r: TrendsWeatherResult) -> [WeatherCondition: Double] { Dictionary(uniqueKeysWithValues: r.tiles.compactMap { t in t.lift.map { (t.condition, $0) } }) }
+        let jan1 = date(2025, 1, 1), jul1 = date(2025, 7, 1)
+        func window(_ from: Date, days: Int) -> DateRange { DateRange(from: from, to: calendar.date(byAdding: .day, value: days, to: from)!.addingTimeInterval(-1)) }
+
+        // Parts of the day and the temperature columns.
+        let names = (0..<24).map { TrendsWeatherEngine.dayparts[TrendsWeatherEngine.daypart(hour: $0)] }
+        check("the day is split Morning 5–11, Afternoon 12–16, Evening 17–20, Night 21–4", names[4] == "Night" && names[5] == "Morning" && names[11] == "Morning" && names[12] == "Afternoon" && names[16] == "Afternoon" && names[17] == "Evening" && names[20] == "Evening" && names[21] == "Night" && names[0] == "Night")
+
+        // Dataset A: ten days, each with 2 plays at 7 (rain), 1 at 12 (clear), 1 at 20 (snow), 1 at 2 (clear).
+        let weatherA = snapshot(series(windows: [(jan1, 10)]))
+        let edges = TrendsWeatherEngine.decileEdges(of: weatherA.series!)
+        check("ten days of hourly 0–23° give the column edges 0, 2, 4, 7, 9, 11, 14, 16, 19, 21, 23", edges == [0, 2, 4, 7, 9, 11, 14, 16, 19, 21, 23], "\(edges)")
+        check("a temperature belongs to the last edge at or below it, and never past the final column",
+              TrendsWeatherEngine.column(of: 0, edges: edges) == 0 && TrendsWeatherEngine.column(of: 1.99, edges: edges) == 0 && TrendsWeatherEngine.column(of: 2, edges: edges) == 1
+                && TrendsWeatherEngine.column(of: 23, edges: edges) == 9 && TrendsWeatherEngine.column(of: 100, edges: edges) == 9 && TrendsWeatherEngine.column(of: -5, edges: edges) == 0)
+        var playsA: [ScrobbleSnapshot] = []
+        for d in 0..<10 {
+            let day = calendar.date(byAdding: .day, value: d, to: jan1)!
+            playsA += [play(day, 7), play(day, 7, 30), play(day, 12), play(day, 20), play(day, 2)]
+        }
+        let rangeA = window(jan1, days: 10)
+        func run(_ plays: [ScrobbleSnapshot], _ weather: WeatherSnapshot, _ range: DateRange, compare: DateRange? = nil, metric: TrendsMetric = .plays, adjust: Bool = false) -> TrendsWeatherResult {
+            TrendsWeatherEngine.compute(scrobbles: plays, weather: weather, range: range, compareRange: compare, metric: metric, durations: .empty, adjustForSeason: adjust, calendar: calendar)
+        }
+        let a = run(playsA, weatherA, rangeA)
+        let aLifts = lifts(a)
+        check("rain: 20 plays over 30 hours of rain is 16 a day against an average day of 5, a lift of 3.2", near(a.tiles.first { $0.condition == .rain }?.perDay, 16) && near(a.tiles.first?.average, 5) && near(aLifts[.rain], 3.2), "\(a.tiles.map { "\($0.condition) \($0.perDay) \($0.lift ?? -1)" })")
+        check("snow: 10 plays over 20 hours is 12 a day, a lift of 2.4", near(a.tiles.first { $0.condition == .snow }?.perDay, 12) && near(aLifts[.snow], 2.4))
+        check("clear: 20 plays over 190 hours is about 2.53 a day, a lift of about 0.505", near(a.tiles.first { $0.condition == .clear }?.perDay, 20.0 / 190 * 24) && near(aLifts[.clear], 20.0 / 190 * 24 / 5))
+        check("a weather that never happened has no hours and no lift", a.tiles.first { $0.condition == .fog }?.hours == 0 && aLifts[.fog] == nil && a.tiles.first { $0.condition == .fog }?.lift == nil)
+        check("the hours and plays behind each tile are counted: rain 30 h and 20 plays, all 240 hours in total", a.tiles.first { $0.condition == .rain }.map { $0.hours == 30 && $0.playCount == 20 && $0.weight == 20 } == true && a.tiles.map(\.hours).reduce(0, +) == 240)
+        check("fewer than 30 plays is thin, and the leaning weather ignores thin ones", a.tiles.allSatisfy(\.isThin) && a.leaning == nil)
+        let aAdjusted = lifts(run(playsA, weatherA, rangeA, adjust: true))
+        check("within one month allowing for the time of year changes nothing", near(aAdjusted[.rain], 3.2) && near(aAdjusted[.snow], 2.4))
+
+        // The grid: how much more or less than that part of the day's usual rate, by temperature.
+        let g = a.grid
+        check("the grid has four parts of the day and ten temperature columns", g.cells.count == 4 && g.cells.allSatisfy { $0.count == 10 } && g.edges == edges)
+        check("morning at 7–9°: 20 plays against 20 hours at 2/7 an hour is 3.5 times usual", near(g.cells[0][3].lift, 3.5) && g.cells[0][3].plays == 20, "\(String(describing: g.cells[0][3]))")
+        check("afternoon at 11–14°: 10 plays against 4 expected is 2.5", near(g.cells[1][5].lift, 2.5) && g.cells[1][5].plays == 10)
+        check("evening at 19–21°: 10 against 5 expected is 2.0, night at 2–4°: 10 against 2.5 is 4.0", near(g.cells[2][8].lift, 2.0) && near(g.cells[3][1].lift, 4.0))
+        check("a cell with hours but no plays is 0 times usual, and one with no hours has no value", near(g.cells[0][2].lift, 0) && g.cells[0][2].plays == 0 && g.cells[0][0].lift == nil && g.cells[0][9].lift == nil)
+
+        // The weeks (days, for a short period).
+        check("a ten-day period is drawn day by day: ten days, each 5 plays, 11.5° and snowy (2 of 24 hours of snow)",
+              a.bucketDays == 1 && a.buckets.count == 10 && a.buckets.allSatisfy { $0.plays == 5 && near($0.temperature, 11.5) && $0.precipitation == .snow && $0.days == 1 }, "\(a.buckets.prefix(2))")
+
+        // Clicking what is drawn opens exactly what is counted.
+        func counted(_ filter: QueryPlayFilter, _ plays: [ScrobbleSnapshot], _ weather: WeatherSnapshot) -> Int {
+            plays.filter { filter.matches($0.playedAt, calendar: calendar, weather: weather) }.count
+        }
+        var cellsAgree = true, cellDetail = ""
+        for row in 0..<4 { for col in 0..<10 {
+            guard let filter = TrendsWeatherEngine.cellFilter(row: row, column: col, edges: edges) else { cellsAgree = false; continue }
+            let opened = counted(filter, playsA, weatherA)
+            if opened != g.cells[row][col].plays { cellsAgree = false; cellDetail += " [\(row),\(col)] drawn \(g.cells[row][col].plays) opens \(opened)" }
+        } }
+        check("every grid cell opens exactly the plays it counts (all 40 cells)", cellsAgree, cellDetail)
+        check("a tile opens exactly its weather's plays: rain 20, snow 10, clear 20",
+              [(WeatherCondition.rain, 20), (.snow, 10), (.clear, 20)].allSatisfy { counted(QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, weatherConditions: [$0.0.rawValue]), playsA, weatherA) == $0.1 })
+
+        // Two months where the weather differs: Jan all clear, July with rain. January is busy, July quiet.
+        let weatherB = snapshot(series(windows: [(jan1, 10), (jul1, 10)], rainOnly: nil))
+        // Jan: no rain at all (use a series with rain only in July): rebuild with codes by month.
+        var seriesB = WeatherSeries(startHour: WeatherSeries.hour(of: jan1), count: WeatherSeries.hour(of: jul1) + 240 - WeatherSeries.hour(of: jan1))
+        for (from, days) in [(jan1, 10), (jul1, 10)] {
+            let first = WeatherSeries.hour(of: from)
+            for h in first..<(first + days * 24) {
+                let hod = h % 24
+                let rain = from == jul1 && (6...8).contains(hod)
+                seriesB.set(hour: h, WeatherSample(temperature: Double(hod), precipitation: nil, rain: nil, snowfall: nil, code: rain ? 61 : 0))
+            }
+        }
+        _ = weatherB
+        let snapB = snapshot(seriesB)
+        var playsB: [ScrobbleSnapshot] = []
+        for d in 0..<10 {
+            let janDay = calendar.date(byAdding: .day, value: d, to: jan1)!, julDay = calendar.date(byAdding: .day, value: d, to: jul1)!
+            for i in 0..<8 { playsB.append(play(janDay, 12, i)) }          // January: 8 a day at noon (clear)
+            playsB += [play(julDay, 7), play(julDay, 7, 30)]                // July: 2 a day at 7 (rain)
+        }
+        let rangeB = DateRange(from: jan1, to: calendar.date(byAdding: .day, value: 11, to: jul1)!)
+        let b = run(playsB, snapB, rangeB), bAdj = run(playsB, snapB, rangeB, adjust: true)
+        check("unadjusted, rain looks 3.2 times usual and clear 0.85 (rain only happens in the quiet month)",
+              near(lifts(b)[.rain], 3.2) && near(lifts(b)[.clear], 80.0 / 450 * 24 / 5), "\(lifts(b))")
+        check("allowing for the time of year, rain is 8 times what July usually brings and clear is 0.82 times what its months bring",
+              near(lifts(bAdj)[.rain], 8.0) && near(lifts(bAdj)[.clear], 80.0 / 97.5), "\(lifts(bAdj))")
+        check("the adjusted bar is the lift times the average day: rain 40 a day, clear 4.1", near(bAdj.tiles.first { $0.condition == .rain }?.perDay, 40) && near(bAdj.tiles.first { $0.condition == .clear }?.perDay, 80.0 / 97.5 * 5))
+        check("a long period is drawn week by week, and every play lands in a week: four weeks with data, 100 plays",
+              b.bucketDays == 7 && b.buckets.count == 4 && b.buckets.map(\.plays).reduce(0, +) == 100 && b.buckets.map(\.plays) == [32, 48, 10, 10], "\(b.buckets.map(\.plays))")
+        check("a rainy week is marked (July's 3 of 24 hours a day), a January week is not", b.buckets.last?.precipitation == .rain && b.buckets.first?.precipitation == TrendsWeatherWeek.Precipitation.none)
+
+        // A comparison period.
+        var playsC: [ScrobbleSnapshot] = []
+        for d in 0..<10 {
+            let day = calendar.date(byAdding: .day, value: d, to: jan1)!
+            for i in 0..<8 { playsC.append(play(day, 7, i)) }
+            for i in 0..<4 { playsC += [play(day, 12, i), play(day, 20, i), play(day, 2, i)] }
+        }
+        let c = run(playsC, weatherA, window(jan1, days: 5), compare: window(calendar.date(byAdding: .day, value: 5, to: jan1)!, days: 5))
+        check("with a comparison period each weather also reports last period's lift: rain 3.2 (enough plays), not snow (too few)", near(c.previousLifts[.rain], 3.2) && c.previousLifts[.snow] == nil && c.leaning?.condition == .rain, "\(c.previousLifts)")
+
+        // Nothing to show.
+        check("with no weather, or a period before it, there is nothing to draw", !run(playsA, .empty, rangeA).hasWeather && !run(playsA, weatherA, window(date(2020, 1, 1), days: 10)).hasWeather)
+        let pendingRun = run(playsA, weatherA, rangeA, metric: .timeListened)
+        check("counting time listened, plays still waiting for a track length are set aside, not guessed", pendingRun.pending == 50 && pendingRun.tiles.allSatisfy { $0.weight == 0 }, "\(pendingRun.pending)")
+    }
+
     // MARK: - The Query fields
 
     private static func fields(_ report: (String, Bool, String) -> Void) {
@@ -479,7 +615,7 @@ enum WeatherChecks {
         var weatherSpec = QuerySpec(target: .track)
         weatherSpec.playFilter = filter(["Rain", "Snow"], ["Cold"])
         let weatherAgain = try? QuerySpec.decode(weatherSpec.encoded())
-        check("a weather filter survives saving at schema version 7", weatherAgain?.playFilter?.weatherConditions == ["Rain", "Snow"] && weatherAgain?.playFilter?.temperatureBands == ["Cold"] && weatherAgain?.schemaVersion == 7)
+        check("a weather filter survives saving at schema version 8", weatherAgain?.playFilter?.weatherConditions == ["Rain", "Snow"] && weatherAgain?.playFilter?.temperatureBands == ["Cold"] && weatherAgain?.schemaVersion == 8)
         let v6 = Data(#"{"schemaVersion": 6, "target": "artist", "groups": [], "sorts": [], "columns": [], "playFilter": {"months": [12, 1, 2]}}"#.utf8)
         let decodedV6 = try? QuerySpec.decode(v6)
         check("a set saved before weather filters still loads, with any weather", decodedV6?.playFilter?.months == [12, 1, 2] && decodedV6?.playFilter?.usesWeather == false)

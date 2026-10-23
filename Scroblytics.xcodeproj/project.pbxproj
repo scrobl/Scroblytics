@@ -90,6 +90,7 @@
 		4CDC6220ADBF97129055535A /* TestProfileLauncherChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D7BC9E16E10D5A8BB0B7F4 /* TestProfileLauncherChecks.swift */; };
 		4D0ED636B3FB24E3232436BC /* AppleMusicPlaylistExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50A180D6008EC4ABC19CD6A7 /* AppleMusicPlaylistExporter.swift */; };
 		4D2EA727B67F0078AD2EE969 /* OverviewDrill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023E1A32C25FAAD8DB801E3B /* OverviewDrill.swift */; };
+		4D5ECB4682B45A4A54660655 /* TrendsWeatherViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0B6E8DF3AB897EA26A86CD /* TrendsWeatherViews.swift */; };
 		4D72C3F700A85F2026F16B9A /* AskSimilar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B530F95F1FBAB7822CCD80 /* AskSimilar.swift */; };
 		4EEA39C5E0918578D5DB2F2E /* SimilarSounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B60B34C70E7BBF86656C59A /* SimilarSounds.swift */; };
 		501BA84B4C10B40F124D26B8 /* ListeningFlowSampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A87A98C230F8E70C3F85B99 /* ListeningFlowSampleData.swift */; };
@@ -209,6 +210,7 @@
 		B3663923F038519D7D36A509 /* SyncEventsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 895E6E93613F2189755A778C /* SyncEventsEngine.swift */; };
 		B51B009433C1F6494325D27E /* QueryWeatherFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE51BF0DB87DF2CC8061E07 /* QueryWeatherFields.swift */; };
 		B77B33FEC02259179B2BBBA1 /* UpdateViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2DE804C2BD59559CC51D84 /* UpdateViews.swift */; };
+		B843671AE8FD249626553938 /* TrendsWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEFD57BB342C08437D127780 /* TrendsWeather.swift */; };
 		B88F132779EE2FC13D85F04B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C0452819E756AD5CD62B93 /* Models.swift */; };
 		B89AF110AB16584E31A1D8B7 /* AlbumTurnoverEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2466FB9E7295529F2E9E52CE /* AlbumTurnoverEngine.swift */; };
 		BAFF20CE14224624B3F87DD3 /* DurationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2E235FEADBC246A91B1558 /* DurationEngine.swift */; };
@@ -314,6 +316,7 @@
 		F848151E61277EC88E93CC92 /* ChartDateSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ACF9E34E65F830D9B905628 /* ChartDateSettings.swift */; };
 		F85D0E17DCB915CC8A62AB22 /* AskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE436DD34F6AACF330623D7 /* AskView.swift */; };
 		F9784375CCE53F2AF82C1DC6 /* LastfmCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43054B020C4F2E7B01EEB184 /* LastfmCredentialsStore.swift */; };
+		FB6E02A1337A0B87D524A3FB /* TrendsWeatherChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06CEAD1557F3DB883C224DA4 /* TrendsWeatherChart.swift */; };
 		FB8211B79A4D749E65B797F6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CC0C068A4DCB4386A76A19AC /* Assets.xcassets */; };
 		FC202BE73AA90EBFCB1F369E /* TrendsMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = 640182F05471471A2F4F4D5D /* TrendsMetric.swift */; };
 		FCA38E86DE6DE914C6842B28 /* BackgroundWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB4B0817343EE8CD301C15C /* BackgroundWork.swift */; };
@@ -326,6 +329,7 @@
 		023E1A32C25FAAD8DB801E3B /* OverviewDrill.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OverviewDrill.swift; sourceTree = "<group>"; };
 		03D5DBB1A5B2B942A80D8173 /* ToolsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolsView.swift; sourceTree = "<group>"; };
 		0654E6603FA4C326B99DA15F /* PopularityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopularityStore.swift; sourceTree = "<group>"; };
+		06CEAD1557F3DB883C224DA4 /* TrendsWeatherChart.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsWeatherChart.swift; sourceTree = "<group>"; };
 		06DEEAC5457CFF1B1564055F /* HelpFieldDefinitions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpFieldDefinitions.swift; sourceTree = "<group>"; };
 		09293A443493E8814F6A0B23 /* ImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageStore.swift; sourceTree = "<group>"; };
 		0A85F1DB2C642CB47EB6A50E /* MostRecentMostOften.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MostRecentMostOften.swift; sourceTree = "<group>"; };
@@ -465,6 +469,7 @@
 		7A2E235FEADBC246A91B1558 /* DurationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurationEngine.swift; sourceTree = "<group>"; };
 		7CD96AFC245A7C42A3F31AE8 /* AskSuggestions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskSuggestions.swift; sourceTree = "<group>"; };
 		7CE436DD34F6AACF330623D7 /* AskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskView.swift; sourceTree = "<group>"; };
+		7D0B6E8DF3AB897EA26A86CD /* TrendsWeatherViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsWeatherViews.swift; sourceTree = "<group>"; };
 		7DA6F1AD2287E2E8E2CB15E7 /* TrendsFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsFlow.swift; sourceTree = "<group>"; };
 		7E615F12ACE0E17618DE7D85 /* CrashReports.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrashReports.swift; sourceTree = "<group>"; };
 		7E6CD2CF6BBED3E493AB77C0 /* RabbitHoleSeeds.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RabbitHoleSeeds.swift; sourceTree = "<group>"; };
@@ -615,6 +620,7 @@
 		E81EF0F4F429BF876C93F53F /* TrendsRankBumpChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsRankBumpChart.swift; sourceTree = "<group>"; };
 		ECC5FBCD9EC7F522E9DE655C /* QueryOperator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryOperator.swift; sourceTree = "<group>"; };
 		EEFAD2C4371248FE24587698 /* QueryCapChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryCapChecks.swift; sourceTree = "<group>"; };
+		EEFD57BB342C08437D127780 /* TrendsWeather.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsWeather.swift; sourceTree = "<group>"; };
 		EF74469BD404A5B762AB616E /* PopularityDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopularityDataStore.swift; sourceTree = "<group>"; };
 		EFA8564705AC1FF6F797DC4C /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
 		F06364A6367779D744018FB8 /* TrendsDecadeRiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsDecadeRiver.swift; sourceTree = "<group>"; };
@@ -1153,6 +1159,9 @@
 				3D5BD50EA1CEA1F8EED49236 /* TrendsView.swift */,
 				5BA2B48DC8BE33DE112FF84E /* TrendsVolumeChart.swift */,
 				B8869751982F117FBE0474E3 /* TrendsComputeGate.swift */,
+				7D0B6E8DF3AB897EA26A86CD /* TrendsWeatherViews.swift */,
+				EEFD57BB342C08437D127780 /* TrendsWeather.swift */,
+				06CEAD1557F3DB883C224DA4 /* TrendsWeatherChart.swift */,
 			);
 			path = Trends;
 			sourceTree = "<group>";
@@ -1603,6 +1612,9 @@
 				B51B009433C1F6494325D27E /* QueryWeatherFields.swift in Sources */,
 				3CD895E64F94EC57D15AEAB7 /* WeatherChecks.swift in Sources */,
 				58EA24976C1B367258181B9C /* TrackPlaysList.swift in Sources */,
+				4D5ECB4682B45A4A54660655 /* TrendsWeatherViews.swift in Sources */,
+				B843671AE8FD249626553938 /* TrendsWeather.swift in Sources */,
+				FB6E02A1337A0B87D524A3FB /* TrendsWeatherChart.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

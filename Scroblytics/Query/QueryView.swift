@@ -1473,6 +1473,23 @@ struct PlayFilterEditor: View {
                     }
                 }
             }
+            if filter.temperatureFrom != nil || filter.temperatureTo != nil {
+                // Set by clicking a cell in Trends › Weather; shown so a filter is never hidden.
+                HStack(spacing: 6) {
+                    let unit = WeatherSettings.temperatureUnit()
+                    let text: String = {
+                        switch (filter.temperatureFrom, filter.temperatureTo) {
+                        case (let from?, let to?): "Temperature \(unit.text(celsius: from)) to \(unit.text(celsius: to))"
+                        case (let from?, nil): "Temperature \(unit.text(celsius: from)) or warmer"
+                        case (nil, let to?): "Temperature below \(unit.text(celsius: to))"
+                        case (nil, nil): ""
+                        }
+                    }()
+                    Text(text).font(AppTypography.compactMetadata)
+                    Button("Remove") { filter.temperatureFrom = nil; filter.temperatureTo = nil }
+                        .buttonStyle(.link).font(AppTypography.compactMetadata)
+                }
+            }
             if filter.usesWeather && (!weatherEnabled || weatherStatus.coverageText == nil) {
                 Text("Weather is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather.")
                     .font(AppTypography.supporting).foregroundStyle(.orange)

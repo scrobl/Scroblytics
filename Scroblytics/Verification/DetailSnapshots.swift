@@ -143,6 +143,72 @@ enum DetailSnapshots {
     @MainActor
     static func playFilter(_ filter: QueryPlayFilter) -> some View { PlayFilterHost(filter: filter) }
 
+    // MARK: Trends › weather (made-up data)
+
+    private static func weatherCard<Content: View>(_ title: String, _ subtitle: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(AppTypography.sectionTitle)
+                Text(subtitle).font(AppTypography.metadata).foregroundStyle(.secondary)
+            }
+            content()
+        }
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
+    }
+
+    static func sampleWeatherTiles() -> [TrendsWeatherTile] {
+        [
+            TrendsWeatherTile(condition: .clear, perDay: 29, average: 31, playCount: 4_210, weight: 4_210, hours: 3_480),
+            TrendsWeatherTile(condition: .cloudy, perDay: 31, average: 31, playCount: 6_020, weight: 6_020, hours: 4_660),
+            TrendsWeatherTile(condition: .fog, perDay: 33, average: 31, playCount: 410, weight: 410, hours: 300),
+            TrendsWeatherTile(condition: .rain, perDay: 38, average: 31, playCount: 3_340, weight: 3_340, hours: 2_110),
+            TrendsWeatherTile(condition: .snow, perDay: 36, average: 31, playCount: 1_150, weight: 1_150, hours: 770),
+            TrendsWeatherTile(condition: .thunderstorm, perDay: 22, average: 31, playCount: 14, weight: 14, hours: 15),
+        ]
+    }
+
+    static func sampleWeatherGrid() -> TrendsWeatherGrid {
+        let rowBias = [-0.10, 0.02, 0.08, 0.17]
+        let cells: [[TrendsWeatherGrid.Cell]] = (0..<4).map { row in
+            (0..<10).map { column in
+                let cold = (4.5 - Double(column)) / 4.5
+                let wobble = sin(Double(row * 7 + column * 3)) * 0.05
+                let plays = (row == 3 && column == 9) ? 8 : 70 + (column * 13 + row * 29) % 130
+                return TrendsWeatherGrid.Cell(lift: 1 + cold * 0.30 + rowBias[row] + wobble, plays: plays)
+            }
+        }
+        return TrendsWeatherGrid(edges: [-9, -4, -1, 1.5, 4, 6.5, 9, 12, 15, 19, 27], cells: cells)
+    }
+
+    static func sampleWeatherWeeks() -> [TrendsWeatherWeek] {
+        let calendar = AppCalendars.listening
+        let start = calendar.date(from: DateComponents(year: 2023, month: 1, day: 2))!
+        return (0..<156).map { index in
+            let season = sin(2 * Double.pi * (Double(index) - 14) / 52)
+            let temperature = 8 + 13 * season + sin(Double(index) * 1.7) * 2.2
+            let plays = Int(200 - 3.4 * (temperature - 8) + sin(Double(index) * 0.9) * 28 + (index % 23 == 0 ? 70 : 0))
+            let precipitation: TrendsWeatherWeek.Precipitation = temperature < 0.5 && index % 2 == 0 ? .snow : (index % 3 == 0 && temperature > 1 ? .rain : .none)
+            return TrendsWeatherWeek(start: calendar.date(byAdding: .day, value: index * 7, to: start)!, temperature: temperature, plays: plays, precipitation: precipitation)
+        }
+    }
+
+    @MainActor
+    static func weatherTrends(unit: TemperatureUnit) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            weatherCard("Weather and listening", "Rainy days are your music days: 38 scrobbles a day, +23% on an average day") {
+                TrendsWeatherTiles(tiles: sampleWeatherTiles())
+            }
+            weatherCard("Temperature and time of day", "How much more or less than usual you play, by how warm it was for your place and the time of day") {
+                TrendsWeatherGridView(grid: sampleWeatherGrid(), unit: unit)
+            }
+            weatherCard("Listening against the weather", "Each week’s scrobbles over that week’s temperature, adjusted for nothing: the raw story") {
+                TrendsWeatherTimeline(weeks: sampleWeatherWeeks(), unit: unit)
+            }
+        }
+    }
+
     @MainActor
     static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, to url: URL) async {
         let view = content
@@ -225,6 +291,10 @@ enum DetailSnapshots {
                     await render(playFilter(chosen), width: width, dark: dark, container: container, to: base.appending(path: "playfilter-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
+            for dark in [true, false] {
+                await render(weatherTrends(unit: .celsius), width: 1000, dark: dark, container: container, to: base.appending(path: "trends-weather-\(dark ? "dark" : "light").png"))
+            }
+            await render(weatherTrends(unit: .fahrenheit), width: 640, dark: true, container: container, to: base.appending(path: "trends-weather-640-dark.png"))
             await render(playsList(withWeather: false), width: 700, dark: true, container: container, to: base.appending(path: "plays-plain-700-dark.png"))
             await render(table(longAlbum: true), width: 900, dark: true, container: container, to: base.appending(path: "table-long-900-dark.png"))
             exit(0)

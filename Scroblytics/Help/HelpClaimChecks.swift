@@ -53,7 +53,7 @@ enum HelpClaimChecks {
             let plays = QueryIdentity.canonicalizingArtists(raw)
             let asOf = date(2026, 10, 4, 12)
             let ids = ["plays", "allTimePlays", "activeDays", "activeWeeks", "activeMonths", "daysSinceLastPlayed", "daysSinceFirstPlayed",
-                       "playSpanDays", "playRank", "nextMilestone", "artistDiscographySize", "peakTimeOfDay", "dayOfWeek", "weekdayOrWeekend"]
+                       "playSpanDays", "playRank", "nextMilestone", "artistDiscographySize", "peakTimeOfDay", "dayOfWeek", "weekdayOrWeekend", "peakSeason"]
             var table: [String: [QueryEntityID: QueryCell]] = [:]
             for id in ids { table[id] = cells(QueryFieldRef(id), plays: plays, asOf: asOf) }
             let byRank = (table["plays"] ?? [:]).compactMap { id, cell in number(cell).map { (id, $0) } }
@@ -188,6 +188,12 @@ enum HelpClaimChecks {
             check("weekdayOrWeekend: a tie is Weekday", text(values(QueryFieldRef("weekdayOrWeekend"), plays: tied, asOf: asOf)["wk"]) == "Weekday")
             let weekend = tied + [play("wk", date(2025, 6, 15))]
             check("weekdayOrWeekend: more weekend plays is Weekend", text(values(QueryFieldRef("weekdayOrWeekend"), plays: weekend, asOf: asOf)["wk"]) == "Weekend")
+            let seasons = [("dec", 12), ("jan", 1), ("feb", 2), ("mar", 3), ("may", 5), ("jun", 6), ("aug", 8), ("sep", 9), ("nov", 11)].map { play($0.0, date(2025, $0.1, 10, 12)) }
+            let seasonValues = values(QueryFieldRef("peakSeason"), plays: seasons, asOf: asOf)
+            let seasonExpected = ["dec": "Winter", "jan": "Winter", "feb": "Winter", "mar": "Spring", "may": "Spring", "jun": "Summer", "aug": "Summer", "sep": "Autumn", "nov": "Autumn"]
+            check("peakSeason (northern): Dec–Feb winter, Mar–May spring, Jun–Aug summer, Sep–Nov autumn", seasonExpected.allSatisfy { text(seasonValues[$0.key]) == $0.value }, "\(seasonValues)")
+            let seasonTie = [play("st", date(2025, 7, 10, 12)), play("st", date(2025, 1, 10, 12))]   // one summer + one winter play
+            check("peakSeason: a tie goes to the earlier of Winter, Spring, Summer, Autumn", text(values(QueryFieldRef("peakSeason"), plays: seasonTie, asOf: asOf)["st"]) == "Winter")
         }
 
         // Milestones.

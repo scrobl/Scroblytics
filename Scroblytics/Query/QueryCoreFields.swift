@@ -150,6 +150,7 @@ extension QueryFieldRegistry {
     static let timeOfDayLabels = ["Night", "Morning", "Afternoon", "Evening"]
     static let dayOfWeekLabels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     static let weekdayOrWeekendLabels = ["Weekday", "Weekend"]
+    static let seasonLabels = Season.allCases.map(\.label)
 
     /// The "peak" fields describe an item's most common day / time, not every play — worth saying wherever a
     /// request like "songs I play on Sunday mornings" is turned into them.
@@ -159,6 +160,25 @@ extension QueryFieldRegistry {
         var field = field
         field.choices = choices
         field.caveat = peakCaveat
+        return field
+    }
+
+    /// The season with the most plays, by the hemisphere chosen in Settings. Whole calendar months, so it never depends on the exact solstice.
+    private static func seasonField(all: Set<QueryTarget>) -> QueryField {
+        var field = withChoices(seasonLabels, QueryField(
+            id: "peakSeason", name: "Season", group: .context, type: .text, targets: all,
+            help: "The season with the most plays: Winter, Spring, Summer or Autumn, as whole calendar months for the hemisphere chosen in Settings › General (northern: winter is December–February; southern: June–August). A tie goes to the first of Winter, Spring, Summer, Autumn. Uses the query’s period or this column’s date scope.",
+            scopedCompute: { run, _, scope, entities in
+                let labels = seasonLabels
+                let hemisphere = SeasonSettings.hemisphere
+                let peaks = peakBucket(run, scope: scope, bucketCount: labels.count) {
+                    Season.of(month: run.calendar.component(.month, from: $0.playedAt), in: hemisphere).rawValue
+                }
+                return Dictionary(uniqueKeysWithValues: entities.map { entity in
+                    (entity.id, peaks[entity.id].map { .value(.text(labels[$0])) } ?? .missing)
+                })
+            }))
+        field.caveat = "The season field matches each item’s most common season, not every one of its plays. To count only the plays made in a season, use “Only count plays on certain days, months or hours” in the scope."
         return field
     }
 
@@ -338,6 +358,7 @@ extension QueryFieldRegistry {
                     (entity.id, peaks[entity.id].map { .value(.text(labels[$0])) } ?? .missing)
                 })
             })),
+            seasonField(all: all),
         ]
     }()
 }

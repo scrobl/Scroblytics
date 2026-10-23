@@ -497,6 +497,7 @@ struct PrivacySettingsSection: View {
 private struct AppearanceSettingsView: View {
     @Binding var appearance: AppearancePreference
     @AppStorage(AppCalendars.weekStartKey) private var weekStartDay = WeekStart.monday.rawValue
+    @AppStorage(SeasonSettings.hemisphereKey) private var hemisphere = Hemisphere.north.rawValue
 
     var body: some View {
         Form {
@@ -536,6 +537,13 @@ private struct AppearanceSettingsView: View {
                 .onChange(of: weekStartDay) { NotificationCenter.default.post(name: .weekStartDidChange, object: nil) }
 
                 Text("Used wherever the app groups plays into weeks: Timeline, Trends, Active weeks, “this week” in Query and Ask, and Time Machine. Last.fm’s own weeks start on Friday. Changing it never alters your data.")
+                    .font(AppTypography.supporting)
+                    .foregroundStyle(.secondary)
+
+                Picker("Seasons", selection: $hemisphere) {
+                    ForEach(Hemisphere.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                Text("Decides which months are winter, spring, summer and autumn in Query and Ask: December–February is winter in the northern hemisphere and June–August in the southern. Changing it never alters your data.")
                     .font(AppTypography.supporting)
                     .foregroundStyle(.secondary)
             }

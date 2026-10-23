@@ -66,7 +66,7 @@ extension HelpContent {
                 .paragraph("A query can limit which plays are counted in four different ways. They do different things."),
                 .table(headers: ["Setting", "Where", "Effect"], rows: [
                     ["**Period**", "Scope & limit › Only count plays in a period", "Plays outside From–To are ignored before anything is computed. “From” and “To” are both optional."],
-                    ["**Certain days or hours**", "Scope & limit › Only count plays on certain days or hours", "Counts only plays on the chosen weekdays and within the hour range (it can wrap past midnight), in local time."],
+                    ["**Certain days, months or hours**", "Scope & limit › Only count plays on certain days, months or hours", "Counts only plays on the chosen weekdays, in the chosen months (in every year) and within the hour range (it can wrap past midnight), in local time. The **Winter**, **Spring**, **Summer** and **Autumn** chips pick a season’s three months for the hemisphere chosen in Settings › General › Dates; the month chips pick any months you like, such as just December for the holidays."],
                     ["**As of**", "Scope & limit › Evaluate as of a date", "Sets “now” for relative fields such as “days since last played” and “last N days”. Normally the moment you run it."],
                     ["**Date scope / baseline** (per column)", "A column’s own date range", "That column is computed over its own range and ignores the Period and the days/hours filter. Comparison columns (Plays change, Rank movement) need a scope **and** a baseline; the default is the last 30 days against the same 30 days a year earlier."],
                 ]),

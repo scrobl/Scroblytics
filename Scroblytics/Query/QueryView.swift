@@ -758,11 +758,11 @@ struct QueryView: View {
                     DatePicker("To", selection: Binding(get: { period.to }, set: { model.spec.period?.to = $0 }), displayedComponents: .date)
                         .help("Last day whose plays count.")
                 }
-                Toggle("Only count plays on certain days or hours", isOn: Binding(
+                Toggle("Only count plays on certain days, months or hours", isOn: Binding(
                     get: { model.spec.playFilter != nil },
                     set: { model.spec.playFilter = $0 ? QueryPlayFilter(weekdays: [], fromHour: nil, toHour: nil) : nil }
                 ))
-                .help("Ignore plays made on other days of the week or at other times of day before anything is counted — “Sunday mornings” means the plays made then. Uses your local time.")
+                .help("Ignore plays made on other days of the week, in other months or at other times of day before anything is counted — “Sunday mornings” or “winter” mean the plays made then, in every year. Uses your local time.")
                 if let filter = model.spec.playFilter {
                     PlayFilterEditor(filter: Binding(get: { filter }, set: { model.spec.playFilter = $0 }))
                 }
@@ -1407,11 +1407,60 @@ extension QueryView {
 }
 
 
-/// Weekday chips (Sun–Sat, none picked = every day) and an optional hour range.
+/// Weekday chips (Sun–Sat, none picked = every day), season and month chips (none picked = every month) and an optional hour range.
 private struct PlayFilterEditor: View {
     @Binding var filter: QueryPlayFilter
+    @AppStorage(SeasonSettings.hemisphereKey) private var hemisphereRaw = Hemisphere.north.rawValue
 
     private let days = ["S", "M", "T", "W", "T", "F", "S"]
+    private var hemisphere: Hemisphere { Hemisphere(rawValue: hemisphereRaw) ?? .north }
+
+    private func chip(_ text: String, on: Bool, width: CGFloat, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .frame(width: width, height: 24)
+                .background(on ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(on ? Color.white : Color.primary)
+                .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// Season chips set the three months of that season; a chip shows as on when exactly those months are chosen.
+    private var seasonChips: some View {
+        HStack(spacing: 4) {
+            ForEach(Season.allCases) { season in
+                let months = season.months(in: hemisphere)
+                let on = Set(filter.months ?? []) == Set(months)
+                chip(season.label, on: on, width: 58, help: "\(season.label): \(season.rangeLabel(in: hemisphere)) (\(hemisphere.label.lowercased()); change it in Settings › General)") {
+                    filter.months = on ? [] : months
+                }
+            }
+        }
+    }
+
+    private var monthChips: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(0..<2, id: \.self) { row in
+                HStack(spacing: 4) {
+                    ForEach(0..<6, id: \.self) { column in
+                        let month = row * 6 + column + 1
+                        let on = filter.months?.contains(month) ?? false
+                        chip(MonthNames.short[month - 1], on: on, width: 38, help: MonthNames.full[month - 1]) {
+                            var set = Set(filter.months ?? [])
+                            if on { set.remove(month) } else { set.insert(month) }
+                            filter.months = set.sorted()
+                        }
+                    }
+                }
+            }
+            // On its own line: beside the chips it has no room in the narrow scope panel and wraps a letter at a time.
+            if (filter.months ?? []).isEmpty {
+                Text("every month").foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1434,6 +1483,8 @@ private struct PlayFilterEditor: View {
                 }
                 Text(filter.weekdays?.isEmpty ?? true ? "every day" : "").foregroundStyle(.secondary)
             }
+            seasonChips
+            monthChips
             Toggle("Only certain hours", isOn: Binding(
                 get: { filter.fromHour != nil },
                 set: { filter.fromHour = $0 ? 5 : nil; filter.toHour = $0 ? 11 : nil }

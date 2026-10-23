@@ -125,6 +125,7 @@ enum HelpFieldDefinitions {
         "artistDiscographySize": "Number of different non-empty album names by the item’s artist in your whole library. Editions count separately. Not limited by the period.",
         "peakTimeOfDay": "The time of day with the most plays: Night (9 PM to 5 AM), Morning (5 AM to noon), Afternoon (noon to 5 PM) or Evening (5 PM to 9 PM), in local time. A tie goes to the earliest of those in that order. It describes the item’s most common time, not each play; to keep only plays from certain hours, use “Only count plays on certain days or hours”.",
         "dayOfWeek": "The weekday on which the item was played most often (a tie goes to the earlier day, Sunday first). Describes its most common day, not every play.",
+        "peakSeason": "The season with the most plays: Winter, Spring, Summer or Autumn, as whole calendar months. In the northern hemisphere winter is December to February, spring March to May, summer June to August and autumn September to November; in the southern hemisphere each season is six months later (winter is June to August). Choose your hemisphere in Settings › General › Dates. A tie goes to the first of Winter, Spring, Summer, Autumn. It describes its most common season, not every play: to count only the plays made in a season, use the season chips under “Only count plays on certain days, months or hours”.",
         "weekdayOrWeekend": "Weekend if more plays fell on Saturday or Sunday than on weekdays; otherwise Weekday (a tie is Weekday). Describes its most common kind of day.",
     ]
 

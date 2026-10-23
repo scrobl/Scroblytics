@@ -50,11 +50,15 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// nil = every hour.
     var fromHour: Int?
     var toHour: Int?
+    /// Calendar months, 1 = January … 12 = December, of any year ("winter" is 12, 1, 2). nil or empty = every month. Optional, and last, so
+    /// sets saved before it existed decode unchanged.
+    var months: [Int]?
 
-    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil }
+    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty }
 
     func matches(_ date: Date, calendar: Calendar = AppCalendars.listening) -> Bool {
         if let weekdays, !weekdays.isEmpty, !weekdays.contains(calendar.component(.weekday, from: date) - 1) { return false }
+        if let months, !months.isEmpty, !months.contains(calendar.component(.month, from: date)) { return false }
         if let from = fromHour, let to = toHour {
             let hour = calendar.component(.hour, from: date)
             return from <= to ? (hour >= from && hour <= to) : (hour >= from || hour <= to)
@@ -64,6 +68,7 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
 
     func validate() throws {
         if let weekdays, weekdays.contains(where: { !(0...6).contains($0) }) { throw QueryError.unsupported("a weekday outside Sunday–Saturday") }
+        if let months, months.contains(where: { !(1...12).contains($0) }) { throw QueryError.unsupported("a month outside January–December") }
         if (fromHour == nil) != (toHour == nil) { throw QueryError.unsupported("an hour range needs both a start and an end") }
         if let fromHour, let toHour, !(0...23).contains(fromHour) || !(0...23).contains(toHour) { throw QueryError.unsupported("hours run from 0 to 23") }
     }
@@ -74,17 +79,27 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         hour == 0 ? "12 AM" : hour == 12 ? "12 PM" : hour < 12 ? "\(hour) AM" : "\(hour - 12) PM"
     }
 
-    /// "Sunday, Saturday, 5 AM–11 AM" — how the filter reads in the builder and in chips.
-    var label: String {
+    /// "Sunday, Saturday, Winter, 5 AM–11 AM" — how the filter reads in the builder and in chips. Three months that make up a season read as
+    /// the season's name (in the hemisphere chosen in Settings).
+    func label(hemisphere: Hemisphere = SeasonSettings.hemisphere) -> String {
         var parts: [String] = []
         if let weekdays, !weekdays.isEmpty {
             parts.append(weekdays.sorted().map { Self.dayNames[$0] }.joined(separator: ", "))
+        }
+        if let months, !months.isEmpty {
+            if let season = Season.matching(months: months, in: hemisphere) {
+                parts.append("\(season.label) (\(season.rangeLabel(in: hemisphere)))")
+            } else {
+                parts.append(Set(months).sorted().map { MonthNames.short[$0 - 1] }.joined(separator: ", "))
+            }
         }
         if let fromHour, let toHour {
             parts.append(fromHour == toHour ? Self.hourLabel(fromHour) : "\(Self.hourLabel(fromHour))–\(Self.hourLabel(toHour))")
         }
         return parts.joined(separator: ", ")
     }
+
+    var label: String { label() }
 }
 
 /// "For each calendar year": the query is evaluated separately over each year's plays. (One kind of period for now; the struct leaves room
@@ -121,7 +136,8 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 4: a `playFilter` (only plays on some weekdays / hours). Older sets decode unchanged.
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
-    static let currentSchemaVersion = 5
+    /// 6: a `playFilter` may also name calendar months (seasons). Older sets decode unchanged.
+    static let currentSchemaVersion = 6
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget

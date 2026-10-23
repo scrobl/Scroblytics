@@ -50,6 +50,9 @@ enum AskExamples {
         Example(request: "top songs I play on Friday nights", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("dayOfWeek", "textIs", text: "Friday"), cond("peakTimeOfDay", "textIs", text: "Night")]],
             sorts: [.init(field: "plays", direction: "descending")], unsupported: [])),
+        Example(request: "top songs I play in winter", target: .track, ordered: true, query: AskWire.Query(
+            groups: [[cond("peakSeason", "textIs", text: "Winter")]],
+            sorts: [.init(field: "plays", direction: "descending")], unsupported: [])),
         Example(request: "songs tagged running that I haven't loved", target: .track, ordered: false, query: AskWire.Query(
             groups: [[AskWire.Condition(field: "tags", op: "tagsIsAny", tags: ["running"]), cond("loved", "isFalse")]], unsupported: [])),
         Example(request: "songs that give me chills", target: .track, ordered: false, query: AskWire.Query(

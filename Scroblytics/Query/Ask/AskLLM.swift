@@ -435,6 +435,7 @@ enum AskPortableSchema {
             "playToHour": nullable(integer),
             "playWeather": ["type": "array", "items": ["type": "string", "enum": WeatherCondition.allCases.map(\.rawValue)], "description": "only plays made in this weather; empty for any"],
             "playTemperature": ["type": "array", "items": ["type": "string", "enum": TemperatureBand.allCases.map(\.rawValue)], "description": "only plays made when it was this warm for the person's place; empty for any"],
+            "playCity": ["type": "array", "items": string, "description": "only plays made in these cities, as the person wrote them (\"Munich\"); empty for anywhere"],
             "unsupported": ["type": "array", "items": string, "description": "Parts of the request no field can express, in plain words."],
             "resolvedTerms": ["type": "array", "items": term, "description": "Vague phrases turned into numbers, e.g. a lot → at least 50 plays."],
             // New music similar to something (Similar Sounds): flat keys, not a nested object, to keep the schema small

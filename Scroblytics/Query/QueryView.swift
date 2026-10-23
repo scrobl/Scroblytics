@@ -1416,6 +1416,8 @@ struct PlayFilterEditor: View {
     @AppStorage(SeasonSettings.hemisphereKey) private var hemisphereRaw = Hemisphere.north.rawValue
     @AppStorage(WeatherSettings.enabledKey) private var weatherEnabled = false
     @State private var weatherStatus = WeatherStatus.shared
+    /// Home and trip cities, read from the settings (not from the weather download).
+    @State private var knownCities: [String] = WeatherLocations.knownCities()
 
     private let days = ["S", "M", "T", "W", "T", "F", "S"]
     private var hemisphere: Hemisphere { Hemisphere(rawValue: hemisphereRaw) ?? .north }
@@ -1498,6 +1500,43 @@ struct PlayFilterEditor: View {
         }
     }
 
+    /// Cities: a play counts if it was made in any of the chosen cities (home, or a trip). Shown once a home place is chosen.
+    @ViewBuilder
+    private var cityChips: some View {
+        let chosen = filter.cities ?? []
+        // A chosen city that is no longer in the settings (a trip removed) stays on the list, so a filter is never hidden.
+        let shown = PlaceNames.unique(knownCities + chosen)
+        if !shown.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("In this city").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                TagFlowLayout(spacing: 4) {
+                    ForEach(shown, id: \.self) { city in
+                        let on = chosen.contains { PlaceNames.key($0) == PlaceNames.key(city) }
+                        Button {
+                            var list = chosen.filter { PlaceNames.key($0) != PlaceNames.key(city) }
+                            if !on { list.append(city) }
+                            filter.cities = list
+                        } label: {
+                            Text(city)
+                                .padding(.horizontal, 10)
+                                .frame(height: 24)
+                                .background(on ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(on ? Color.white : Color.primary)
+                                .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Only the plays made in \(city): your home place, or the trip you were on (Settings › Weather)")
+                    }
+                }
+                if filter.usesCity && knownCities.isEmpty {
+                    Text("No home place is set, so no plays can match. Choose one in Settings › Weather.")
+                        .font(AppTypography.supporting).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private var monthChips: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(0..<2, id: \.self) { row in
@@ -1543,6 +1582,7 @@ struct PlayFilterEditor: View {
             }
             seasonChips
             monthChips
+            cityChips
             weatherChips
             Toggle("Only certain hours", isOn: Binding(
                 get: { filter.fromHour != nil },
@@ -1557,6 +1597,7 @@ struct PlayFilterEditor: View {
                 .help("The hours are inclusive: 5 AM through 11 AM covers 5:00 to 11:59. A start after the end wraps past midnight.")
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in knownCities = WeatherLocations.knownCities() }
     }
 
     private func hourMenu(_ title: String, value: Int, set: @escaping (Int) -> Void) -> some View {

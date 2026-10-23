@@ -209,6 +209,73 @@ enum DetailSnapshots {
         }
     }
 
+    /// The leanings and places cards on made-up listening: four months at home (Oslo) with two trips, artists that favour rain, cold or neither.
+    @MainActor
+    static func leaningsAndPlaces() -> some View {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let end = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -120, to: end)!
+        let startHour = WeatherSeries.hour(of: start)
+        var series = WeatherSeries(startHour: startHour, count: 24 * 121)
+        var rainy = Set<Int>()
+        for h in startHour..<(startHour + 24 * 121) {
+            let dayIndex = (h - startHour) / 24, hod = h % 24
+            let isRainDay = dayIndex % 4 == 1
+            if isRainDay { rainy.insert(dayIndex) }
+            series.set(hour: h, WeatherSample(temperature: 4 + 10 * sin(Double(dayIndex) / 19) + Double(hod) / 6, precipitation: isRainDay ? 0.4 : 0, rain: isRainDay ? 0.4 : 0, snowfall: 0, code: isRainDay ? 61 : (dayIndex % 3 == 0 ? 3 : 0)))
+        }
+        var snapshot = WeatherSnapshot(series: series, placeName: "Oslo, Norway", percentiles: (20, 80))
+        let lisbonPlace = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
+        let tripA = WeatherTrip(place: lisbonPlace, from: calendar.date(byAdding: .day, value: -40, to: end)!, until: calendar.date(byAdding: .day, value: -34, to: end)!)
+        let tripB = WeatherTrip(place: WeatherPlace(name: "Tokyo, Japan", latitude: 35.68, longitude: 139.69), from: calendar.date(byAdding: .day, value: -9, to: end)!, until: nil)
+        for trip in [tripA, tripB] {
+            var away = WeatherSeries(startHour: WeatherSeries.hour(of: trip.from), count: 24 * 12)
+            for h in away.startHour..<(away.startHour + 24 * 12) { away.set(hour: h, WeatherSample(temperature: 19 + Double(h % 24) / 5, precipitation: 0, rain: 0, snowfall: 0, code: 0)) }
+            snapshot.trips.append(WeatherSnapshot.TripWeather(trip: trip, series: away))
+        }
+        var plays: [ScrobbleSnapshot] = []
+        let artists = ["Artist A", "Artist B", "Artist C", "Artist D", "Artist E", "Artist F"]
+        for dayIndex in 0..<120 {
+            let day = calendar.date(byAdding: .day, value: dayIndex, to: start)!
+            let away = (dayIndex >= 80 && dayIndex < 86) || dayIndex >= 111
+            let count = away ? 3 : 9
+            let isRain = rainy.contains(dayIndex)
+            for i in 0..<count {
+                // A and B favour rainy days, C and D dry ones, E and F neither.
+                let pool: [Int] = isRain ? [0, 0, 1, 1, 4, 5, 2] : [2, 2, 3, 3, 4, 5, 0]
+                let artist = artists[pool[(dayIndex * 7 + i) % pool.count]]
+                plays.append(ScrobbleSnapshot(artistName: artist, albumName: "Album \(artist)", trackName: "Song \(artist) \(i % 4)", imageURL: nil, playedAt: day.addingTimeInterval(Double(10 * 3600 + i * 1500))))
+            }
+        }
+        let range = DateRange(from: start, to: end.addingTimeInterval(86_399))
+        // Artwork for some artists (made-up pictures on disk), none for the rest, so both states show.
+        var lookup: [String: String] = [:]
+        let folder = FileManager.default.temporaryDirectory.appending(path: "scroblytics-art-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (index, name) in ["Artist A", "Artist B", "Artist C"].enumerated() {
+            let image = NSImage(size: NSSize(width: 120, height: 120), flipped: false) { rect in
+                NSColor(hue: CGFloat(index) / 3, saturation: 0.55, brightness: 0.75, alpha: 1).setFill(); rect.fill()
+                NSColor.white.withAlphaComponent(0.35).setFill(); NSBezierPath(ovalIn: rect.insetBy(dx: 30, dy: 30)).fill()
+                return true
+            }
+            if let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                let file = folder.appending(path: "\(index).png")
+                try? png.write(to: file)
+                lookup[ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: name, album: nil, track: nil))] = file.absoluteString
+            }
+        }
+        let inputs = TrendsWeatherGroup.Inputs(scrobbles: plays, canonical: plays, imageLookup: lookup, durations: .empty, weather: snapshot, range: range, compareRange: nil, version: 1)
+        return VStack(alignment: .leading, spacing: 18) {
+            weatherCard("Leaning into the weather", "The artists, albums and tracks you play more (or less) than usual in a kind of weather") {
+                TrendsLeaningsCard(inputs: inputs, adjust: true, openQuery: { _, _ in })
+            }
+            weatherCard("Where you listened", "Your trips against home: how much you played, what was new, and the weather") {
+                TrendsPlacesCard(inputs: inputs, unit: .celsius, openQuery: { _, _ in })
+            }
+        }
+    }
+
     /// Settings › Weather › Trips with two trips (one open), and the sheet that adds one. Seeds the scratch trips file.
     @MainActor
     static func tripsSettings() -> some View {
@@ -321,6 +388,9 @@ enum DetailSnapshots {
             }
             for dark in [true, false] {
                 await render(weatherTrends(unit: .celsius), width: 1000, dark: dark, container: container, to: base.appending(path: "trends-weather-\(dark ? "dark" : "light").png"))
+            }
+            for (width, dark) in [(1000, true), (1000, false), (640, true)] as [(CGFloat, Bool)] {
+                await render(leaningsAndPlaces(), width: width, dark: dark, container: container, to: base.appending(path: "trends-new-\(Int(width))-\(dark ? "dark" : "light").png"))
             }
             await render(weatherTrends(unit: .fahrenheit), width: 640, dark: true, container: container, to: base.appending(path: "trends-weather-640-dark.png"))
             for dark in [true, false] {

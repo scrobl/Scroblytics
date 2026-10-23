@@ -52,6 +52,25 @@ extension QueryFieldRegistry {
         }
     }
 
+    /// Every play's city, tallied per item: how many of its plays were made in each city (from the settings alone, so a trip's plays count
+    /// whether or not its weather has been downloaded).
+    static func cityTallies(_ run: QueryRun, scope: QueryScope?) -> [QueryEntityID: [String: Int]] {
+        run.memoized("cityTallies.\(scope?.cacheKey ?? "-")") {
+            let weather = run.snapshots.weather
+            guard !weather.isEmpty else { return [:] }
+            var perEntity: [QueryEntityID: [String: Int]] = [:]
+            for (id, scrobbles) in run.scopedScrobblesByEntity(scope) {
+                var counts: [String: Int] = [:]
+                for scrobble in scrobbles {
+                    guard let city = weather.city(at: scrobble.playedAt) else { continue }
+                    counts[city, default: 0] += 1
+                }
+                perEntity[id] = counts
+            }
+            return perEntity
+        }
+    }
+
     private static let weatherChoices = (WeatherCondition.allCases.map(\.rawValue) + TemperatureBand.allCases.map(\.rawValue))
 
     private static let weatherParameter = QueryFieldParameter(
@@ -133,8 +152,32 @@ extension QueryFieldRegistry {
                 })
             })
 
+        let city = QueryField(
+            id: "playCity", name: "City", group: .context, type: .text, targets: all,
+            help: "The city most of its plays were made in: your home place, or the trip you were on at the time of each play (Settings › Weather › Trips). A tie goes to the city that comes first alphabetically. Needs a home place chosen in Settings › Weather; without it there is no value. It describes the most common city, not every play: to count only the plays made in a city, use the play filter’s Cities. Uses the query’s period or this column’s date scope.",
+            scopedCompute: { run, _, scope, entities in
+                let tallies = cityTallies(run, scope: scope)
+                return Dictionary(uniqueKeysWithValues: entities.map { entity in
+                    guard let counts = tallies[entity.id], let top = counts.values.max() else { return (entity.id, .missing) }
+                    let name = counts.filter { $0.value == top }.keys.sorted { PlaceNames.key($0) < PlaceNames.key($1) }[0]
+                    return (entity.id, .value(.text(name)))
+                })
+            })
+
+        let cityCount = QueryField(
+            id: "playCityCount", name: "Cities played in", group: .context, type: .numeric, targets: all,
+            column: .standard(for: .numeric, style: .integer, width: 100),
+            help: "How many different cities its plays were made in (your home place and each trip place counts once, by name). 1 means it was only ever played in one place. Needs a home place chosen in Settings › Weather. Uses the query’s period or this column’s date scope.",
+            scopedCompute: { run, _, scope, entities in
+                let tallies = cityTallies(run, scope: scope)
+                return Dictionary(uniqueKeysWithValues: entities.map { entity in
+                    guard let counts = tallies[entity.id], !counts.isEmpty else { return (entity.id, .missing) }
+                    return (entity.id, .value(.number(Double(Set(counts.keys.map(PlaceNames.key)).count))))
+                })
+            })
+
         // Kept out of the on-device model's small vocabulary (a weather condition would match nothing while weather is off); the larger
         // models are offered them.
-        return [scoped(condition), scoped(band), scoped(average), scoped(share), scoped(lift)]
+        return [scoped(condition), scoped(band), scoped(average), scoped(share), scoped(lift), scoped(city), scoped(cityCount)]
     }()
 }

@@ -21,7 +21,10 @@ enum AskChips {
         WeatherSettings.isEnabled() && WeatherSettings.place() != nil && UserDefaults.standard.object(forKey: WeatherSettings.lastUpdateKey) != nil
     }
 
-    static func describe(_ spec: QuerySpec, registry: QueryFieldRegistry, weatherReady: Bool = AskChips.weatherReady) -> [AskChip] {
+    /// Whether a home place is set with weather on: a city filter can match nothing before that (it needs no download).
+    static var cityReady: Bool { WeatherSettings.isEnabled() && WeatherSettings.place() != nil }
+
+    static func describe(_ spec: QuerySpec, registry: QueryFieldRegistry, weatherReady: Bool = AskChips.weatherReady, cityReady: Bool = AskChips.cityReady) -> [AskChip] {
         var chips = [AskChip(kind: .target, text: spec.target.rawValue.capitalized + "s")]
         for (index, group) in spec.groups.enumerated() {
             if index > 0 { chips.append(AskChip(kind: .alternative, text: "or")) }
@@ -34,7 +37,8 @@ enum AskChips {
             chips.append(AskChip(
                 kind: .condition, text: "Only plays: " + filter.label,
                 help: "Only the plays made then are counted, so plays, ranks and dates use just those plays.",
-                caveat: filter.usesWeather && !weatherReady ? "This needs weather, which is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather." : nil
+                caveat: filter.usesWeather && !weatherReady ? "This needs weather, which is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather."
+                    : (filter.usesCity && !cityReady ? "This needs a home place, which isn't set yet (weather is off), so no plays can match. Set one in Settings › Weather." : nil)
             ))
         }
         for sort in spec.sorts {

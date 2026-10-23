@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// Trends › Listening › Weather: three cards (kinds of weather, temperature by time of day, listening over the weeks' weather) with one
+/// Trends › Weather & places: five cards (kinds of weather, temperature by time of day, listening over the weeks' weather) with one
 /// set of controls. The weather is the home place's, from Settings › Weather. Everything shown is worked out per hour of weather, so more
 /// plays on clear days only because there are more clear days never shows up as a liking for them.
 struct TrendsWeatherGroup: View {
     struct Inputs: Equatable {
         let scrobbles: [ScrobbleSnapshot]
+        /// The same plays with artist spellings merged: the identity Query uses (leanings and places group by it).
+        let canonical: [ScrobbleSnapshot]
+        /// The artwork the app has saved, by image key (`ImageResolutionEngine.lookupKey`), for the thumbnails.
+        var imageLookup: [String: String] = [:]
         let durations: DurationEngine.Snapshot
         let weather: WeatherSnapshot
         let range: DateRange
@@ -134,11 +138,17 @@ struct TrendsWeatherGroup: View {
         TrendsSection(title: "Weather and listening", subtitle: tilesSubtitle(result), comparison: true) {
             tilesCard(result)
         }
+        TrendsSection(title: "Leaning into the weather", subtitle: "The artists, albums and tracks you play more (or less) than usual in a kind of weather") {
+            TrendsLeaningsCard(inputs: inputs, adjust: adjustForSeason, openQuery: openQuery)
+        }
         TrendsSection(title: "Temperature and time of day", subtitle: "How much more or less than usual you play, by how warm it was for your place and the time of day" + (result.adjusted ? ", allowing for the time of year" : "")) {
             gridCard(result)
         }
         TrendsSection(title: "Listening against the weather", subtitle: "Each \(result.bucketDays == 1 ? "day" : "week")’s \(unitWord) over the weather of that \(result.bucketDays == 1 ? "day" : "week")") {
             timelineCard(result)
+        }
+        TrendsSection(title: "Where you listened", subtitle: "Your trips against home: how much you played, what was new, and the weather") {
+            TrendsPlacesCard(inputs: inputs, unit: unit, openQuery: openQuery)
         }
     }
 
@@ -238,6 +248,6 @@ private struct ShareSummaryModifier: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func shareSummary(_ summary: ShareChartSummary?) -> some View { modifier(ShareSummaryModifier(summary: summary)) }
 }

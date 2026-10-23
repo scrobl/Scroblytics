@@ -52,7 +52,7 @@ struct AskModelEngine: AskEngine {
         // A number of results with no stated order means "the top": most played first.
         let ordered = query.limit != nil && (query.sorts ?? []).isEmpty
         var interpretation = AskInterpreter.interpret(
-            query, target: target, registry: registry, now: now, count: nil, ordered: ordered, knownTags: context.knownTags
+            query, target: target, registry: registry, now: now, count: nil, ordered: ordered, knownTags: context.knownTags, knownCities: context.knownCities
         )
         // "find 25 songs similar to X": the number is the person's, whatever default an omitted key became.
         var similar = wire.similar
@@ -163,7 +163,7 @@ struct AskModelWire: Decodable {
         return shift
     }
 
-    private enum Keys: String, CodingKey { case target, groups, sorts, limit, perArtist, perAlbum, perReleaseYear, playWeekdays, playMonths, playFromHour, playToHour, playWeather, playTemperature, unsupported, resolvedTerms, similarSeed, similarKind, similarArtist, similarLimit }
+    private enum Keys: String, CodingKey { case target, groups, sorts, limit, perArtist, perAlbum, perReleaseYear, playWeekdays, playMonths, playFromHour, playToHour, playWeather, playTemperature, playCity, unsupported, resolvedTerms, similarSeed, similarKind, similarArtist, similarLimit }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -187,7 +187,7 @@ struct AskModelWire: Decodable {
         let monthList = ((try? c.decodeIfPresent([Lenient].self, forKey: .playMonths)) ?? nil)?.compactMap { $0.number.isFinite && abs($0.number) < 1_000 ? Int($0.number.rounded()) : nil }
         let playFilter = AskWire.PlayFilter(
             weekdays: names(.playWeekdays), months: (monthList?.isEmpty ?? true) ? nil : monthList, fromHour: whole(.playFromHour), toHour: whole(.playToHour),
-            weather: names(.playWeather), temperature: names(.playTemperature)
+            weather: names(.playWeather), temperature: names(.playTemperature), city: names(.playCity)
         )
         let seed = ((try? c.decodeIfPresent(String.self, forKey: .similarSeed)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if seed.isEmpty {

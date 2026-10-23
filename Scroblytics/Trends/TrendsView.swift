@@ -77,10 +77,10 @@ struct TrendsView: View {
         }
     }
 
-    /// The page is split into four groups, one shown at a time: it keeps each screen short, and only the charts on
+    /// The page is split into five groups, one shown at a time: it keeps each screen short, and only the charts on
     /// screen are computed, so opening Trends does the work of one group rather than of all ten charts.
     private enum Group: String, CaseIterable, Identifiable {
-        case listening = "Listening", taste = "Taste & eras", habits = "Habits", sequence = "Rankings & flow"
+        case listening = "Listening", weather = "Weather & places", taste = "Taste & eras", habits = "Habits", sequence = "Rankings & flow"
         var id: String { rawValue }
     }
     @AppStorage("trends.group") private var groupRaw = Group.listening.rawValue
@@ -108,7 +108,7 @@ struct TrendsView: View {
                     ForEach(Group.allCases) { Text($0.rawValue).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented).labelsHidden()
-                .help("Trends is split into four groups so each screen stays short and only what you’re looking at is calculated.")
+                .help("Trends is split into five groups so each screen stays short and only what you’re looking at is calculated.")
                 if let errorMessage, hasAnyPlaysInRange == nil {
                     ContentUnavailableView("Failed to load Trends", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
                 } else if let hasAnyPlaysInRange {
@@ -133,7 +133,7 @@ struct TrendsView: View {
                                 TrendsDiscoveryChart(inputs: discoveryInputs, openQuery: openQuery)
                             }
                         }
-                        if group == .listening, let weatherInputs {
+                        if group == .weather, let weatherInputs {
                             TrendsWeatherGroup(inputs: weatherInputs, openQuery: openQuery)
                         }
                         if group == .sequence, let rankBumpInputs {
@@ -303,7 +303,7 @@ struct TrendsView: View {
             canonicalScrobbles = canonical
             volumeInputs = TrendsVolumeChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             heatmapInputs = TrendsHeatmapChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
-            weatherInputs = TrendsWeatherGroup.Inputs(scrobbles: all, durations: snapshots.durations, weather: snapshots.weather, range: range, compareRange: compareRange, version: dataVersion)
+            weatherInputs = TrendsWeatherGroup.Inputs(scrobbles: all, canonical: canonical, imageLookup: snapshots.images.lookup, durations: snapshots.durations, weather: snapshots.weather, range: range, compareRange: compareRange, version: dataVersion)
             discoveryInputs = TrendsDiscoveryChart.Inputs(scrobbles: canonical, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             tagsInputs = TrendsTagsChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             flowInputs = TrendsFlowChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)

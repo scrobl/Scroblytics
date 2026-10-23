@@ -63,8 +63,14 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// a Trends weather cell opens: its own range of temperatures, which the three bands can't say. Not in the builder's chips.
     var temperatureFrom: Double?
     var temperatureTo: Double?
+    /// Only plays made in one of these cities (the home place's or a trip's short name, "Seattle", "Munich"), wherever the person was at the
+    /// time of the play. nil or empty = anywhere. Optional, and last, so sets saved before it existed decode unchanged.
+    var cities: [String]?
 
-    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather }
+    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather && !usesCity }
+
+    /// Whether the filter looks at where the play was made, so counting plays needs the home place and trips.
+    var usesCity: Bool { !(cities ?? []).isEmpty }
 
     /// Whether the filter looks at the weather, so counting plays needs it.
     var usesWeather: Bool { !(weatherConditions ?? []).isEmpty || !(temperatureBands ?? []).isEmpty || temperatureFrom != nil || temperatureTo != nil }
@@ -74,6 +80,11 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     func matches(_ date: Date, calendar: Calendar = AppCalendars.listening, weather: WeatherSnapshot = .empty) -> Bool {
         if let weekdays, !weekdays.isEmpty, !weekdays.contains(calendar.component(.weekday, from: date) - 1) { return false }
         if let months, !months.isEmpty, !months.contains(calendar.component(.month, from: date)) { return false }
+        if let cities, !cities.isEmpty {
+            guard let city = weather.city(at: date) else { return false }
+            let key = PlaceNames.key(city)
+            guard cities.contains(where: { PlaceNames.key($0) == key }) else { return false }
+        }
         if usesWeather {
             guard let sample = weather.sample(at: date) else { return false }
             if let conditions = weatherConditions, !conditions.isEmpty {
@@ -103,6 +114,7 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         if let temperatureFrom, !temperatureFrom.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
         if let temperatureTo, !temperatureTo.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
         if let temperatureFrom, let temperatureTo, temperatureFrom >= temperatureTo { throw QueryError.unsupported("a temperature range that ends before it starts") }
+        if let cities, cities.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { throw QueryError.unsupported("a city with no name") }
         if (fromHour == nil) != (toHour == nil) { throw QueryError.unsupported("an hour range needs both a start and an end") }
         if let fromHour, let toHour, !(0...23).contains(fromHour) || !(0...23).contains(toHour) { throw QueryError.unsupported("hours run from 0 to 23") }
     }
@@ -129,6 +141,9 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         }
         if let fromHour, let toHour {
             parts.append(fromHour == toHour ? Self.hourLabel(fromHour) : "\(Self.hourLabel(fromHour))–\(Self.hourLabel(toHour))")
+        }
+        if let cities, !cities.isEmpty {
+            parts.append("in " + cities.joined(separator: " or "))
         }
         if let conditions = weatherConditions, !conditions.isEmpty {
             let ordered = WeatherCondition.allCases.map(\.rawValue).filter(conditions.contains).map { $0.lowercased() }
@@ -188,8 +203,8 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
     /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. 8: and a range of
-    /// temperatures. Older sets decode unchanged.
-    static let currentSchemaVersion = 8
+    /// temperatures. 9: and cities. Older sets decode unchanged.
+    static let currentSchemaVersion = 9
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget

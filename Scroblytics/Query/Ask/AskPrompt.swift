@@ -68,7 +68,7 @@ enum AskPrompt {
         in plain words. Never replace it with a different field, and never invent a name, artist or tag the request didn't say. \
         If nothing in the request can be expressed, return no conditions and say why in "unsupported".
 
-        PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature keys)
+        PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature / playCity keys)
         - These keys count ONLY the plays made at that time or in that weather, before anything else is worked out. Use them when the request \
         ranks, counts or lists music by what was played then: "my top songs on Sunday mornings", "what I played most in winter", "artists I played \
         when it rained", "top 10 songs when it is cold and raining on a Sunday morning". For "top", "most played" and similar, also sort by plays \
@@ -82,6 +82,9 @@ enum AskPrompt {
         - playWeather: Rain, Snow, Fog, Thunderstorm, Clear or Cloudy ("raining", "rainy" → Rain; "snowing" → Snow; "sunny" → Clear). playTemperature: \
         Cold, Mild or Hot, judged against the person's own place ("cold", "chilly", "freezing" → Cold; "hot", "scorching" → Hot; "mild" → Mild). Both can be \
         given: the plays must match both.
+        - playCity: city names as the person wrote them ("in Munich", "when I was in Las Vegas"), only for a city they name; the app checks the name \
+        against the places they have set in Settings › Weather (home and trips) and tells them if it isn't one. It combines with the other keys. \
+        Use the City field instead when the request describes the item ("music I mostly play in Seattle").
         - Leave the keys empty (empty lists, null hours) when the request names no such time or weather. These are supported: never put them in \
         "unsupported". Weather needs the person to have turned weather on; the app tells them if it isn't, so don't mention it.
 

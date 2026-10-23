@@ -95,6 +95,19 @@ struct WeatherTrip: Codable, Identifiable, Equatable, Sendable {
     var shortName: String { place.shortName }
 }
 
+/// Place names compared the way a person means them: "Munchen" and "München", "munich" and "Munich ".
+enum PlaceNames {
+    static func key(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
+
+    /// The city names a person has listened in: the home place's, then each trip's, each once (by `key`).
+    static func unique(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        return names.filter { !$0.isEmpty && seen.insert(key($0)).inserted }
+    }
+}
+
 extension WeatherPlace {
     var shortName: String { name.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? name }
 }
@@ -437,6 +450,22 @@ struct WeatherSnapshot: Sendable {
         if let trip = tripWeather(at: date) { return trip.trip.shortName }
         guard let placeName, !placeName.isEmpty else { return nil }
         return placeName.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? placeName
+    }
+
+    /// The city a play at `date` was made in: the trip's if the person was away, else the home place's, short ("Oslo", not "Oslo, Norway").
+    /// Not tied to whether weather has been downloaded for that time: where you were is known from the settings alone. nil when no home
+    /// place is set (weather off or never downloaded), so nothing claims a city it doesn't know.
+    func city(at date: Date) -> String? {
+        guard !isEmpty else { return nil }
+        if let trip = WeatherTrip.effective(at: date, in: trips.map(\.trip)) { return trip.shortName }
+        guard let placeName, !placeName.isEmpty else { return nil }
+        return placeName.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? placeName
+    }
+
+    /// Every city this snapshot can name: the home place, then each trip, each once.
+    var cities: [String] {
+        let home = placeName.flatMap { $0.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? $0 }
+        return PlaceNames.unique(([home].compactMap { $0 }) + trips.map(\.trip.shortName))
     }
 
     /// The first and last hour any of the weather covers.

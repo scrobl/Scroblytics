@@ -178,6 +178,8 @@ struct AskContext: Sendable {
     var knownTags: Set<String>?
     /// Every artist name in the library, for validating a code-read "by <artist>" — never shown to the model.
     var knownArtists: Set<String>?
+    /// The cities the person has set (home and trips), for checking a city a model names; nil reads them from the settings.
+    var knownCities: [String]?
     var earliest: Date?
     /// For finding the library item a "similar to X" request names.
     var container: ModelContainer?

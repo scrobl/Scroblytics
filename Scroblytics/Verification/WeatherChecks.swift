@@ -21,6 +21,8 @@ enum WeatherChecks {
             trends(check)
             await tripChecks(check)
             leanChecks(check)
+            leaningChecks(check)
+            placeChecks(check)
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }
@@ -592,6 +594,64 @@ enum WeatherChecks {
         let onTrip = date(2025, 3, 7, 12), atHome = date(2025, 3, 3, 12)
         check("a play on a trip gets the trip's weather, one at home gets home's", snapshot.sample(at: onTrip)?.condition == .rain && near(snapshot.sample(at: onTrip)?.temperature, 21.2) && snapshot.sample(at: atHome)?.condition == .clear)
         check("the location of a play is the trip's place on a trip and home otherwise", snapshot.locationName(at: onTrip) == "Lisbon" && snapshot.locationName(at: atHome) == "Oslo")
+        // Cities: where you were, from the settings alone (not from what has been downloaded).
+        check("the city of a play is the trip's on a trip and home's otherwise, short", snapshot.city(at: onTrip) == "Lisbon" && snapshot.city(at: atHome) == "Oslo")
+        var noWeatherForTrip = snapshot
+        noWeatherForTrip.trips = [WeatherSnapshot.TripWeather(trip: t1, series: WeatherSeries(startHour: WeatherSeries.hour(of: mar5), count: 0))]
+        check("a trip whose weather isn't downloaded yet is still its city (the weather is none, the city is known)", noWeatherForTrip.sample(at: onTrip) == nil && noWeatherForTrip.city(at: onTrip) == "Lisbon")
+        check("no home place means no city for any play", WeatherSnapshot.empty.city(at: onTrip) == nil)
+        var sameCity = snapshot
+        sameCity.trips = [WeatherSnapshot.TripWeather(trip: trip(WeatherPlace(name: "Oslo, Norway", latitude: 59.9, longitude: 10.7), mar5, mar10), series: away), WeatherSnapshot.TripWeather(trip: trip(lisbon, mar10, mar15), series: away)]
+        check("the cities are home first, then each trip, each once", snapshot.cities == ["Oslo", "Lisbon"] && sameCity.cities == ["Oslo", "Lisbon"] && WeatherSnapshot.empty.cities.isEmpty, "\(sameCity.cities)")
+        check("names compare without case or accents", PlaceNames.key(" MÜNCHEN ") == PlaceNames.key("munchen") && PlaceNames.key("Munich") != PlaceNames.key("München") && WeatherLocations.match("lisbon", in: ["Oslo", "Lisbon"]) == "Lisbon" && WeatherLocations.match("Paris", in: ["Oslo", "Lisbon"]) == nil)
+        func cityFilter(_ cities: [String], _ conditions: [String] = []) -> QueryPlayFilter {
+            QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, weatherConditions: conditions, temperatureBands: nil, cities: cities)
+        }
+        check("a city filter keeps the plays made there: Lisbon on the trip, Oslo at home, either spelling of the case", cityFilter(["lisbon"]).matches(onTrip, weather: snapshot) && !cityFilter(["Lisbon"]).matches(atHome, weather: snapshot) && cityFilter(["OSLO"]).matches(atHome, weather: snapshot) && !cityFilter(["Oslo"]).matches(onTrip, weather: snapshot))
+        check("several cities mean any of them", cityFilter(["Oslo", "Lisbon"]).matches(onTrip, weather: snapshot) && cityFilter(["Oslo", "Lisbon"]).matches(atHome, weather: snapshot) && !cityFilter(["Paris"]).matches(atHome, weather: snapshot))
+        check("with no home place a city filter counts nothing, instead of everything", !cityFilter(["Oslo"]).matches(atHome, weather: .empty))
+        check("a city combines with the weather: rain in Lisbon, but not rain in Oslo (the trip's rain)", cityFilter(["Lisbon"], ["Rain"]).matches(onTrip, weather: snapshot) && !cityFilter(["Oslo"], ["Rain"]).matches(onTrip, weather: snapshot))
+        check("a city filter is not empty and says so in words, before the weather", !cityFilter(["Lisbon"]).isEmpty && cityFilter(["Lisbon"]).usesCity && !cityFilter(["Lisbon"]).usesWeather && cityFilter(["Lisbon", "Oslo"], ["Rain"]).label(hemisphere: .north) == "in Lisbon or Oslo, in rain" && QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil).label.isEmpty, cityFilter(["Lisbon"], ["Rain"]).label(hemisphere: .north))
+        check("a city with no name is refused", (try? cityFilter([" "]).validate()) == nil && (try? cityFilter(["Lisbon"]).validate()) != nil)
+        var citySpec = QuerySpec(target: .track)
+        citySpec.playFilter = cityFilter(["Lisbon"], ["Rain"])
+        let cityAgain = try? QuerySpec.decode(citySpec.encoded())
+        check("a city filter survives saving, and an older set without it still loads", cityAgain?.playFilter?.cities == ["Lisbon"] && cityAgain?.schemaVersion == QuerySpec.currentSchemaVersion && (try? QuerySpec.decode(Data(#"{"schemaVersion": 8, "target": "artist", "groups": [], "sorts": [], "columns": [], "playFilter": {"months": [12]}}"#.utf8)))?.playFilter?.cities == nil)
+        // The plays counted and the fields: A only at home, B only on the trip, C both.
+        func cityPlay(_ artist: String, _ date: Date, _ i: Int) -> ScrobbleSnapshot {
+            ScrobbleSnapshot(artistName: artist, albumName: "Album \(artist)", trackName: "Track \(artist)", imageURL: nil, playedAt: date.addingTimeInterval(Double(i) * 60))
+        }
+        let cityPlays = (0..<3).map { cityPlay("A", atHome, $0) } + (0..<2).map { cityPlay("B", onTrip, $0) } + [cityPlay("C", atHome, 9), cityPlay("C", onTrip, 9)]
+        func cityResult(_ filter: QueryPlayFilter?, columns: [String]) -> [String: [QueryCell?]] {
+            var spec = QuerySpec(target: .artist)
+            spec.playFilter = filter
+            spec.columns = columns.map { QueryFieldRef($0) }
+            guard let validated = try? spec.validate(against: .standard) else { return ["invalid": []] }
+            var snapshots = QuerySnapshots()
+            snapshots.weather = snapshot
+            let run = QueryRun(target: .artist, asOf: date(2025, 4, 1), scrobbles: spec.countedPlays(cityPlays, weather: snapshot), allTimeScrobbles: cityPlays, snapshots: snapshots)
+            let result = QueryEngine.evaluate(validated, run: run)
+            return Dictionary(uniqueKeysWithValues: result.rows.map { row in (row.entity.name, result.columns.map { row.cells[$0.cacheKey] }) })
+        }
+        func plays(_ rows: [String: [QueryCell?]]) -> [String: Int] { rows.compactMapValues { cells in if case .value(.number(let n))? = cells.first ?? nil { Int(n) } else { nil } } }
+        check("only the plays made in Lisbon are counted: B's two and C's one", plays(cityResult(cityFilter(["Lisbon"]), columns: ["plays"])) == ["B": 2, "C": 1], "\(plays(cityResult(cityFilter(["Lisbon"]), columns: ["plays"])))")
+        check("only the plays made in Oslo: A's three and C's one", plays(cityResult(cityFilter(["Oslo"]), columns: ["plays"])) == ["A": 3, "C": 1])
+        let cityFields = cityResult(nil, columns: ["plays", "playCity", "playCityCount"])
+        func text(_ cell: QueryCell??) -> String? { if case .value(.text(let t))? = cell ?? nil { t } else { nil } }
+        func number(_ cell: QueryCell??) -> Double? { if case .value(.number(let n))? = cell ?? nil { n } else { nil } }
+        check("the City field is the city most of an item's plays were made in (a tie goes to the first alphabetically)", text(cityFields["A"]?[1]) == "Oslo" && text(cityFields["B"]?[1]) == "Lisbon" && text(cityFields["C"]?[1]) == "Lisbon", "\(cityFields)")
+        check("Cities played in counts the different cities", number(cityFields["A"]?[2]) == 1 && number(cityFields["C"]?[2]) == 2)
+        check("with weather off the city fields have no value", cityResult(nil, columns: ["plays", "playCity"]).isEmpty == false && { var spec = QuerySpec(target: .artist); spec.columns = [QueryFieldRef("playCity")]; let v = try! spec.validate(against: .standard); let run = QueryRun(target: .artist, asOf: date(2025, 4, 1), scrobbles: cityPlays, allTimeScrobbles: cityPlays, snapshots: QuerySnapshots()); let r = QueryEngine.evaluate(v, run: run); return r.rows.allSatisfy { row in text(r.columns.first.map { row.cells[$0.cacheKey] }) == nil } }())
+        // Ask: a city a model names is checked against the places set; one that isn't is dropped, with the places named.
+        var droppedCities: [AskInterpretation.Dropped] = []
+        let asked = AskInterpreter.playFilter(AskWire.PlayFilter(weekdays: nil, months: nil, fromHour: nil, toHour: nil, weather: nil, temperature: nil, city: ["lisbon", "Atlantis", "OSLO"]), dropped: &droppedCities, knownCities: ["Oslo", "Lisbon"])
+        check("Ask keeps the cities that are the person's, spelled the app's way, and drops the others with a reason", asked?.cities == ["Lisbon", "Oslo"] && droppedCities.count == 1 && droppedCities[0].what.contains("Atlantis") && droppedCities[0].reason.contains("Oslo, Lisbon"), "\(String(describing: asked?.cities)) \(droppedCities)")
+        var noPlaces: [AskInterpretation.Dropped] = []
+        let none = AskInterpreter.playFilter(AskWire.PlayFilter(weekdays: nil, months: nil, fromHour: nil, toHour: nil, weather: nil, temperature: nil, city: ["Oslo"]), dropped: &noPlaces, knownCities: [])
+        check("with no places set Ask drops the city and says there is no home place", none == nil && noPlaces.first?.reason.contains("no home place") == true)
+        let cityChips = AskChips.describe(citySpec, registry: .standard, weatherReady: true, cityReady: false)
+        check("the chip says what is counted and warns when no home place is set", cityChips.contains { $0.text == "Only plays: in Lisbon, in rain" && $0.caveat?.contains("home place") == true }, "\(cityChips.map(\.text))")
+        check("with a home place set the chip has no warning", AskChips.describe(citySpec, registry: .standard, weatherReady: true, cityReady: true).first { $0.text.hasPrefix("Only plays:") }?.caveat == nil)
         check("the first day of a trip is the trip's and the day it ends is home's again", snapshot.sample(at: date(2025, 3, 5, 0))?.condition == .rain && snapshot.sample(at: date(2025, 3, 10, 0))?.condition == .clear)
         var gappy = snapshot
         gappy.trips = [WeatherSnapshot.TripWeather(trip: trip(lisbon, mar5, mar15), series: away)]   // weather for 5 of the 10 days
@@ -698,6 +758,141 @@ enum WeatherChecks {
     }
 
     // MARK: - What an artist or album leans into
+
+    /// A snapshot over March and April 2025 with the stand-in weather (rain at 06–08 UTC, snow at 20–21, clear otherwise).
+    private static func marchApril() -> WeatherSnapshot {
+        let startHour = WeatherSeries.hour(of: date(2025, 3, 1))
+        var series = WeatherSeries(startHour: startHour, count: 24 * 61)
+        for h in startHour..<(startHour + 24 * 61) { series.set(hour: h, weather(atHour: h)) }
+        return WeatherSnapshot(series: series, placeName: "Oslo, Norway", percentiles: (20, 80))
+    }
+
+    private static func playAt(_ artist: String, _ album: String = "", _ track: String = "", day: Int, month: Int = 3, hour h: Int, minute: Int = 0) -> ScrobbleSnapshot {
+        ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track.isEmpty ? "Track \(artist)" : track, imageURL: nil, playedAt: date(2025, month, day, h, minute))
+    }
+
+    @MainActor
+    private static func leaningChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-6) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        let weather = marchApril()
+        let range = DateRange(from: date(2025, 3, 1), to: date(2025, 4, 30, 23))
+        // R: 50 plays at 07:00 over 10 days (all rain). C: 50 at noon (none). M: 25 + 25. S: 50 plays in ONE rainy sitting. T: 10 plays (too few).
+        var plays: [ScrobbleSnapshot] = []
+        for i in 0..<50 { plays.append(playAt("R", day: 1 + i % 10, hour: 7, minute: i)) }
+        for i in 0..<50 { plays.append(playAt("C", day: 1 + i % 10, hour: 12, minute: i)) }
+        for i in 0..<25 { plays.append(playAt("M", day: 1 + i % 5, hour: 7, minute: i)); plays.append(playAt("M", day: 1 + i % 5, hour: 12, minute: 30 + i)) }
+        for i in 0..<50 { plays.append(playAt("S", day: 20, hour: 7, minute: i)) }
+        for i in 0..<10 { plays.append(playAt("T", day: 1 + i, hour: 12)) }
+        plays.sort { $0.playedAt < $1.playedAt }
+        let result = TrendsLeaningsEngine.compute(scrobbles: plays, weather: weather, range: range, target: .artist, choice: "Rain", adjust: false, calendar: utc)
+        // Rain plays: R 50 + M 25 + S 50 = 125 of 210 → 125/210 of everything is rain; R is expected 50 × 125/210.
+        let overall = 125.0 / 210
+        check("every play with weather counts once: 210, and the overall share in rain is 125 of 210", result.totalPlays == 210 && near(result.baselineShare, overall), "\(result.totalPlays) \(String(describing: result.baselineShare))")
+        check("a play outside the period or without weather says nothing", TrendsLeaningsEngine.compute(scrobbles: plays, weather: weather, range: DateRange(from: date(2025, 3, 1), to: date(2025, 3, 2)), target: .artist, choice: "Rain", adjust: false, calendar: utc).totalPlays < 210 && TrendsLeaningsEngine.compute(scrobbles: plays, weather: .empty, range: range, target: .artist, choice: "Rain", adjust: false, calendar: utc).totalPlays == 0)
+        let r = result.toward.first
+        check("the artist played only in rain leans most: 50 of 50 plays on 10 days, 50 ÷ (50 × 125/210) = 1.68×", result.toward.map(\.name) == ["R"] && r?.plays == 50 && r?.inWeather == 50 && r?.days == 10 && near(r?.lift, 50 / (50 * overall)), "\(result.toward.map { ($0.name, $0.lift, $0.days) })")
+        check("a sitting on one rainy day is not a pattern: S has the same lift but one day, so it is left out", !result.toward.contains { $0.name == "S" } && result.eligible == 4, "\(result.eligible)")
+        check("only a lean of 15% or more is listed, either way", (result.toward.allSatisfy { $0.lift >= TrendsLeaningsEngine.minimumLift }) && (result.away.allSatisfy { $0.lift <= TrendsLeaningsEngine.maximumAwayLift }) && TrendsLeaningsEngine.minimumLift == 1.15)
+        check("an item with too few plays is not judged at all (T has 10)", !(result.toward + result.away).contains { $0.name == "T" })
+        check("an even mix is not 'more': M is 25 of 50, 0.84×, so it is not on the list", !result.toward.contains { $0.name == "M" })
+        check("the artist never played in rain is the one it leans away from: 0 of 50 with 29.8 expected, lift 0", result.away.first?.name == "C" && near(result.away.first?.lift, 0) && near(result.away.first?.expected, 50 * overall), "\(result.away.map { ($0.name, $0.lift, $0.expected) })")
+        check("away needs enough expected plays to mean something: T (expected 6) is not on the list", !result.away.contains { $0.name == "T" })
+        check("the least-played-in-rain list is ordered from the lowest lift up (C 0, then M 0.84)", result.away.map(\.name) == ["C", "M"], "\(result.away.map(\.name))")
+        // The time of year: Y plays 40 times in a month that is all rain, Z 40 in a month with none.
+        var seasonal: [ScrobbleSnapshot] = []
+        for i in 0..<40 { seasonal.append(playAt("Y", day: 1 + i % 8, month: 3, hour: 7, minute: i)) }
+        for i in 0..<40 { seasonal.append(playAt("Z", day: 1 + i % 8, month: 4, hour: 12, minute: i)) }
+        seasonal.sort { $0.playedAt < $1.playedAt }
+        let raw = TrendsLeaningsEngine.compute(scrobbles: seasonal, weather: weather, range: range, target: .artist, choice: "Rain", adjust: false, calendar: utc)
+        let adjusted = TrendsLeaningsEngine.compute(scrobbles: seasonal, weather: weather, range: range, target: .artist, choice: "Rain", adjust: true, calendar: utc)
+        check("without allowing for the time of year, the artist of the rainy month leans 2×", raw.toward.first?.name == "Y" && near(raw.toward.first?.lift, 2), "\(raw.toward.map { ($0.name, $0.lift) })")
+        check("allowing for it, that is just the month: lift 1×, nothing leans, and the dry month's artist was never expected any rain", adjusted.toward.isEmpty && adjusted.away.isEmpty && adjusted.adjusted)
+        // A temperature band, albums and tracks.
+        let cold = TrendsLeaningsEngine.compute(scrobbles: plays, weather: weather, range: range, target: .track, choice: "Cold", adjust: false, calendar: utc)
+        check("a temperature band counts the plays with a temperature, and a track is its own item", cold.totalPlays == 210 && cold.eligible == 4 && (cold.toward + cold.away).allSatisfy { $0.id.target == .track })
+        let albumPlays = plays.map { ScrobbleSnapshot(artistName: $0.artistName, albumName: $0.artistName == "R" ? "" : "Album \($0.artistName)", trackName: $0.trackName, imageURL: nil, playedAt: $0.playedAt) }
+        let albums = TrendsLeaningsEngine.compute(scrobbles: albumPlays, weather: weather, range: range, target: .album, choice: "Rain", adjust: false, calendar: utc)
+        check("plays with no album are left out of an album list", albums.totalPlays == 160 && !(albums.toward + albums.away).contains { $0.artist == "R" })
+        let withArt = plays.map { ScrobbleSnapshot(artistName: $0.artistName, albumName: "Album \($0.artistName)", trackName: $0.trackName, imageURL: $0.artistName == "R" ? "https://example.test/r.jpg" : nil, playedAt: $0.playedAt) }
+        let art = TrendsLeaningsEngine.compute(scrobbles: withArt, weather: weather, range: range, target: .track, choice: "Rain", adjust: false, calendar: utc)
+        check("a row carries the album it was played under and the artwork its plays had, for the thumbnail", art.toward.first?.album == "Album R" && art.toward.first?.fallbackImageURL == "https://example.test/r.jpg" && art.away.first?.fallbackImageURL == nil, "\(String(describing: art.toward.first?.album)) \(String(describing: art.toward.first?.fallbackImageURL))")
+        check("an unknown weather gives nothing", TrendsLeaningsEngine.compute(scrobbles: plays, weather: weather, range: range, target: .artist, choice: "Lukewarm", adjust: false, calendar: utc) == .empty)
+        // What a row opens.
+        let drill = TrendsLeaningsEngine.drillSpec(for: r!, choice: "Rain", range: range)
+        check("an artist row opens its tracks played in rain, in the period", drill.target == .track && drill.playFilter?.weatherConditions == ["Rain"] && drill.playFilter?.temperatureBands == nil && drill.period?.from == range.from && drill.groups[0].contains { $0.field.id == "artist" && $0.operands == [.text("R")] })
+        let coldDrill = TrendsLeaningsEngine.drillSpec(for: TrendsLeaningItem(id: QueryEntityID(target: .album, artist: "R", name: "X"), plays: 1, inWeather: 1, expected: 1, days: 1), choice: "Cold", range: range)
+        check("a temperature row filters by the band, and an album row opens that album", coldDrill.target == .album && coldDrill.playFilter?.temperatureBands == ["Cold"] && coldDrill.playFilter?.weatherConditions == nil && coldDrill.groups[0].contains { $0.field.id == "name" })
+        // The rows Query shows for that drill are exactly the plays counted: R's 50 rain plays.
+        var rainSpec = drill
+        rainSpec.columns = [QueryFieldRef("plays")]
+        var snapshots = QuerySnapshots(); snapshots.weather = weather
+        if let validated = try? rainSpec.validate(against: .standard) {
+            let run = QueryRun(target: .track, asOf: date(2025, 5, 1), scrobbles: rainSpec.countedPlays(plays, weather: weather), allTimeScrobbles: plays, snapshots: snapshots)
+            let rows = QueryEngine.evaluate(validated, run: run)
+            let key = rows.columns.first?.cacheKey ?? ""
+            let total = rows.rows.reduce(0) { sum, row in if case .value(.number(let n))? = row.cells[key] { sum + Int(n) } else { sum } }
+            check("the plays that drill opens are exactly the 50 the row counted", total == r?.inWeather, "\(total)")
+        } else { check("the drill is a valid query", false) }
+    }
+
+    @MainActor
+    private static func placeChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-6) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        let lisbon = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
+        let trip = WeatherTrip(place: lisbon, from: date(2025, 3, 5), until: date(2025, 3, 10))
+        var snapshot = marchApril()
+        var away = WeatherSeries(startHour: WeatherSeries.hour(of: date(2025, 3, 5)), count: 24 * 5)
+        for h in away.startHour..<(away.startHour + 24 * 5) { away.set(hour: h, WeatherSample(temperature: 20 + Double(h % 24) / 10, precipitation: nil, rain: nil, snowfall: nil, code: 61)) }
+        snapshot.trips = [WeatherSnapshot.TripWeather(trip: trip, series: away)]
+        // 20 days, Mar 1–20: two plays a day at home (A at 10:00 and 15:00), one at noon on each trip day (B, new on the trip, on top of A's).
+        var plays: [ScrobbleSnapshot] = []
+        for d in 1...20 {
+            if (5...9).contains(d) {
+                plays.append(playAt(d == 5 ? "A" : "B", day: d, hour: 12))
+            } else {
+                plays.append(playAt("A", day: d, hour: 10)); plays.append(playAt("A", day: d, hour: 15))
+            }
+        }
+        let range = DateRange(from: date(2025, 3, 1), to: date(2025, 3, 20, 23, 59))
+        let now = date(2025, 3, 20, 23, 59)
+        let result = TrendsPlacesEngine.compute(scrobbles: plays, weather: snapshot, range: range, now: now, calendar: utc)
+        let home = result.home, lisbonStay = result.trips.first
+        check("home is the other 15 days and 30 plays, 2 a day; the trip is 5 days and 5 plays, 1 a day", home?.days == 15 && home?.plays == 30 && near(home?.perDay, 2) && lisbonStay?.days == 5 && lisbonStay?.plays == 5 && near(lisbonStay?.perDay, 1), "\(String(describing: home?.days)) \(String(describing: home?.plays)) \(String(describing: lisbonStay?.days)) \(String(describing: lisbonStay?.plays))")
+        check("the trip is half as much a day as home", near(lisbonStay.flatMap { result.relativeToHome($0) }, 0.5))
+        check("the city and the trip's dates are the trip's, cut to the period", lisbonStay?.city == "Lisbon" && lisbonStay?.from == date(2025, 3, 5) && lisbonStay?.until == date(2025, 3, 10) && home?.city == "Oslo")
+        check("an artist is new where its first play ever was made: B on the trip, A at home", lisbonStay?.newArtists == 1 && home?.newArtists == 1, "\(String(describing: lisbonStay?.newArtists)) \(String(describing: home?.newArtists))")
+        check("the trip's top artists are by plays there (B 4, A 1) and home's is A", lisbonStay?.topArtists == [TrendsStay.Artist(name: "B", plays: 4), TrendsStay.Artist(name: "A", plays: 1)] && home?.topArtists == [TrendsStay.Artist(name: "A", plays: 30)], "\(String(describing: lisbonStay?.topArtists))")
+        check("the weather of a stay is the weather where you were: the trip is 21.2° and all rain, home's noon-free plays are clear", near(lisbonStay?.averageTemperature, 21.2, 1e-9) && near(lisbonStay?.rainShare, 1) && near(home?.rainShare, 0), "\(String(describing: lisbonStay?.averageTemperature)) \(String(describing: home?.rainShare))")
+        check("the chart has a bucket for each of the 20 days with each day's plays a day", result.bucketDays == 1 && result.buckets.count == 20 && result.buckets[0].plays == 2 && result.buckets[5].plays == 1 && near(result.buckets[5].perDay, 1))
+        check("the plays in the buckets are all 35 plays of the period", result.buckets.reduce(0) { $0 + $1.plays } == 35)
+        // A trip going on, and a period that ends part-way through it.
+        let partial = TrendsPlacesEngine.compute(scrobbles: plays, weather: snapshot, range: DateRange(from: date(2025, 3, 1), to: date(2025, 3, 7, 23, 59)), now: now, calendar: utc)
+        check("a period that ends during the trip cuts it: 3 days (5, 6, 7) and its plays up to then", partial.trips.first?.days == 3 && partial.trips.first?.plays == 3 && partial.trips.first?.until == date(2025, 3, 7, 23, 59), "\(String(describing: partial.trips.first?.days)) \(String(describing: partial.trips.first?.plays))")
+        check("a period with no trip has no trips (the chart is not drawn)", TrendsPlacesEngine.compute(scrobbles: plays, weather: snapshot, range: DateRange(from: date(2025, 3, 11), to: date(2025, 3, 20, 23, 59)), now: now, calendar: utc).trips.isEmpty)
+        check("with no weather or home place there is nothing to compare", TrendsPlacesEngine.compute(scrobbles: plays, weather: .empty, range: range, now: now, calendar: utc) == .empty)
+        var open = snapshot
+        open.trips = [WeatherSnapshot.TripWeather(trip: WeatherTrip(place: lisbon, from: date(2025, 3, 18), until: nil), series: away)]
+        let ongoing = TrendsPlacesEngine.compute(scrobbles: plays, weather: open, range: range, now: now, calendar: utc)
+        check("a trip you are still on runs to now: from the 18th, 3 days", ongoing.trips.first?.days == 3 && ongoing.trips.first?.until == now, "\(String(describing: ongoing.trips.first?.days))")
+        // Long periods are drawn a week at a time.
+        let early = [ScrobbleSnapshot(artistName: "A", albumName: "", trackName: "Track A", imageURL: nil, playedAt: date(2024, 6, 2, 10))] + plays
+        let long = TrendsPlacesEngine.compute(scrobbles: early, weather: snapshot, range: DateRange(from: date(2024, 6, 1), to: date(2025, 3, 20, 23, 59)), now: now, calendar: utc)
+        check("a period over 200 days is drawn in weeks, each with its days", long.bucketDays == 7 && long.buckets.allSatisfy { $0.days <= 7 } && long.buckets.reduce(0) { $0 + $1.plays } == 36, "\(long.bucketDays) \(long.buckets.count)")
+        // What a stay opens.
+        let spec = lisbonStay.map { TrendsPlacesEngine.drillSpec(for: $0, target: .track) }
+        check("a trip opens the plays made in its city between its dates", spec?.playFilter?.cities == ["Lisbon"] && spec?.period?.from == date(2025, 3, 5) && spec?.period?.to == date(2025, 3, 10) && spec?.target == .track)
+        if let spec, let validated = try? { var s = spec; s.columns = [QueryFieldRef("plays")]; return try s.validate(against: .standard) }() {
+            var s = spec; s.columns = [QueryFieldRef("plays")]
+            var snapshots = QuerySnapshots(); snapshots.weather = snapshot
+            let run = QueryRun(target: .track, asOf: date(2025, 5, 1), scrobbles: s.countedPlays(plays, weather: snapshot), allTimeScrobbles: plays, snapshots: snapshots)
+            let rows = QueryEngine.evaluate(validated, run: run)
+            let key = rows.columns.first?.cacheKey ?? ""
+            let total = rows.rows.reduce(0) { sum, row in if case .value(.number(let n))? = row.cells[key] { sum + Int(n) } else { sum } }
+            check("the plays that opens are exactly the trip's 5", total == lisbonStay?.plays, "\(total)")
+        }
+    }
 
     private static func leanChecks(_ report: (String, Bool, String) -> Void) {
         func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
@@ -859,7 +1054,7 @@ enum WeatherChecks {
         var weatherSpec = QuerySpec(target: .track)
         weatherSpec.playFilter = filter(["Rain", "Snow"], ["Cold"])
         let weatherAgain = try? QuerySpec.decode(weatherSpec.encoded())
-        check("a weather filter survives saving at schema version 8", weatherAgain?.playFilter?.weatherConditions == ["Rain", "Snow"] && weatherAgain?.playFilter?.temperatureBands == ["Cold"] && weatherAgain?.schemaVersion == 8)
+        check("a weather filter survives saving at the current schema version", weatherAgain?.playFilter?.weatherConditions == ["Rain", "Snow"] && weatherAgain?.playFilter?.temperatureBands == ["Cold"] && weatherAgain?.schemaVersion == QuerySpec.currentSchemaVersion)
         let v6 = Data(#"{"schemaVersion": 6, "target": "artist", "groups": [], "sorts": [], "columns": [], "playFilter": {"months": [12, 1, 2]}}"#.utf8)
         let decodedV6 = try? QuerySpec.decode(v6)
         check("a set saved before weather filters still loads, with any weather", decodedV6?.playFilter?.months == [12, 1, 2] && decodedV6?.playFilter?.usesWeather == false)

@@ -60,6 +60,21 @@ extension WeatherSnapshot {
     }
 }
 
+/// The cities the person has listened in, from the settings alone (the home place and the trips), for the query builder and Ask to offer and
+/// check names against.
+enum WeatherLocations {
+    static func knownCities(defaults: UserDefaults = .standard, tripsFile: URL = WeatherTripStore.defaultFile()) -> [String] {
+        guard WeatherSettings.isEnabled(defaults: defaults), let place = WeatherSettings.place(defaults: defaults) else { return [] }
+        return PlaceNames.unique([place.shortName] + WeatherTripStore.load(file: tripsFile).map(\.shortName))
+    }
+
+    /// The city as the app names it (its own spelling), for a name a person or model typed; nil if it isn't one of `known`.
+    static func match(_ name: String, in known: [String]) -> String? {
+        let key = PlaceNames.key(name)
+        return known.first { PlaceNames.key($0) == key }
+    }
+}
+
 /// Downloads and tops up the weather for a place. Only the years the history spans are fetched, each at most once; after that only
 /// the new days are asked for. Each year is saved as it completes, so a stop part-way (offline, a limit, quitting) loses nothing.
 enum WeatherUpdater {

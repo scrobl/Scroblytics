@@ -32,7 +32,7 @@ enum AskInterpreter {
     /// `count` is the number of results the request asked for (found in stage 1), applied as the limit.
     static func interpret(
         _ query: AskWire.Query, target: QueryTarget, registry: QueryFieldRegistry, now: Date, calendar: Calendar = AppCalendars.listening, count: Int? = nil, ordered: Bool = false,
-        knownTags: Set<String>? = nil
+        knownTags: Set<String>? = nil, knownCities: [String]? = nil
     ) -> AskInterpretation {
         var dropped: [AskInterpretation.Dropped] = []
         var spec = QuerySpec(target: target)
@@ -85,7 +85,7 @@ enum AskInterpreter {
             if limit >= 1 { spec.limit = limit } else { dropped.append(.init(what: "limit \(limit)", reason: "a limit below 1")) }
         }
 
-        spec.playFilter = playFilter(query.playFilter, dropped: &dropped)
+        spec.playFilter = playFilter(query.playFilter, dropped: &dropped, knownCities: knownCities)
 
         spec.groupLimit = groupLimit(perArtist: query.perArtist, perAlbum: query.perAlbum, perReleaseYear: query.perReleaseYear, target: target, dropped: &dropped)
 
@@ -97,7 +97,7 @@ enum AskInterpreter {
     /// The plays to count, as the model named them, kept only where the app would accept them: day names become weekday numbers, months
     /// must be 1–12, hours 0–23 and both given, weather and temperature names one of the app's own. Anything that doesn't fit is dropped
     /// and explained, never kept; what is left still applies.
-    static func playFilter(_ wire: AskWire.PlayFilter?, dropped: inout [AskInterpretation.Dropped]) -> QueryPlayFilter? {
+    static func playFilter(_ wire: AskWire.PlayFilter?, dropped: inout [AskInterpretation.Dropped], knownCities: [String]? = nil) -> QueryPlayFilter? {
         guard let wire, !wire.isEmpty else { return nil }
         var filter = QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil)
 
@@ -143,6 +143,18 @@ enum AskInterpreter {
             else { dropped.append(.init(what: "the temperature “\(name)”", reason: "not Cold, Mild or Hot")) }
         }
         if !bands.isEmpty { filter.temperatureBands = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains) }
+
+        // Cities: only places the person has set (home and trips), matched ignoring case and accents, and written the app's way.
+        var cities: [String] = []
+        let known = knownCities ?? WeatherLocations.knownCities()
+        for name in wire.city ?? [] {
+            if let city = WeatherLocations.match(name, in: known) { if !cities.contains(city) { cities.append(city) } }
+            else {
+                let places = known.isEmpty ? "no home place is set in Settings › Weather" : "your places are " + known.joined(separator: ", ")
+                dropped.append(.init(what: "the city “\(name)”", reason: "not a place you have listened in (\(places))"))
+            }
+        }
+        if !cities.isEmpty { filter.cities = cities }
 
         return filter.isEmpty ? nil : filter
     }

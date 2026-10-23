@@ -46,6 +46,25 @@ extension HelpContent {
             ]
         ),
         HelpArticle(
+            id: "screen-weather",
+            title: "Weather",
+            summary: "Match your listening with the weather at home: rainy-day, snowy-day and hot-day music.",
+            blocks: [
+                .paragraph("**Settings › Weather** adds the weather at the time of each play to [Query](help://query-basics) and [Ask](help://ask). Ask “which songs do I play most when it rains?” or build it yourself with the weather fields. It is off until you turn it on."),
+                .bullets([
+                    "**Where:** choose a home place by searching for a city, or enter its coordinates. The weather is looked up for that place, whatever you were really doing, so listening while travelling gets your home weather. Coordinates are rounded to one decimal place (about 11 km).",
+                    "**What:** hourly weather for the years your scrobbles span, from the free [Open-Meteo](https://open-meteo.com/) service (data under CC BY 4.0). Each play gets the weather of the hour it was made in. The last few days come from a quick-look source and are never exactly the same as the settled archive.",
+                    "**Celsius or Fahrenheit:** Settings › Weather chooses the unit temperatures are shown and typed in (Automatic follows your Mac’s region). The weather itself is kept in Celsius, so changing it never alters your data.",
+                    "**Hot and cold are relative.** *Cold* is the coldest 20% of hours at your place and *Hot* the warmest 20% (you can change both percentages), because 15° is warm in one climate and cold in another. Settings shows the temperatures this comes to for you.",
+                ]),
+                .paragraph("The fields, all in the Context group: **Weather** (the kind of weather most plays were made in), **Temperature (relative)** (Cold, Mild or Hot), **Average temperature when played**, **Share of plays in weather** (for example the share made in rain) and **Weather lift** (how much more or less than usual it is played in that weather, so a favourite that only seems rainy because you listen to it in winter does not mislead). Like the Day of week and Season fields, they describe an item’s typical plays, not every one."),
+                .callout(.tip, "Weather follows the seasons, so a plain “most played when cold” is mostly “most played in winter”. Use **Weather lift**, which compares with the same period’s overall plays, and a minimum number of plays so a handful of plays can’t dominate."),
+                .paragraph("**On a track’s page** each play in its list shows the place and the weather at that hour (see [Artist, album and track pages](help://screen-detail-pages))."),
+                .paragraph("**Privacy.** Turning weather on sends Open-Meteo your home place’s rounded coordinates and date ranges (and the name you type when searching for a city). It never sends what you listened to, and the weather is kept on this Mac (never in a backup, since it can be downloaded again). **Remove Downloaded Weather** deletes it; **Offline mode** stops the downloads. See [What leaves your Mac](help://what-leaves-your-mac)."),
+                .paragraph("Weather data by [Open-Meteo.com](https://open-meteo.com/)."),
+            ]
+        ),
+        HelpArticle(
             id: "screen-sharing",
             title: "Sharing",
             summary: "The Share button: an image or text of what you are looking at, for friends or a Reddit post.",
@@ -86,6 +105,7 @@ extension HelpContent {
                     HelpDefinition(term: "Release date and duration", detail: "The pencil opens an editor. A release date accepts `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; a duration accepts `m:ss` or `h:mm:ss`, with an Apple Music prefill. “Reset to Detected” removes your override. A track’s own release date applies to that song only, not its album."),
                     HelpDefinition(term: "Tempo", detail: "A track’s tempo in BPM, with its time signature and key when GetSongBPM knew them; hover for where it came from. The pencil opens an editor with ÷ 2 and × 2 buttons for a tempo a detector reported at half or double speed. “Reset to Detected” removes your correction. See [Tempo](help://tempo-lookup)."),
                     HelpDefinition(term: "Share", detail: "The share icon beside the name makes a card of the page (see [Sharing](help://screen-sharing)): the picture, the numbers in the tiles, the badges and the trend, for the period chosen above. It is disabled until the numbers have loaded."),
+                    HelpDefinition(term: "Plays list and weather", detail: "A track’s plays are listed newest first with the date, album and time. With [weather](help://screen-weather) turned on and downloaded, each play also shows a **Location** (your home place) and the **Weather** at that hour, such as “Rain · 8 °C” with an icon, in the unit chosen in Settings › Weather. A dash means there is no weather for that time yet, for example before the first year downloaded."),
                     HelpDefinition(term: "Tags", detail: "Community tags (from Last.fm, read-only) and Your tags. Adding or removing yours needs [Track Actions](help://track-actions) and changes your public Last.fm profile."),
                     HelpDefinition(term: "Album turnover", detail: "Cycles completed, rate and tracks still unheard ([how](help://metrics-turnover)). They show as tiles (**Tracks**, **Turnover**, **Full cycles** and **This cycle**, such as “8 of 11”), and the per-track checklist is the **Cycle** column of the track table."),
                     HelpDefinition(term: "Track table", detail: "An album’s whole tracklist in order, with each track’s plays in the chosen period and when it was last played. The **Cycle** column shows whether the track counts toward the current listen-through, which is all-time, not limited to the period. A track with no plays in the period is dimmed and shows 0, but it still opens its own page (which shows its plays for whatever period you choose). Plays that match no title on the tracklist are listed under “Other tracks played”. **All tracks**, **Played in period** and **Not heard this cycle** filter it. With no Last.fm account, no tracklist or no match, it is just the tracks you played, with no Cycle column. The playlist export includes only tracks you played. **Length** is the track’s saved length (your correction, else the lookup); a track whose length isn’t known shows a dash. A narrow window drops “Last played” first, then “Length”."),

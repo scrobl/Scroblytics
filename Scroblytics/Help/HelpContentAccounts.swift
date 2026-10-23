@@ -133,6 +133,7 @@ extension HelpContent {
                     ["**MusicBrainz**", "Album release dates", "Artist and album name, with the project’s contact address in the request header, as MusicBrainz asks"],
                     ["**Image servers** (Last.fm, Deezer)", "Downloading artwork, and your Last.fm profile picture if you turn on **Include my profile picture** for shared cards (the address of the picture comes from Last.fm’s `user.getInfo`)", "An ordinary image request"],
                     ["**Apple Music catalogue** (`itunes.apple.com`, no sign-in)", "**View in Apple Music**, only when you choose it", "Artist, album or track name as search text; the answer is the page to open in the Music app"],
+                    ["**Open-Meteo** (`archive-api.open-meteo.com`, `api.open-meteo.com`, `geocoding-api.open-meteo.com`, no sign-in)", "Hourly weather for your home place, only if you turn on **Settings › Weather**; and the city search there", "Your home place’s coordinates rounded to about 11 km and date ranges; the city name you type when searching. Nothing about your music."],
                     ["**GitHub** (`api.github.com`, no sign-in)", "The daily check for a newer version of Scroblytics (turn it off in Settings › General › Updates)", "An ordinary web request: your IP address and the app’s name and version, such as “Scroblytics/0.9.0”. Nothing about you or your library."],
                     ["**Your Ask provider** (if you pick one)", "Ask", "See [Ask engines](help://ask-keys)"],
                 ]),

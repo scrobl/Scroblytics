@@ -19,6 +19,8 @@ final class TrackDetailModel {
     var errorMessage: String?
     var yearlyTopRanks: [TopChartsEngine.YearlyRank] = []
     var scrobbleHistory: [ScrobbleHistoryEntry] = []
+    /// The weather for each play's hour, when weather is turned on and downloaded (Settings › Weather); empty otherwise.
+    var weather = WeatherSnapshot.empty
     var communityTags: TagsLoadState = .loading
     var yourTags: TagsLoadState = .loading
     var resolvedDuration: Int?
@@ -76,6 +78,13 @@ final class TrackDetailModel {
     func loadScrobbleHistory(range: DateRange) {
         guard let context else { return }
         scrobbleHistory = (try? EntityStatsEngine.fetchTrackScrobbleHistory(context: context, artist: identity.artist, track: identity.name, range: range)) ?? []
+    }
+
+    /// Reads the saved weather off the main thread. Cheap while weather is off.
+    func loadWeather() async {
+        let snapshot = await offMain { WeatherSnapshot.load() }
+        guard !Task.isCancelled else { return }
+        weather = snapshot
     }
 
     func loadYearlyTopRanks() async {

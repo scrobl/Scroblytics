@@ -165,6 +165,9 @@ struct QueryView: View {
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in
+            if isActive { model.refreshSnapshots() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: BPMEngine.progressNotification)) { _ in
             if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }

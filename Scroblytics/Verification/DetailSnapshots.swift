@@ -114,6 +114,21 @@ enum DetailSnapshots {
         .frame(height: longAlbum ? 900 : 560)
     }
 
+    /// A track's plays with and without weather: some covered, one before the downloaded years, one at an hour with no temperature.
+    @MainActor
+    static func playsList(withWeather: Bool) -> some View {
+        let now = Date()
+        let history = (0..<8).map { ScrobbleHistoryEntry(playedAt: now.addingTimeInterval(-Double($0) * 86_400 * 3 - Double($0) * 5_000), album: $0 % 3 == 0 ? nil : "Album Name") }
+        var series = WeatherSeries(startHour: WeatherSeries.hour(of: now) - 24 * 14, count: 24 * 15)
+        let codes = [61, 0, 3, 71, 95, 45]
+        for hour in series.startHour..<(series.startHour + series.count) {
+            let index = (hour / 24) % codes.count
+            series.set(hour: hour, WeatherSample(temperature: hour % 11 == 0 ? nil : Double((hour / 24) % 17) - 3 + Double(hour % 24) / 6, precipitation: nil, rain: nil, snowfall: nil, code: codes[index]))
+        }
+        let snapshot = withWeather ? WeatherSnapshot(series: series, placeName: "Oslo, Norway", percentiles: (20, 80)) : .empty
+        return TrackPlaysList(history: history, weather: snapshot, unit: .celsius)
+    }
+
     @MainActor
     static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, to url: URL) async {
         let view = content
@@ -184,6 +199,13 @@ enum DetailSnapshots {
                     await render(table(), width: width, dark: dark, container: container, flagged: flagged, to: base.appending(path: "table-\(Int(width))-\(mode).png"))
                 }
             }
+            for width in [900, 560, 440] as [CGFloat] {
+                for dark in [true, false] {
+                    let mode = dark ? "dark" : "light"
+                    await render(playsList(withWeather: true), width: width, dark: dark, container: container, to: base.appending(path: "plays-weather-\(Int(width))-\(mode).png"))
+                }
+            }
+            await render(playsList(withWeather: false), width: 700, dark: true, container: container, to: base.appending(path: "plays-plain-700-dark.png"))
             await render(table(longAlbum: true), width: 900, dark: true, container: container, to: base.appending(path: "table-long-900-dark.png"))
             exit(0)
         }

@@ -115,6 +115,7 @@ extension HelpContent {
                     "Similar Sounds’ Find Similar, Rabbit Hole suggestions, Missing Data’s Resolve Now, Refresh Image, and the Last.fm candidates in Fix Album Match.",
                     "Ask with Claude, OpenAI or Gemini. Ask with **Apple on-device**, **Ollama** or a **server on this Mac** keeps working (see [Ask engines](help://ask-keys)).",
                     "The daily check for a newer version of Scroblytics (see [Updating Scroblytics](help://updating)).",
+                    "Downloading weather, and searching for a place, in [Settings › Weather](help://screen-weather). The weather already downloaded keeps working.",
                 ]),
                 .heading("What keeps working"),
                 .paragraph("Everything that reads your Mac: Overview, Top Charts, Library, Timeline, Trends, Milestones, Search, Query, saved queries, the Tools that don’t need Last.fm, Library Gaps, Loved Status Audit and everything that uses the Music app, backup and restore, and CSV export."),

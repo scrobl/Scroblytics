@@ -73,6 +73,7 @@ enum AskChips {
             if case .percent = field.column.style { return (stored * 100).formatted(.number.precision(.fractionLength(0...1))) + "%" }
             let shown = AskOperand.shown(stored, for: field)
             if case .year = field.column.style { return String(Int(shown.rounded())) }
+            if case .temperature = field.column.style { return WeatherSettings.temperatureUnit().text(shown: shown, places: 1) }
             let text = shown.formatted(.number.precision(.fractionLength(0...2)))
             return field.inputUnit.map { "\(text) \($0.label)" } ?? text
         case .text(let s): return "“\(s)”"

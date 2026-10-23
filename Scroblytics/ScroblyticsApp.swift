@@ -171,6 +171,7 @@ struct ScroblyticsApp: App {
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
         DetailChecks.runHeadlessIfRequested()
+        WeatherChecks.runHeadlessIfRequested()
         KeychainChecks.runHeadlessIfRequested()
         OverviewChecks.runHeadlessIfRequested()
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
@@ -213,6 +214,8 @@ struct ScroblyticsApp: App {
         // The small activity log behind Help › Report a Problem. It stays on this Mac.
         Task { @MainActor in ActivityEvents.start() }
         Task { @MainActor in ScrobbleHistoryCache.observeHistoryChanges() }
+        let weatherContainer = Self.opened.container
+        Task { @MainActor in WeatherStatus.shared.start(container: weatherContainer) }
     }
 
     var body: some Scene {
@@ -431,6 +434,12 @@ private struct AppSettingsView: View {
                 }
                 .tag(SettingsTab.ask.rawValue)
 
+            WeatherSettingsView()
+                .tabItem {
+                    Label("Weather", systemImage: "cloud.sun")
+                }
+                .tag(SettingsTab.weather.rawValue)
+
         }
         .frame(minWidth: 560, minHeight: 540)
     }
@@ -438,7 +447,7 @@ private struct AppSettingsView: View {
 
 /// The tabs of the Settings window.
 enum SettingsTab: String {
-    case general, sync, tempo, ask
+    case general, sync, tempo, ask, weather
     static let storageKey = "settings.selectedTab"
 }
 

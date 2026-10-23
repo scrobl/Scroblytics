@@ -126,6 +126,7 @@ final class QueryBuilderModel {
     private var entityTags = EntityTagsSnapshot.empty
     private var images = ImageStatusSnapshot.empty
     private var libraryPresence = LibraryPresenceSnapshot.empty
+    private var weather = WeatherSnapshot.empty
     private var snapshotsRefreshTask: Task<Void, Never>?
     /// Every tag that exists in the library, most common first — the tag picker's suggestions.
     private(set) var tagVocabulary: [QueryTagSuggestion] = []
@@ -221,6 +222,7 @@ final class QueryBuilderModel {
         flaggedKeys = loaded.flaggedKeys
         images = loaded.images
         libraryPresence = loaded.libraryPresence
+        weather = loaded.weather
         entityTags = loaded.entityTags
         tagVocabulary = entityTags.vocabulary.map { QueryTagSuggestion(tag: $0.tag, items: $0.items) }
     }
@@ -297,7 +299,7 @@ final class QueryBuilderModel {
         let snapshots = QuerySnapshots(
             popularity: popularity?.snapshot ?? .empty, durations: durations, bpm: bpm, releaseDates: releaseDates,
             turnover: turnover, lovedKeys: lovedKeys, flaggedKeys: flaggedKeys,
-            entityTags: entityTags, libraryPresence: libraryPresence, images: images, turnoverGroups: turnoverGroups
+            entityTags: entityTags, libraryPresence: libraryPresence, weather: weather, images: images, turnoverGroups: turnoverGroups
         )
         runTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(250)) }
@@ -549,6 +551,7 @@ actor QuerySnapshotReader {
         let images: ImageStatusSnapshot
         let entityTags: EntityTagsSnapshot
         let libraryPresence: LibraryPresenceSnapshot
+        let weather: WeatherSnapshot
     }
 
     /// The snapshots, read on a background thread. Use this rather than creating the reader and awaiting `loadAll()`
@@ -570,7 +573,8 @@ actor QuerySnapshotReader {
             }),
             images: ImageStatusSnapshot.load(context: modelContext),
             entityTags: EntityTagsEngine.loadSnapshot(context: modelContext),
-            libraryPresence: LibraryPresenceSnapshot.load(context: modelContext)
+            libraryPresence: LibraryPresenceSnapshot.load(context: modelContext),
+            weather: WeatherSnapshot.load()
         )
     }
 }

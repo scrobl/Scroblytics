@@ -342,7 +342,7 @@ final class AskSuggestionStore {
         scrobbles = canonical
         snapshots = QuerySnapshots(
             durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover, lovedKeys: loaded.lovedKeys,
-            flaggedKeys: loaded.flaggedKeys, entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, images: loaded.images
+            flaggedKeys: loaded.flaggedKeys, entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, weather: loaded.weather, images: loaded.images
         )
         facts = computed
         rowCache = [:]

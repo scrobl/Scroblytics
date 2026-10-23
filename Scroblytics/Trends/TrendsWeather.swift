@@ -44,8 +44,13 @@ enum TrendsWeatherEngine {
     }
 
     /// Eleven °C edges for ten columns: the coldest hour, the nine decile cut-offs, the warmest hour (of every hour the weather covers).
-    static func decileEdges(of series: WeatherSeries) -> [Double] {
-        let sorted = series.temperatures.sorted()
+    static func decileEdges(of series: WeatherSeries) -> [Double] { decileEdges(ofTemperatures: series.temperatures) }
+
+    /// The same edges from everything a snapshot knows about the home climate.
+    static func decileEdges(of weather: WeatherSnapshot) -> [Double] { decileEdges(ofTemperatures: weather.climateTemperatures) }
+
+    private static func decileEdges(ofTemperatures temperatures: [Double]) -> [Double] {
+        let sorted = temperatures.sorted()
         guard let first = sorted.first, let last = sorted.last else { return [] }
         var edges = [first]
         for k in 1..<columns { edges.append(sorted[min(sorted.count - 1, Int((Double(k) / Double(columns) * Double(sorted.count)).rounded(.up)) - 1)]) }
@@ -106,18 +111,18 @@ enum TrendsWeatherEngine {
         scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, range: DateRange, compareRange: DateRange?, metric: TrendsMetric,
         durations: DurationEngine.Snapshot, adjustForSeason: Bool, calendar: Calendar = AppCalendars.listening
     ) -> TrendsWeatherResult {
-        guard let series = weather.series else { return .empty }
-        let edges = decileEdges(of: series)
+        guard let bounds = weather.hourBounds else { return .empty }
+        let edges = decileEdges(of: weather)
         guard edges.count == columns + 1 else { return .empty }
         let days = Int(range.to.timeIntervalSince(range.from) / 86_400)
         let bucketDays = days <= 150 ? 1 : 7
-        let main = tally(range, scrobbles: scrobbles, series: series, edges: edges, metric: metric, durations: durations, bucketDays: bucketDays, calendar: calendar)
+        let main = tally(range, scrobbles: scrobbles, weather: weather, bounds: bounds, edges: edges, metric: metric, durations: durations, bucketDays: bucketDays, calendar: calendar)
         guard main.hasWeather else { return TrendsWeatherResult(tiles: [], previousLifts: [:], grid: TrendsWeatherGrid(edges: edges, cells: []), buckets: [], bucketDays: bucketDays, pending: main.pending, adjusted: adjustForSeason, hasWeather: false) }
         let tiles = tiles(from: main, adjust: adjustForSeason)
         var previous: [WeatherCondition: Double] = [:]
         var pending = main.pending
         if let compareRange {
-            let other = tally(compareRange, scrobbles: scrobbles, series: series, edges: edges, metric: metric, durations: durations, bucketDays: bucketDays, calendar: calendar)
+            let other = tally(compareRange, scrobbles: scrobbles, weather: weather, bounds: bounds, edges: edges, metric: metric, durations: durations, bucketDays: bucketDays, calendar: calendar)
             pending += other.pending
             for tile in Self.tiles(from: other, adjust: adjustForSeason) { if let lift = tile.lift, !tile.isThin { previous[tile.condition] = lift } }
         }
@@ -138,7 +143,7 @@ enum TrendsWeatherEngine {
     // MARK: Tallying one period
 
     private static func tally(
-        _ range: DateRange, scrobbles: [ScrobbleSnapshot], series: WeatherSeries, edges: [Double], metric: TrendsMetric,
+        _ range: DateRange, scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, bounds: ClosedRange<Int>, edges: [Double], metric: TrendsMetric,
         durations: DurationEngine.Snapshot, bucketDays: Int, calendar: Calendar
     ) -> Tally {
         var t = Tally()
@@ -157,11 +162,11 @@ enum TrendsWeatherEngine {
         while day <= range.to {
             let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
             let first = WeatherSeries.hour(of: day), last = WeatherSeries.hour(of: next) - 1
-            if first <= series.endHour, last >= series.startHour {
+            if first <= bounds.upperBound, last >= bounds.lowerBound {
                 var bucketIndex: Int?
-                for hour in max(first, series.startHour)...min(last, series.endHour) {
+                for hour in max(first, bounds.lowerBound)...min(last, bounds.upperBound) {
                     let date = WeatherSeries.date(ofHour: hour)
-                    guard date >= range.from, date <= range.to, let sample = series.sample(hour: hour) else { continue }
+                    guard date >= range.from, date <= range.to, let sample = weather.sample(at: date) else { continue }
                     t.hasWeather = true
                     let index = bucketIndex ?? bucket(forDayStarting: day)
                     bucketIndex = index
@@ -188,7 +193,7 @@ enum TrendsWeatherEngine {
         // The plays made in those hours.
         for s in scrobbles where s.playedAt >= range.from && s.playedAt <= range.to {
             guard let weight = TrendsWeight.of(s, metric: metric, durations: durations) else { t.pending += 1; continue }
-            guard let sample = series.sample(at: s.playedAt) else { continue }
+            guard let sample = weather.sample(at: s.playedAt) else { continue }
             let w = Double(weight)
             let month = calendar.component(.month, from: s.playedAt) - 1
             let row = daypart(hour: calendar.component(.hour, from: s.playedAt))

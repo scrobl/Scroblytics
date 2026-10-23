@@ -65,6 +65,77 @@ enum TemperatureUnit: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// A stay away from home. For the days it covers, the weather at its place stands in for the home weather: nothing about any scrobble is
+/// changed, a play simply looks up where you were when it was made. `until` is the moment the trip ends (the start of the day after the
+/// last day); nil means still there.
+struct WeatherTrip: Codable, Identifiable, Equatable, Sendable {
+    var id = UUID()
+    var place: WeatherPlace
+    var from: Date
+    var until: Date?
+
+    func covers(_ date: Date) -> Bool { date >= from && (until.map { date < $0 } ?? true) }
+
+    /// The trip a play at `date` falls in: where two overlap, the one that began later (the more recent decision). nil means at home.
+    static func effective(at date: Date, in trips: [WeatherTrip]) -> WeatherTrip? {
+        var best: (trip: WeatherTrip, index: Int)?
+        for (index, trip) in trips.enumerated() where trip.covers(date) {
+            if let current = best, (trip.from, index) < (current.trip.from, current.index) { continue }
+            best = (trip, index)
+        }
+        return best?.trip
+    }
+
+    /// Two trips cover some of the same time.
+    func overlaps(_ other: WeatherTrip) -> Bool {
+        from < (other.until ?? .distantFuture) && other.from < (until ?? .distantFuture)
+    }
+
+    /// "Oslo" from "Oslo, Norway".
+    var shortName: String { place.shortName }
+}
+
+extension WeatherPlace {
+    var shortName: String { name.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? name }
+}
+
+/// The home place and every trip: what a backup carries and a restore puts back.
+struct WeatherLocationBook: Codable, Equatable, Sendable {
+    var home: WeatherPlace?
+    var trips: [WeatherTrip]
+}
+
+/// Trips are kept in one small file beside the app's other data (not in the downloaded-weather folder, which "Remove Downloaded Weather"
+/// empties): they are the person's own entries, and they go into backups.
+enum WeatherTripStore {
+    static func defaultFile() -> URL { ActivityLog.defaultDirectory().appending(path: "WeatherTrips.json") }
+
+    private static func encoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    static func load(file: URL = defaultFile()) -> [WeatherTrip] {
+        guard let data = try? Data(contentsOf: file) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([WeatherTrip].self, from: data)) ?? []
+    }
+
+    static func save(_ trips: [WeatherTrip], file: URL = defaultFile()) {
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if trips.isEmpty { try? FileManager.default.removeItem(at: file); return }
+        try? encoder().encode(trips).write(to: file, options: .atomic)
+    }
+
+    /// Where a trip's weather is kept: its own folder, so changing the trip's place or dates never leaves odd gaps in a shared one.
+    static func cacheDirectory(for trip: WeatherTrip, base: URL = WeatherFiles().directory) -> URL {
+        base.appending(path: "trips", directoryHint: .isDirectory).appending(path: trip.id.uuidString, directoryHint: .isDirectory)
+    }
+}
+
 /// The weather settings, kept in the app's preferences. Off until the person turns it on, because turning it on sends the rounded
 /// coordinate to a weather service.
 enum WeatherSettings {
@@ -282,7 +353,16 @@ struct WeatherSeries: Sendable, Equatable {
 /// The weather for every hour of the listening history, plus where "cold" and "hot" begin for this place. Empty when weather is off, no
 /// place is chosen, or nothing has been downloaded yet; the weather fields then have no value.
 struct WeatherSnapshot: Sendable {
+    /// The weather at one trip, with the trip it belongs to.
+    struct TripWeather: Sendable {
+        let trip: WeatherTrip
+        let series: WeatherSeries
+    }
+
+    /// The home place's weather.
     var series: WeatherSeries?
+    /// The weather at each trip; a play made during one looks there instead of at home.
+    var trips: [TripWeather] = []
     /// °C at or below which an hour is Cold, and at or above which it is Hot: where the coldest and the warmest share of the place's own
     /// hourly temperatures (20% each by default) begin.
     var coldAtOrBelow: Double?
@@ -293,7 +373,7 @@ struct WeatherSnapshot: Sendable {
 
     static let empty = WeatherSnapshot()
 
-    var isEmpty: Bool { series == nil }
+    var isEmpty: Bool { series == nil && trips.isEmpty }
 
     init() {}
 
@@ -320,14 +400,39 @@ struct WeatherSnapshot: Sendable {
         return sorted[sorted.count - min(sorted.count, count)]
     }
 
-    func sample(at date: Date) -> WeatherSample? { series?.sample(at: date) }
+    /// The trip a play at `date` was made on, if any.
+    private func tripWeather(at date: Date) -> TripWeather? {
+        guard !trips.isEmpty, let trip = WeatherTrip.effective(at: date, in: trips.map(\.trip)) else { return nil }
+        return trips.first { $0.trip.id == trip.id }
+    }
 
-    /// Where the weather for a play at `date` was taken: the home place's name, short ("Oslo", not "Oslo, Norway"). nil when there is no
-    /// weather for that time, so a list never names a place it has no weather for.
+    /// The weather where the person was at `date`: the trip's if they were away, else home's. A trip with no weather for that hour has
+    /// none (home's weather would be the wrong place's).
+    func sample(at date: Date) -> WeatherSample? {
+        if let trip = tripWeather(at: date) { return trip.series.sample(at: date) }
+        return series?.sample(at: date)
+    }
+
+    func sample(hour: Int) -> WeatherSample? { sample(at: WeatherSeries.date(ofHour: hour)) }
+
+    /// Where the weather for a play at `date` was taken: the trip's place or the home place, short ("Oslo", not "Oslo, Norway"). nil when
+    /// there is no weather for that time, so a list never names a place it has no weather for.
     func locationName(at date: Date) -> String? {
-        guard sample(at: date) != nil, let placeName, !placeName.isEmpty else { return nil }
+        guard sample(at: date) != nil else { return nil }
+        if let trip = tripWeather(at: date) { return trip.trip.shortName }
+        guard let placeName, !placeName.isEmpty else { return nil }
         return placeName.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? placeName
     }
+
+    /// The first and last hour any of the weather covers.
+    var hourBounds: ClosedRange<Int>? {
+        let all = (series.map { [$0] } ?? []) + trips.map(\.series)
+        guard let first = all.map(\.startHour).min(), let last = all.map(\.endHour).max(), first <= last else { return nil }
+        return first...last
+    }
+
+    /// The temperatures hot and cold are judged against: the home place's, wherever the person was (a hot trip is hot for them).
+    var climateTemperatures: [Double] { series?.temperatures ?? trips.flatMap { $0.series.temperatures } }
 
     func band(for sample: WeatherSample) -> TemperatureBand? {
         guard let temperature = sample.temperature, let coldAtOrBelow, let hotAtOrAbove else { return nil }

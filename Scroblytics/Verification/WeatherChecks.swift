@@ -19,6 +19,7 @@ enum WeatherChecks {
             await download(check)
             fields(check)
             trends(check)
+            await tripChecks(check)
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }
@@ -504,6 +505,161 @@ enum WeatherChecks {
         check("with no weather, or a period before it, there is nothing to draw", !run(playsA, .empty, rangeA).hasWeather && !run(playsA, weatherA, window(date(2020, 1, 1), days: 10)).hasWeather)
         let pendingRun = run(playsA, weatherA, rangeA, metric: .timeListened)
         check("counting time listened, plays still waiting for a track length are set aside, not guessed", pendingRun.pending == 50 && pendingRun.tiles.allSatisfy { $0.weight == 0 }, "\(pendingRun.pending)")
+    }
+
+    // MARK: - Trips
+
+    @MainActor
+    private static func tripChecks(_ report: (String, Bool, String) -> Void) async {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-6) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        let calendar = utc
+        let oslo = WeatherPlace(name: "Oslo, Norway", latitude: 59.91273, longitude: 10.74609)
+        let lisbon = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
+        func trip(_ place: WeatherPlace, _ from: Date, _ until: Date?) -> WeatherTrip { WeatherTrip(place: place, from: from, until: until) }
+        let mar1 = date(2025, 3, 1), mar5 = date(2025, 3, 5), mar10 = date(2025, 3, 10), mar15 = date(2025, 3, 15)
+
+        // Which trip a moment falls in.
+        let t1 = trip(lisbon, mar5, mar10)
+        check("a trip covers its first moment and not the moment it ends", t1.covers(mar5) && t1.covers(mar10.addingTimeInterval(-1)) && !t1.covers(mar10) && !t1.covers(mar5.addingTimeInterval(-1)))
+        check("an open trip covers everything from its start on", trip(lisbon, mar5, nil).covers(date(2031, 1, 1)) && !trip(lisbon, mar5, nil).covers(mar1))
+        check("no trips, or none covering the moment, means at home", WeatherTrip.effective(at: mar1, in: []) == nil && WeatherTrip.effective(at: mar1, in: [t1]) == nil && WeatherTrip.effective(at: mar10, in: [t1]) == nil)
+        let inner = trip(oslo, date(2025, 3, 6), date(2025, 3, 8))
+        check("where trips overlap the one that began later is used", WeatherTrip.effective(at: date(2025, 3, 7), in: [t1, inner])?.id == inner.id && WeatherTrip.effective(at: date(2025, 3, 7), in: [inner, t1])?.id == inner.id && WeatherTrip.effective(at: date(2025, 3, 9), in: [t1, inner])?.id == t1.id)
+        let tied = trip(oslo, mar5, mar10)
+        check("trips that began together: the later entry wins", WeatherTrip.effective(at: date(2025, 3, 7), in: [t1, tied])?.id == tied.id)
+        check("trips that follow each other do not overlap, an open trip overlaps a later one",
+              !t1.overlaps(trip(oslo, mar10, mar15)) && t1.overlaps(inner) && trip(lisbon, mar5, nil).overlaps(trip(oslo, mar15, nil)))
+        check("a place reads short in lists", lisbon.shortName == "Lisbon" && WeatherPlace(name: "Home", latitude: 0, longitude: 0).shortName == "Home")
+
+        // Saving trips.
+        let folder = FileManager.default.temporaryDirectory.appending(path: "scroblytics-trips-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let tripsFile = folder.appending(path: "WeatherTrips.json")
+        check("no file means no trips", WeatherTripStore.load(file: tripsFile).isEmpty)
+        WeatherTripStore.save([t1, trip(oslo, mar15, nil)], file: tripsFile)
+        let loaded = WeatherTripStore.load(file: tripsFile)
+        check("trips save and load exactly, including an open one", loaded.count == 2 && loaded[0] == t1 && loaded[1].until == nil && loaded[1].place == oslo)
+        WeatherTripStore.save([], file: tripsFile)
+        check("saving no trips removes the file", !FileManager.default.fileExists(atPath: tripsFile.path))
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? Data("not json".utf8).write(to: tripsFile)
+        check("a damaged file is no trips, not a crash", WeatherTripStore.load(file: tripsFile).isEmpty)
+
+        // The weather where you were.
+        let homeHours = WeatherSeries.hour(of: mar1)
+        var home = WeatherSeries(startHour: homeHours, count: 24 * 20)
+        for h in homeHours..<(homeHours + 24 * 20) { home.set(hour: h, WeatherSample(temperature: Double(h % 24), precipitation: nil, rain: nil, snowfall: nil, code: 0)) }
+        var away = WeatherSeries(startHour: WeatherSeries.hour(of: mar5), count: 24 * 5)
+        for h in away.startHour..<(away.startHour + 24 * 5) { away.set(hour: h, WeatherSample(temperature: 20 + Double(h % 24) / 10, precipitation: nil, rain: nil, snowfall: nil, code: 61)) }
+        var snapshot = WeatherSnapshot(series: home, placeName: "Oslo, Norway", percentiles: (20, 80))
+        snapshot.trips = [WeatherSnapshot.TripWeather(trip: t1, series: away)]
+        let onTrip = date(2025, 3, 7, 12), atHome = date(2025, 3, 3, 12)
+        check("a play on a trip gets the trip's weather, one at home gets home's", snapshot.sample(at: onTrip)?.condition == .rain && near(snapshot.sample(at: onTrip)?.temperature, 21.2) && snapshot.sample(at: atHome)?.condition == .clear)
+        check("the location of a play is the trip's place on a trip and home otherwise", snapshot.locationName(at: onTrip) == "Lisbon" && snapshot.locationName(at: atHome) == "Oslo")
+        check("the first day of a trip is the trip's and the day it ends is home's again", snapshot.sample(at: date(2025, 3, 5, 0))?.condition == .rain && snapshot.sample(at: date(2025, 3, 10, 0))?.condition == .clear)
+        var gappy = snapshot
+        gappy.trips = [WeatherSnapshot.TripWeather(trip: trip(lisbon, mar5, mar15), series: away)]   // weather for 5 of the 10 days
+        check("a trip hour with no downloaded weather has none (home's would be the wrong place's)", gappy.sample(at: date(2025, 3, 12, 12)) == nil && gappy.locationName(at: date(2025, 3, 12, 12)) == nil)
+        check("the snapshot's reach covers home and trips; hot and cold come from home", snapshot.hourBounds == homeHours...(homeHours + 24 * 20 - 1) && snapshot.climateTemperatures.count == 24 * 20 && !snapshot.isEmpty)
+        var tripsOnly = WeatherSnapshot()
+        tripsOnly.trips = snapshot.trips
+        check("a snapshot with only trips is not empty, and an empty one is", !tripsOnly.isEmpty && WeatherSnapshot.empty.isEmpty)
+
+        // The Trends numbers use the weather where you were: days 1–4 home (clear, 10 plays a day), days 5–10 on a trip (rain, 2 a day).
+        func play(_ day: Date, _ i: Int) -> ScrobbleSnapshot {
+            ScrobbleSnapshot(artistName: "A", albumName: "Album A", trackName: "Track A", imageURL: nil, playedAt: calendar.date(byAdding: .minute, value: 12 * 60 + i, to: day)!)
+        }
+        let jan1 = date(2025, 1, 1)
+        var homeJan = WeatherSeries(startHour: WeatherSeries.hour(of: jan1), count: 240)
+        var awayJan = WeatherSeries(startHour: WeatherSeries.hour(of: date(2025, 1, 5)), count: 24 * 6)
+        for h in homeJan.startHour..<(homeJan.startHour + 240) { homeJan.set(hour: h, WeatherSample(temperature: Double(h % 24), precipitation: nil, rain: nil, snowfall: nil, code: 0)) }
+        for h in awayJan.startHour..<(awayJan.startHour + 24 * 6) { awayJan.set(hour: h, WeatherSample(temperature: Double(h % 24), precipitation: nil, rain: nil, snowfall: nil, code: 61)) }
+        var janSnapshot = WeatherSnapshot(series: homeJan, placeName: "Oslo, Norway", percentiles: (20, 80))
+        janSnapshot.trips = [WeatherSnapshot.TripWeather(trip: trip(lisbon, date(2025, 1, 5), date(2025, 1, 11)), series: awayJan)]
+        var janPlays: [ScrobbleSnapshot] = []
+        for d in 0..<10 {
+            let day = calendar.date(byAdding: .day, value: d, to: jan1)!
+            for i in 0..<(d < 4 ? 10 : 2) { janPlays.append(play(day, i)) }
+        }
+        let result = TrendsWeatherEngine.compute(scrobbles: janPlays, weather: janSnapshot, range: DateRange(from: jan1, to: calendar.date(byAdding: .day, value: 10, to: jan1)!.addingTimeInterval(-1)), compareRange: nil, metric: .plays, durations: .empty, adjustForSeason: false, calendar: calendar)
+        let rainTile = result.tiles.first { $0.condition == .rain }, clearTile = result.tiles.first { $0.condition == .clear }
+        check("the Trends tiles count rain only on the trip: 144 hours and 12 plays, 2 a day against an average of 5.2",
+              rainTile?.hours == 144 && rainTile?.playCount == 12 && near(rainTile?.perDay, 2) && near(rainTile?.average, 5.2) && clearTile?.hours == 96 && near(clearTile?.perDay, 10), "\(String(describing: rainTile)) \(String(describing: clearTile))")
+        check("…so rain is 0.38 times an average day and clear 1.92", near(rainTile?.lift, 2 / 5.2) && near(clearTile?.lift, 10 / 5.2))
+
+        // Downloading a trip: just its days, in its own folder.
+        let dl = FileManager.default.temporaryDirectory.appending(path: "scroblytics-trips-dl-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dl) }
+        let log = Log()
+        standIn(log)
+        let service = client()
+        let now = date(2025, 3, 20, 12, 30)
+        currentNow = WeatherSeries.hour(of: now)
+        let past = trip(lisbon, mar5, mar10)
+        let pastFiles = WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: past, base: dl))
+        do {
+            let summary = try await WeatherUpdater.update(place: past.place, firstPlay: past.from, through: past.until, now: now, client: service, files: pastFiles, pause: .zero)
+            let q = log.urls.map(query)
+            check("a past trip asks for exactly its days, in one request: March 5 to March 9", summary.requests == 1 && q.first?["start_date"] == "2025-03-05" && q.first?["end_date"] == "2025-03-09", "\(q)")
+            check("…at the trip's place (rounded), not home", q.first?["latitude"] == "38.7" && q.first?["longitude"] == "-9.1")
+            check("…and keeps it in the trip's own folder", pastFiles.timeline(past.place)?.sample(hour: WeatherSeries.hour(of: mar5)) != nil && pastFiles.timeline(past.place)?.sample(hour: WeatherSeries.hour(of: mar5) - 1) == nil && pastFiles.timeline(lisbon)?.lastHourWithData == WeatherSeries.hour(of: mar10) - 1, "\(String(describing: pastFiles.timeline(past.place)?.lastHourWithData))")
+            log.urls.removeAll()
+            let again = try await WeatherUpdater.update(place: past.place, firstPlay: past.from, through: past.until, now: now, client: service, files: pastFiles, pause: .zero)
+            check("a finished trip is never asked for again", again.requests == 0 && log.urls.isEmpty)
+            let open = trip(lisbon, mar15, nil)
+            let openFiles = WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: open, base: dl))
+            let openRun = try await WeatherUpdater.update(place: open.place, firstPlay: open.from, through: open.until, now: now, client: service, files: openFiles, pause: .zero)
+            check("a trip you are still on is topped up like home: from the recent-days source (the archive is a week behind), asking for just its days (7), not the year so far", openRun.requests == 1 && log.urls.last?.host == "api.open-meteo.com" && log.urls.last.map { query($0)["past_days"] } == "7", "\(log.urls.map(\.absoluteString))")
+            check("…and holds nothing from before the trip began", openFiles.timeline(open.place)?.sample(hour: WeatherSeries.hour(of: mar15) - 1) == nil && openFiles.timeline(open.place)?.sample(hour: WeatherSeries.hour(of: mar15) + 5) != nil)
+            // The case that was missed: a trip begun six days ago, late in a year (more than 92 days after January), still being on it.
+            let lateNow = date(2025, 10, 23, 12, 30)
+            currentNow = WeatherSeries.hour(of: lateNow)
+            let lateTrip = trip(lisbon, date(2025, 10, 17, 22), nil)
+            let lateFiles = WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: lateTrip, base: dl))
+            log.urls.removeAll()
+            let lateRun = try await WeatherUpdater.update(place: lateTrip.place, firstPlay: lateTrip.from, through: nil, now: lateNow, client: service, files: lateFiles, pause: .zero)
+            check("a trip begun last week, late in the year, is downloaded (one request for its days), not skipped", lateRun.requests == 1 && log.urls.last.map { query($0)["past_days"] } == "8", "\(lateRun.requests) \(log.urls.map(\.absoluteString))")
+            check("…with weather from the day it began and nothing earlier", lateFiles.timeline(lateTrip.place)?.sample(hour: WeatherSeries.hour(of: date(2025, 10, 17, 22))) != nil && lateFiles.timeline(lateTrip.place)?.sample(hour: WeatherSeries.hour(of: date(2025, 10, 16, 12))) == nil)
+            currentNow = WeatherSeries.hour(of: now)
+            check("a trip that has not started yet is not downloaded", try await WeatherUpdater.update(place: lisbon, firstPlay: date(2025, 6, 1), through: nil, now: now, client: service, files: WeatherFiles(directory: dl.appending(path: "future")), pause: .zero).requests == 0)
+            // The loader puts trips on the snapshot and the cleaner forgets removed trips.
+            let defaults = UserDefaults(suiteName: "weather-trips-\(UUID().uuidString)")!
+            defaults.set(true, forKey: WeatherSettings.enabledKey)
+            WeatherSettings.setPlace(oslo, defaults: defaults)
+            let homeFiles = WeatherFiles(directory: dl)
+            homeFiles.save(home, place: oslo, year: 2025)
+            let file = dl.appending(path: "trips.json")
+            WeatherTripStore.save([past, open], file: file)
+            let loadedSnapshot = WeatherSnapshot.load(defaults: defaults, files: homeFiles, tripsFile: file)
+            check("the snapshot loads each trip's weather from its folder", loadedSnapshot.trips.count == 2 && loadedSnapshot.locationName(at: date(2025, 3, 7, 12)) != nil)
+            // A trip whose weather has not been downloaded yet: its days show no weather, not home's.
+            let pending = trip(lisbon, date(2025, 3, 2), date(2025, 3, 4))
+            let pendingFile = dl.appending(path: "pending.json")
+            WeatherTripStore.save([pending], file: pendingFile)
+            let beforeDownload = WeatherSnapshot.load(defaults: defaults, files: homeFiles, tripsFile: pendingFile)
+            check("a trip not downloaded yet is on the snapshot with no weather: its days show none, and the days around it still show home's",
+                  beforeDownload.trips.count == 1 && beforeDownload.sample(at: date(2025, 3, 3, 12)) == nil && beforeDownload.locationName(at: date(2025, 3, 3, 12)) == nil && beforeDownload.sample(at: date(2025, 3, 1, 12)) != nil && beforeDownload.locationName(at: date(2025, 3, 1, 12)) == "Oslo")
+            WeatherStatus.removeCaches(ofTripsNotIn: [open], base: dl)
+            check("removing a trip forgets its downloaded weather and keeps the others'", !FileManager.default.fileExists(atPath: WeatherTripStore.cacheDirectory(for: past, base: dl).path) && FileManager.default.fileExists(atPath: WeatherTripStore.cacheDirectory(for: open, base: dl).path))
+            homeFiles.removeAll()
+            WeatherTripStore.save([past], file: file)
+            check("removing the downloaded weather leaves the trips themselves", WeatherTripStore.load(file: file) == [past])
+        } catch {
+            check("a trip downloads from a stand-in service", false, "\(error)")
+        }
+
+        // Backups carry the home place and the trips.
+        let book = WeatherLocationBook(home: oslo, trips: [past, trip(oslo, mar15, nil)])
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        check("the home place and trips survive a trip through backup JSON", (try? decoder.decode(WeatherLocationBook.self, from: encoder.encode(book))) == book)
+        let restoreDefaults = UserDefaults(suiteName: "weather-restore-\(UUID().uuidString)")!
+        let restoreFile = folder.appending(path: "restored.json")
+        NativeBackupEngine.restoreWeatherLocations(book, tripsFile: restoreFile, defaults: restoreDefaults)
+        check("a restore puts the home place and trips back", WeatherSettings.place(defaults: restoreDefaults) == oslo && WeatherTripStore.load(file: restoreFile) == book.trips)
+        NativeBackupEngine.restoreWeatherLocations(nil, tripsFile: restoreFile, defaults: restoreDefaults)
+        check("restoring an older backup (without them) leaves the current ones alone", WeatherSettings.place(defaults: restoreDefaults) == oslo && WeatherTripStore.load(file: restoreFile) == book.trips)
     }
 
     // MARK: - The Query fields

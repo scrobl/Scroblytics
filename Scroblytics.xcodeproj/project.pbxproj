@@ -226,6 +226,7 @@
 		C150E7D2B0FB847984F6C4A6 /* TagManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16B8936C50A253B8D529B686 /* TagManagement.swift */; };
 		C20CA820AEA8ED72EC434DAE /* QueryMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59612875235DD5729636341 /* QueryMatcher.swift */; };
 		C34D609D9C02A263D364CBE3 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FD509D061EB1E054BDDC1B /* UpdateChecker.swift */; };
+		C3FD085727D24472321DF53A /* WeatherTripsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6FC2918D272CDA0BC32E9DB /* WeatherTripsView.swift */; };
 		C52C4E57C397D971AC9B20A8 /* QueryClimbingFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A5DC3C154D1A3DFC9A794C /* QueryClimbingFields.swift */; };
 		C5F1C00DCC0AE42242DC18CC /* QueryTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9630422B2BE3A8B7E57BCA7C /* QueryTable.swift */; };
 		C7928290847D4FD71DA76429 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510FD7B2F9D1E9F33783ED51 /* TimelineView.swift */; };
@@ -538,6 +539,7 @@
 		B5FFBEAC3E93C815079E66A4 /* HelpModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpModel.swift; sourceTree = "<group>"; };
 		B660323F181943A0585DFA1A /* FadingFavoritesView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FadingFavoritesView.swift; sourceTree = "<group>"; };
 		B6DFB139ADF6102C35F148E2 /* EditionChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditionChecks.swift; sourceTree = "<group>"; };
+		B6FC2918D272CDA0BC32E9DB /* WeatherTripsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WeatherTripsView.swift; sourceTree = "<group>"; };
 		B7D73DAFEDC85F823B117E72 /* Scroblytics.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = Scroblytics.entitlements; path = Config/Scroblytics.entitlements; sourceTree = SOURCE_ROOT; };
 		B801F401C530C49ED84EB1C3 /* DiagnosticsChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiagnosticsChecks.swift; sourceTree = "<group>"; };
 		B8869751982F117FBE0474E3 /* TrendsComputeGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsComputeGate.swift; sourceTree = "<group>"; };
@@ -1122,6 +1124,7 @@
 				B5A4594A4430E78905ECA766 /* WeatherClient.swift */,
 				448A30AC2DAA2A278BF2068A /* WeatherStore.swift */,
 				E799C4805DA9F1D11A928E2C /* WeatherSettingsView.swift */,
+				B6FC2918D272CDA0BC32E9DB /* WeatherTripsView.swift */,
 			);
 			name = Weather;
 			path = Weather;
@@ -1615,6 +1618,7 @@
 				4D5ECB4682B45A4A54660655 /* TrendsWeatherViews.swift in Sources */,
 				B843671AE8FD249626553938 /* TrendsWeather.swift in Sources */,
 				FB6E02A1337A0B87D524A3FB /* TrendsWeatherChart.swift in Sources */,
+				C3FD085727D24472321DF53A /* WeatherTripsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

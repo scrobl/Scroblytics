@@ -28,7 +28,9 @@ comfortable with that. The same information is available inside the app under **
   Scroblytics folder on your Mac and refreshes it about once a week.
 - **Weather.** If you turn on weather in Settings, the weather for your home place is downloaded and kept in a `Weather` folder
   in the Scroblytics folder on your Mac. It is not part of backups (it can be downloaded again) and *Remove Downloaded Weather*
-  deletes it. Your home place is stored in the app's preferences as a rounded coordinate.
+  deletes it. Your home place is stored in the app's preferences as a rounded coordinate. If you add trips (where you were, for
+  the weather), they are stored in a small file in the Scroblytics folder and included in backups (which are not encrypted); the
+  weather for each trip is requested for its place and dates, so Open-Meteo sees where and when, but never who or what you listened to.
 - **Backups and exports** you create are files you choose the location of. They contain your listening history and are not
   encrypted, so store them as carefully as you would any personal file. They never contain your keys.
 
@@ -45,7 +47,7 @@ The app only contacts these services, and only the ones for features you use. Tu
 | **GetSongBPM** | Tempo, time signature and musical key | Artist and track names as search text, with a GetSongBPM key |
 | **MusicBrainz** | Album release dates | Artist and album names. As MusicBrainz asks, requests identify the app and a project contact address. |
 | **Image servers** (Last.fm, Deezer) | Downloading artwork, and your Last.fm profile picture if you turn it on for shared cards | An ordinary image request (your IP address is visible to the server, as with any download) |
-| **Open-Meteo** (no sign-in) | Hourly weather for your home place, only if you turn on weather in Settings, and the city search there | Your home place's coordinates rounded to about 11 km and date ranges; the city name you type when searching. Nothing about your music or your history. Open-Meteo asks that its data be credited ("Weather data by Open-Meteo.com", CC BY 4.0). |
+| **Open-Meteo** (no sign-in) | Hourly weather for your home place, only if you turn on weather in Settings, and the city search there | The coordinates (rounded to about 11 km) of your home place and of any trip, with date ranges; the city name you type when searching. Nothing about your music or your history. Open-Meteo asks that its data be credited ("Weather data by Open-Meteo.com", CC BY 4.0). |
 | **Apple's public catalogue** (`itunes.apple.com`) | *View in Apple Music*, only when you choose it | Artist, album or track name as search text |
 | **GitHub** (no sign-in) | Once a day, checking whether a newer version of Scroblytics has been released. You can turn this off in Settings. | An ordinary web request: your IP address and the app's name and version (for example "Scroblytics/0.9.0"). Nothing about you or your library. The app never downloads or installs anything by itself. |
 | **The Ask provider you choose** (optional) | Turning a sentence into a query | See below |

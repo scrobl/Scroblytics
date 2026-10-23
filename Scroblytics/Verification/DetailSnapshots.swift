@@ -209,6 +209,26 @@ enum DetailSnapshots {
         }
     }
 
+    /// Settings › Weather › Trips with two trips (one open), and the sheet that adds one. Seeds the scratch trips file.
+    @MainActor
+    static func tripsSettings() -> some View {
+        let calendar = AppCalendars.listening
+        let today = calendar.startOfDay(for: Date())
+        let lisbon = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
+        let tokyo = WeatherPlace(name: "Tokyo, Japan", latitude: 35.68, longitude: 139.69)
+        WeatherTripStore.save([
+            WeatherTrip(place: lisbon, from: calendar.date(byAdding: .day, value: -3, to: today)!, until: nil),
+            WeatherTrip(place: tokyo, from: calendar.date(byAdding: .day, value: -200, to: today)!, until: calendar.date(byAdding: .day, value: -190, to: today)!),
+        ])
+        return Form { WeatherTripsSection() }.formStyle(.grouped).frame(height: 470)
+    }
+
+    @MainActor
+    static func tripEditor() -> some View {
+        let calendar = AppCalendars.listening
+        return TripEditor(draft: TripDraft.new(calendar: calendar), onSave: { _ in }, onCancel: {})
+    }
+
     @MainActor
     static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, to url: URL) async {
         let view = content
@@ -295,6 +315,11 @@ enum DetailSnapshots {
                 await render(weatherTrends(unit: .celsius), width: 1000, dark: dark, container: container, to: base.appending(path: "trends-weather-\(dark ? "dark" : "light").png"))
             }
             await render(weatherTrends(unit: .fahrenheit), width: 640, dark: true, container: container, to: base.appending(path: "trends-weather-640-dark.png"))
+            for dark in [true, false] {
+                await render(tripsSettings(), width: 560, dark: dark, container: container, to: base.appending(path: "trips-settings-\(dark ? "dark" : "light").png"))
+            }
+            await render(tripEditor(), width: 480, dark: true, container: container, to: base.appending(path: "trip-editor-dark.png"))
+            WeatherTripStore.save([])
             await render(playsList(withWeather: false), width: 700, dark: true, container: container, to: base.appending(path: "plays-plain-700-dark.png"))
             await render(table(longAlbum: true), width: 900, dark: true, container: container, to: base.appending(path: "table-long-900-dark.png"))
             exit(0)

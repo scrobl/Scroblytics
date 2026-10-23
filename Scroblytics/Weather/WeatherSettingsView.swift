@@ -9,13 +9,6 @@ struct WeatherSettingsView: View {
     @AppStorage(WeatherSettings.hotPercentileKey) private var hotPercentile = WeatherSettings.defaultHotPercentile
     @State private var status = WeatherStatus.shared
     @State private var place = WeatherSettings.place()
-    @State private var query = ""
-    @State private var results: [GeocodeResult] = []
-    @State private var isSearching = false
-    @State private var searchMessage: String?
-    @State private var latitudeText = ""
-    @State private var longitudeText = ""
-    @State private var coordinateName = ""
     @State private var cutoffs: (cold: Double, hot: Double)?
 
     var body: some View {
@@ -26,7 +19,7 @@ struct WeatherSettingsView: View {
                         if on { status.update(force: true) } else { status.stop() }
                         NotificationCenter.default.post(name: .weatherDidUpdate, object: nil)
                     }
-                Text("Adds fields to Query and Ask for the weather at the time of each play: the kind of weather, how warm it was for where you live, and the temperature. To get it, the app asks the free Open-Meteo weather service for the hourly weather at your home place for the years you have scrobbles. It sends only the place’s coordinates, rounded to about 11 km, and the dates: never what you listened to. The weather is then kept on this Mac, and never leaves it.")
+                Text("Adds fields to Query and Ask for the weather at the time of each play: the kind of weather, how warm it was for where you live, and the temperature. To get it, the app asks the free Open-Meteo weather service for the hourly weather at your home place for the years you have scrobbles, and at any trip you add for its dates. It sends only each place’s coordinates, rounded to about 11 km, and the dates: never what you listened to. The weather is then kept on this Mac, and never leaves it.")
                     .font(AppTypography.supporting)
                     .foregroundStyle(.secondary)
             }
@@ -45,41 +38,10 @@ struct WeatherSettingsView: View {
                     Text("No place chosen yet.").foregroundStyle(.secondary)
                 }
 
-                HStack {
-                    TextField("Search for a city", text: $query)
-                        .onSubmit { Task { await search() } }
-                    Button("Search") { Task { await search() } }
-                        .disabled(isSearching || query.trimmingCharacters(in: .whitespaces).count < 2)
-                }
-                if let searchMessage { Text(searchMessage).font(AppTypography.supporting).foregroundStyle(.secondary) }
-                ForEach(results) { result in
-                    Button {
-                        choose(result.place)
-                        results = []
-                        query = ""
-                    } label: {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(result.label)
-                            Text(result.place.coordinateLabel).font(AppTypography.supporting).foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                Text("The name you type is sent to Open-Meteo’s search, nothing else. The place you choose is kept as a rounded coordinate.")
-                    .font(AppTypography.supporting)
-                    .foregroundStyle(.secondary)
-
-                DisclosureGroup("Enter coordinates instead") {
-                    TextField("Latitude (−90 to 90)", text: $latitudeText)
-                    TextField("Longitude (−180 to 180)", text: $longitudeText)
-                    TextField("Name (optional)", text: $coordinateName)
-                    Button("Use these coordinates") { useCoordinates() }
-                        .disabled(parsedCoordinates == nil)
-                    Text("Coordinates are rounded to one decimal place (about 11 km).")
-                        .font(AppTypography.supporting)
-                        .foregroundStyle(.secondary)
-                }
+                WeatherPlacePicker { choose($0) }
             }
+
+            WeatherTripsSection()
 
             Section("Temperature") {
                 Picker("Show temperatures in", selection: $unitRaw) {
@@ -176,32 +138,5 @@ struct WeatherSettingsView: View {
         NotificationCenter.default.post(name: .weatherDidUpdate, object: nil)
         if new != nil, enabled { status.update(force: true) }
         status.refreshCoverage()
-    }
-
-    private func search() async {
-        isSearching = true
-        searchMessage = nil
-        defer { isSearching = false }
-        do {
-            results = try await WeatherClient().search(name: query)
-            if results.isEmpty { searchMessage = "No place found with that name. Try a bigger city nearby, or enter coordinates." }
-        } catch {
-            results = []
-            searchMessage = describeWeatherError(error)
-        }
-    }
-
-    private var parsedCoordinates: (Double, Double)? {
-        func number(_ text: String) -> Double? { Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")) }
-        guard let lat = number(latitudeText), let lon = number(longitudeText), WeatherPlace.isValid(latitude: lat, longitude: lon) else { return nil }
-        return (lat, lon)
-    }
-
-    private func useCoordinates() {
-        guard let (lat, lon) = parsedCoordinates else { return }
-        let name = coordinateName.trimmingCharacters(in: .whitespaces)
-        let made = WeatherPlace(name: name.isEmpty ? "My place" : name, latitude: lat, longitude: lon)
-        choose(made)
-        latitudeText = ""; longitudeText = ""; coordinateName = ""
     }
 }

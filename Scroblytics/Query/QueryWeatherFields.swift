@@ -74,7 +74,7 @@ extension QueryFieldRegistry {
 
         var condition = QueryField(
             id: "weatherCondition", name: "Weather", group: .context, type: .text, targets: all,
-            help: "The kind of weather most of its plays were made in: Clear, Cloudy, Fog, Rain, Snow or Thunderstorm, at your home place, from the hour of each play. A tie goes to the first in that order. Needs weather turned on and downloaded in Settings › Weather. Uses the query’s period or this column’s date scope.",
+            help: "The kind of weather most of its plays were made in: Clear, Cloudy, Fog, Rain, Snow or Thunderstorm, where you were (your home place, or the trip you were on), from the hour of each play. A tie goes to the first in that order. Needs weather turned on and downloaded in Settings › Weather. Uses the query’s period or this column’s date scope.",
             scopedCompute: { run, _, scope, entities in
                 let tallies = weatherTallies(run, scope: scope).perEntity
                 return Dictionary(uniqueKeysWithValues: entities.map { entity in
@@ -99,7 +99,7 @@ extension QueryFieldRegistry {
         let average = QueryField(
             id: "weatherAverageTemperature", name: "Average temperature when played", group: .context, type: .numeric, targets: all,
             column: .standard(for: .numeric, style: .temperature, width: 120),
-            help: "The average outdoor temperature at the hours of its plays, at your home place, in the unit chosen in Settings › Weather (Celsius or Fahrenheit; a condition on it is typed in that unit, so changing the unit changes what a saved number means). For hot and cold judged against your own climate in either unit, use Temperature (relative). Uses the query’s period or this column’s date scope.",
+            help: "The average outdoor temperature at the hours of its plays, where you were (home, or the trip you were on), in the unit chosen in Settings › Weather (Celsius or Fahrenheit; a condition on it is typed in that unit, so changing the unit changes what a saved number means). For hot and cold judged against your own climate in either unit, use Temperature (relative). Uses the query’s period or this column’s date scope.",
             scopedCompute: { run, _, scope, entities in
                 let tallies = weatherTallies(run, scope: scope).perEntity
                 return Dictionary(uniqueKeysWithValues: entities.map { entity in

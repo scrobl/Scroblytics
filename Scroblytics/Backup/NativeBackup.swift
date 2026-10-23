@@ -108,6 +108,9 @@ enum NativeBackupFormat {
         var tagRules: [TagRuleRecord]?
         /// Editions counted on their own, with their match decisions. Optional for the same reason as above.
         var albumEditionMatches: [AlbumEditionMatchRecord]?
+        /// The weather home place and the trips (where you were, for the weather). Optional for the same reason as above: restoring an
+        /// archive without it leaves the current ones alone. Not the downloaded weather, which can be fetched again.
+        var weatherLocations: WeatherLocationBook?
         var theme: String
         var images: [String: Data]
     }
@@ -185,6 +188,7 @@ enum NativeBackupEngine {
         var lovedAuditDecisions = 0
         var tagRules = 0
         var albumEditionMatches = 0
+        var weatherTrips = 0
 
         var description: String {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
@@ -192,6 +196,7 @@ enum NativeBackupEngine {
             if lovedAuditDecisions > 0 { text += " · \(lovedAuditDecisions) loved-audit decisions" }
             if tagRules > 0 { text += " · \(tagRules) tag rules" }
             if albumEditionMatches > 0 { text += " · \(albumEditionMatches) editions counted separately" }
+            if weatherTrips > 0 { text += " · \(weatherTrips) weather trips" }
             return text
         }
     }
@@ -278,12 +283,23 @@ enum NativeBackupEngine {
         try restoreLovedAuditDecisions(archive.lovedAuditDecisions, context: context, save: false)
         try restoreTagRules(archive.tagRules, context: context, save: false)
         try restoreAlbumEditionMatches(archive.albumEditionMatches, context: context, save: false)
+        restoreWeatherLocations(archive.weatherLocations)
 
         UserDefaults.standard.set(archive.theme, forKey: AppearancePreference.storageKey)
         let appSettings = try context.fetch(FetchDescriptor<AppSettings>()).first
         if let appSettings { appSettings.theme = archive.theme } else { context.insert(AppSettings(theme: archive.theme)) }
         try restoreImages(archive.images)
         try context.save()
+    }
+
+    /// Puts back the weather home place and trips. `nil` (an archive from before they were backed up) leaves the current ones alone. The
+    /// weather for them is downloaded again, if weather is on.
+    static func restoreWeatherLocations(_ book: WeatherLocationBook?, tripsFile: URL = WeatherTripStore.defaultFile(), defaults: UserDefaults = .standard) {
+        guard let book else { return }
+        if let home = book.home { WeatherSettings.setPlace(home, defaults: defaults) }
+        WeatherTripStore.save(book.trips, file: tripsFile)
+        WeatherStatus.removeCaches(ofTripsNotIn: book.trips)
+        NotificationCenter.default.post(name: .weatherDidUpdate, object: nil)
     }
 
     /// Replaces the Library Gaps confirmations with the archive's. `nil` — an archive from before they were backed
@@ -379,10 +395,12 @@ enum NativeBackupEngine {
         let editionMatches = try context.fetch(FetchDescriptor<AlbumEditionMatch>()).map {
             NativeBackupFormat.AlbumEditionMatchRecord(artist: $0.artist, title: $0.title, matchMode: $0.matchResolutionMode?.rawValue, canonicalArtist: $0.canonicalArtist, canonicalAlbum: $0.canonicalAlbum, manualTracklist: $0.manualTracklist, countsSeparately: $0.countsSeparately)
         }
+        let trips = WeatherTripStore.load()
+        let weatherBook: WeatherLocationBook? = WeatherSettings.place() == nil && trips.isEmpty ? nil : WeatherLocationBook(home: WeatherSettings.place(), trips: trips)
         let username = try context.fetch(FetchDescriptor<SyncState>()).first?.username
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         let theme = UserDefaults.standard.string(forKey: AppearancePreference.storageKey) ?? AppearancePreference.dark.rawValue
-        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, theme: theme, images: images)
+        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, weatherLocations: weatherBook, theme: theme, images: images)
     }
 
     private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
@@ -399,7 +417,7 @@ enum NativeBackupEngine {
     }
 
     private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
-        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0)
+        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0)
     }
 
     private static func findOrCreateArtist(named name: String, context: ModelContext) throws -> Artist {

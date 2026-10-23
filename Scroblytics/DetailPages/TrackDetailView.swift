@@ -75,7 +75,8 @@ struct TrackDetailView: View {
         .navigationTitle(identity.name)
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { return }
+            // The weather may have changed meanwhile (a trip added, a download finished): that alone is read again.
+            if model.isLoaded(for: identity.id) { await model.loadWeather(); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range

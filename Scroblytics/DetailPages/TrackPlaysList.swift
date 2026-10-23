@@ -30,7 +30,7 @@ struct TrackPlaysList: View {
                 }
             }
             if showsWeather {
-                Text("Weather is for the home place chosen in Settings › Weather, at the hour of each play. \(WeatherAttribution.text).")
+                Text("Weather is for where you were at the hour of each play: your home place, or a trip you added in Settings › Weather. \(WeatherAttribution.text).")
                     .font(AppTypography.supporting).foregroundStyle(.secondary)
             }
         }

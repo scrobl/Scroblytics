@@ -44,11 +44,19 @@ struct WeatherFiles: Sendable {
 
 extension WeatherSnapshot {
     /// The weather a query reads, from what is saved on this Mac. Empty (and cheap) while weather is off or no place is chosen.
-    static func load(defaults: UserDefaults = .standard, files: WeatherFiles = WeatherFiles()) -> WeatherSnapshot {
+    static func load(defaults: UserDefaults = .standard, files: WeatherFiles = WeatherFiles(), tripsFile: URL = WeatherTripStore.defaultFile()) -> WeatherSnapshot {
         guard WeatherSettings.isEnabled(defaults: defaults), let place = WeatherSettings.place(defaults: defaults),
               let series = files.timeline(place) else { return .empty }
-        return WeatherSnapshot(series: series, placeName: place.name, percentiles: WeatherSettings.percentiles(defaults: defaults),
-                               unit: WeatherSettings.temperatureUnit(defaults: defaults))
+        var snapshot = WeatherSnapshot(series: series, placeName: place.name, percentiles: WeatherSettings.percentiles(defaults: defaults),
+                                       unit: WeatherSettings.temperatureUnit(defaults: defaults))
+        // Each trip's weather from its own folder. A trip not downloaded yet is still on the snapshot, with no hours: its days show no weather
+        // until it arrives, rather than quietly showing the home weather of a place you weren't in.
+        for trip in WeatherTripStore.load(file: tripsFile) {
+            let tripFiles = WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: trip, base: files.directory))
+            let tripSeries = tripFiles.timeline(trip.place) ?? WeatherSeries(startHour: WeatherSeries.hour(of: trip.from), count: 0)
+            snapshot.trips.append(WeatherSnapshot.TripWeather(trip: trip, series: tripSeries))
+        }
+        return snapshot
     }
 }
 
@@ -71,17 +79,22 @@ enum WeatherUpdater {
         return day * 24 + 23
     }
 
+    /// Downloads the weather for `place` from the day of `firstPlay` through `through` (nil: up to now). A trip passes the dates it covers,
+    /// so only those days are asked for; home passes its first play.
     static func update(
-        place: WeatherPlace, firstPlay: Date, now: Date = Date(), client: WeatherClient, files: WeatherFiles,
+        place: WeatherPlace, firstPlay: Date, through: Date? = nil, now: Date = Date(), client: WeatherClient, files: WeatherFiles,
         pause: Duration = WeatherUpdater.pause, progress: @Sendable (String) -> Void = { _ in }
     ) async throws -> Summary {
         var summary = Summary()
-        let nowHour = WeatherSeries.hour(of: now)
+        // `through` is where a trip ends (the start of the day after its last): the last hour wanted is the one before it.
+        let end = min(now, through.map { $0.addingTimeInterval(-1) } ?? now)
+        let realNowHour = WeatherSeries.hour(of: now)
+        let nowHour = WeatherSeries.hour(of: end)
         let limit = archiveLimitHour(now: now)
         let utc = WeatherClientCalendar.utc
         let firstYear = utc.component(.year, from: firstPlay)
-        let lastYear = utc.component(.year, from: now)
-        guard firstYear <= lastYear else { return summary }
+        let lastYear = utc.component(.year, from: end)
+        guard firstPlay <= end, firstYear <= lastYear else { return summary }
         let firstPlayDayStart = (WeatherSeries.hour(of: firstPlay) / 24) * 24
 
         for year in firstYear...lastYear {
@@ -96,7 +109,7 @@ enum WeatherUpdater {
             progress("Weather for \(year)")
 
             // Settled history from the archive.
-            let archiveTarget = min(yearEnd, limit)
+            let archiveTarget = min(yearEnd, limit, nowHour)
             let fromHour = max(series.coveredThroughHour == Int.min ? yearStart : series.coveredThroughHour + 1, yearStart, firstPlayDayStart)
             if archiveTarget >= fromHour, archiveTarget > series.coveredThroughHour {
                 if summary.requests > 0 { try await Task.sleep(for: pause) }
@@ -109,8 +122,11 @@ enum WeatherUpdater {
 
             // The last days, which the archive doesn't have yet (only in the current year).
             if year == lastYear, series.coveredThroughHour < nowHour {
-                let recentFrom = max(series.coveredThroughHour + 1, yearStart)
-                let days = (nowHour - recentFrom) / 24 + 2
+                // From the end of what is covered, or (nothing yet) from the first day wanted: not from January, which for a trip begun
+                // last week made the request look 300 days long and be skipped.
+                let wantedFrom = max(yearStart, firstPlayDayStart)
+                let recentFrom = series.coveredThroughHour == Int.min ? wantedFrom : max(series.coveredThroughHour + 1, wantedFrom)
+                let days = (realNowHour - recentFrom) / 24 + 2
                 if days <= 92 {
                     if summary.requests > 0 { try await Task.sleep(for: pause) }
                     let hours = try await client.fetchRecent(place: place, pastDays: days)
@@ -156,6 +172,7 @@ final class WeatherStatus {
     private(set) var bytesOnDisk = 0
 
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var rerunRequested = false
     @ObservationIgnored private var container: ModelContainer?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
@@ -188,21 +205,37 @@ final class WeatherStatus {
 
     /// Starts a download if weather is on and a place is chosen. `force` skips the twice-a-day limit (turning weather on, choosing a place).
     func update(force: Bool) {
-        guard isEnabled, let place = WeatherSettings.place(), let container, task == nil else { return }
+        guard isEnabled, let place = WeatherSettings.place(), let container else { return }
+        // A download is already running: a change made meanwhile (a trip added, a place chosen) must not be dropped, so it runs again after.
+        guard task == nil else { if force { rerunRequested = true }; return }
         if !force, let last = lastUpdatedAt, Date().timeIntervalSince(last) < Self.minimumInterval { return }
         if ConnectivityGate.isOffline { state = .waitingForConnection; return }
         state = .updating("Starting…")
         let status = self
         task = Task { @MainActor [weak self] in
-            defer { self?.task = nil }
+            defer {
+                self?.task = nil
+                if self?.rerunRequested == true { self?.rerunRequested = false; self?.update(force: true) }
+            }
             do {
                 guard let first = try await TopChartsEngine.fetchOldestScrobbleDate(container: container) else {
                     self?.state = .idle
                     return
                 }
-                let summary = try await WeatherUpdater.update(place: place, firstPlay: first, client: WeatherClient(), files: WeatherFiles(), progress: { text in
+                var summary = try await WeatherUpdater.update(place: place, firstPlay: first, client: WeatherClient(), files: WeatherFiles(), progress: { text in
                     Task { @MainActor in status.state = .updating(text) }
                 })
+                // Then each trip, from its own dates: the days away, not the whole history.
+                let trips = WeatherTripStore.load()
+                for trip in trips where trip.from <= Date() {
+                    let tripSummary = try await WeatherUpdater.update(
+                        place: trip.place, firstPlay: trip.from, through: trip.until, client: WeatherClient(),
+                        files: WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: trip)),
+                        progress: { text in Task { @MainActor in status.state = .updating("\(trip.shortName): \(text)") } }
+                    )
+                    summary.requests += tripSummary.requests
+                }
+                Self.removeCaches(ofTripsNotIn: trips)
                 UserDefaults.standard.set(Date(), forKey: WeatherSettings.lastUpdateKey)
                 self?.lastUpdatedAt = Date()
                 self?.state = .idle
@@ -221,6 +254,15 @@ final class WeatherStatus {
     }
 
     func stop() { task?.cancel() }
+
+    /// Forgets the downloaded weather of trips that were removed (their folders are named by trip).
+    nonisolated static func removeCaches(ofTripsNotIn trips: [WeatherTrip], base: URL = WeatherFiles().directory) {
+        let folder = base.appending(path: "trips", directoryHint: .isDirectory)
+        let keep = Set(trips.map(\.id.uuidString))
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where !keep.contains(name) {
+            try? FileManager.default.removeItem(at: folder.appending(path: name))
+        }
+    }
 
     /// Deletes everything downloaded, and forgets when it last ran.
     func removeDownloadedWeather() {

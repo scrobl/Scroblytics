@@ -199,6 +199,9 @@ struct ShareOptions: Codable, Equatable, Sendable {
     var showNotes = true
     /// Whether a page card (artist, album or track) includes the weather it is played in. Off unless chosen.
     var showWeather = false
+    /// A chart card: let the card take the chart's own proportions (as large as the chart allows, with no empty band above or below it)
+    /// instead of fitting the chart into a fixed size. Ignored by every other card.
+    var fitToChart = false
     /// List or tree, for a card that has both.
     var layout = ShareLayout.list
     /// A title the person typed to replace the card's own (a list card); empty keeps the card's. Not remembered: it belongs to one share.
@@ -206,7 +209,7 @@ struct ShareOptions: Codable, Equatable, Sendable {
     /// Which value column of a query card the image shows. Not remembered: the columns differ from one query to the next.
     var valueColumn: Int? = nil
 
-    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, showWeather, layout }
+    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, showWeather, fitToChart, layout }
 
     init(size: ShareSize = .square, rowCount: Int = 10, showValues: Bool = true, showMovement: Bool = true, showDate: Bool = true, icon: ShareIcon = .trophy) {
         self.size = size
@@ -228,6 +231,8 @@ struct ShareOptions: Codable, Equatable, Sendable {
         icon = try c.decodeIfPresent(ShareIcon.self, forKey: .icon) ?? .trophy
         showNotes = try c.decodeIfPresent(Bool.self, forKey: .showNotes) ?? true
         showWeather = try c.decodeIfPresent(Bool.self, forKey: .showWeather) ?? false
+        // Chart choices remembered before this existed take the fitted card; no other kind of card reads it.
+        fitToChart = try c.decodeIfPresent(Bool.self, forKey: .fitToChart) ?? true
         layout = try c.decodeIfPresent(ShareLayout.self, forKey: .layout) ?? .list
     }
 
@@ -305,8 +310,18 @@ extension ShareCard {
     /// What the preview starts from before the person has chosen anything for this kind of card: a chart is wider than tall, so wide.
     var defaultOptions: ShareOptions {
         var options = ShareOptions()
-        if snapshot != nil { options.size = .wide }
+        if snapshot != nil { options.size = .wide; options.fitToChart = true }
         return options
+    }
+
+    /// Whether the card is shaped by its chart picture (the height follows the picture) rather than by a chosen size.
+    func fitsChart(for options: ShareOptions) -> Bool { snapshot != nil && options.fitToChart }
+
+    /// The width of a fitted chart card in points: the picture at its own size plus the margins, within what reads well. (A wider chart
+    /// gets a wider card, so it is never shrunk to fit; a narrow one is enlarged a little.)
+    var fittedWidth: CGFloat {
+        let picture = snapshot?.image.size.width ?? 0
+        return min(1920, max(900, picture + 128))
     }
 
     /// Whether any row says why it is there.

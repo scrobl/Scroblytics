@@ -496,6 +496,15 @@ enum ShareChecks {
                 var other = chartCard; other.snapshot = chartB
                 check("a chart card, \(size.label): shows its picture, and the footer", png != ShareRenderer.png(card: other, options: o, identity: .anonymous, images: [:]) && png != ShareRenderer.png(card: chartCard, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:]))
             }
+            var fitOptions = chartCard.defaultOptions
+            check("a chart card starts shaped to its chart; other cards never are", fitOptions.fitToChart && chartCard.fitsChart(for: fitOptions) && !card.fitsChart(for: card.defaultOptions) && !chartCard.fitsChart(for: ShareOptions()))
+            let fitPng = ShareRenderer.png(card: chartCard, options: fitOptions, identity: .anonymous, images: [:]).flatMap { NSBitmapImageRep(data: $0) }
+            check("a fitted chart card is as wide as the picture plus margins (1,028 for this 900 pt picture), twice that in pixels", fitPng?.pixelsWide == 2056 && chartCard.fittedWidth == 1028, "\(fitPng?.pixelsWide ?? 0) × \(fitPng?.pixelsHigh ?? 0)")
+            check("it has no empty band: much shorter than the square card, taller than its picture", (fitPng?.pixelsHigh ?? 0) > 2 * 300 && (fitPng?.pixelsHigh ?? 9_999) < 1800, "\(fitPng?.pixelsHigh ?? 0)")
+            check("a fitted card is not blank and shows its picture", fitPng.map { luminanceSpread($0) > 0.05 } == true && ShareRenderer.png(card: chartCard, options: fitOptions, identity: .anonymous, images: [:]) != { var other = chartCard; other.snapshot = chartB; return ShareRenderer.png(card: other, options: fitOptions, identity: .anonymous, images: [:]) }())
+            fitOptions.fitToChart = false
+            check("with the fit off the chosen size applies again", ShareRenderer.png(card: chartCard, options: fitOptions, identity: .anonymous, images: [:]).flatMap { NSBitmapImageRep(data: $0) }?.pixelsWide == Int(fitOptions.size.points.width) * 2)
+            check("options saved before the switch existed fit the chart", (try? JSONDecoder().decode(ShareOptions.self, from: Data("{\"size\":\"portrait\"}".utf8)))?.fitToChart == true)
             var withSummary = chartCard
             withSummary.chartSummary = ShareChartSummary(headline: "12,345 scrobbles", change: "+8% vs Jan 1, 2025 – Oct 17, 2025", isUp: true)
             var withDown = withSummary
@@ -1213,6 +1222,9 @@ enum ShareChecks {
                 if let png = ShareRenderer.png(card: card, options: o, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:], scale: 1) {
                     try? png.write(to: URL(fileURLWithPath: folder).appending(path: "trends-\(slug)-\(size.rawValue).png"))
                 }
+            }
+            if let png = ShareRenderer.png(card: card, options: card.defaultOptions, identity: ShareIdentity(name: "someone", showsFooter: true), images: [:], scale: 1) {
+                try? png.write(to: URL(fileURLWithPath: folder).appending(path: "trends-\(slug)-fit.png"))
             }
             print("\(title): picture \(Int(image.size.width)) × \(Int(image.size.height))")
         }

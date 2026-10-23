@@ -15,7 +15,8 @@ enum ShareRenderer {
     static func nsImage(card: ShareCard, options: ShareOptions, identity: ShareIdentity, images: [String: NSImage], scale: CGFloat) -> NSImage? {
         let view = ShareCardView(card: card, options: options, identity: identity, images: images)
         let renderer = ImageRenderer(content: view)
-        renderer.proposedSize = ProposedViewSize(options.size.points)
+        // A fitted chart card has a width and takes the height its content needs.
+        renderer.proposedSize = card.fitsChart(for: options) ? ProposedViewSize(width: card.fittedWidth, height: nil) : ProposedViewSize(options.size.points)
         renderer.scale = scale
         return renderer.nsImage
     }

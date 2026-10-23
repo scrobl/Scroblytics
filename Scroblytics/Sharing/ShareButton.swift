@@ -142,7 +142,10 @@ private struct SharePopover: View {
 
     @ViewBuilder
     private var previewView: some View {
-        let ratio = options.size.points.width / options.size.points.height
+        // A fitted chart card has the shape of the picture the renderer made, not of a chosen size.
+        let ratio: CGFloat = card.fitsChart(for: options) && preview != nil
+            ? (preview.map { $0.size.width / max(1, $0.size.height) } ?? 1)
+            : options.size.points.width / options.size.points.height
         ZStack {
             RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black.opacity(0.25))
             if let preview {
@@ -194,11 +197,16 @@ private struct SharePopover: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Size", selection: $options.size) {
-                ForEach(ShareSize.allCases) { Text($0.label).tag($0) }
+            if card.snapshot != nil {
+                Toggle("Shape the card to the chart", isOn: $options.fitToChart)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            if !card.fitsChart(for: options) {
+                Picker("Size", selection: $options.size) {
+                    ForEach(ShareSize.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
             if card.isList {
                 HStack {
                     Picker("Rows", selection: Binding(get: { shownRowCount }, set: { options.rowCount = $0 })) {

@@ -161,7 +161,7 @@ struct TrendsWeatherGroup: View {
         VStack(alignment: .leading, spacing: 10) {
             TrendsWeatherGridView(grid: result.grid, unit: unit, onSelect: { openCell(row: $0, column: $1, edges: result.grid.edges) })
                 .shareChartArea()
-                .shareSummary(ShareChartSummary(headline: "Weather and time of day", change: nil, detail: "How much more or less than usual, by temperature and time of day"))
+                .shareSummary(ShareChartSummary(headline: "", change: nil, detail: "How much more or less than usual you play, by temperature and time of day"))
             Text("Cells with fewer than \(TrendsWeatherGridView.minimumPlays) plays are left blank.")
                 .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
         }
@@ -170,7 +170,7 @@ struct TrendsWeatherGroup: View {
     private func timelineCard(_ result: TrendsWeatherResult) -> some View {
         TrendsWeatherTimeline(weeks: result.buckets, unit: unit, metric: metric, onSelect: { openBucket($0, days: result.bucketDays) })
             .shareChartArea()
-            .shareSummary(ShareChartSummary(headline: "Listening against the weather", change: nil, detail: "Each \(result.bucketDays == 1 ? "day" : "week")’s \(unitWord) over its temperature"))
+            .shareSummary(ShareChartSummary(headline: "", change: nil, detail: "Each \(result.bucketDays == 1 ? "day" : "week")’s \(unitWord) over its temperature"))
     }
 
     private func footnote(_ result: TrendsWeatherResult) -> some View {

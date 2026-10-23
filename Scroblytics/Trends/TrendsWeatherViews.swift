@@ -206,15 +206,14 @@ struct TrendsWeatherGridView: View {
                         ForEach(0..<grid.cells[row].count, id: \.self) { column in cell(grid.cells[row][column], row: row, column: column) }
                     }
                 }
-                GridRow {
-                    Color.clear.frame(width: 70, height: 1)
-                    temperatureScale.gridCellColumns(max(1, grid.cells.first?.count ?? 10))
-                }
             }
-            HStack(spacing: 8) {
-                Text(hoverText).font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary)
-                Spacer()
-                legend
+            VStack(alignment: .leading, spacing: 6) {
+                Text(hoverText).font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary).lineLimit(2)
+                HStack(spacing: 16) {
+                    temperatureScale
+                    Spacer()
+                    legend
+                }
             }
             .padding(.leading, 74)
         }
@@ -236,18 +235,16 @@ struct TrendsWeatherGridView: View {
             .onTapGesture { if cell.plays > 0 { onSelect(row, column) } }
     }
 
-    /// A bar from the coldest to the warmest hour, with the temperatures at the ends and the middle.
+    /// A short key to the columns: coldest to warmest. It is deliberately not as wide as the grid, because the columns hold equal
+    /// shares of your hours, not equal ranges of temperature, so a position along it would say nothing; hover a cell for its range.
     private var temperatureScale: some View {
-        VStack(spacing: 3) {
-            Capsule()
-                .fill(LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 0.1).map { WeatherPalette.temperature($0) }, startPoint: .leading, endPoint: .trailing))
-                .frame(height: 6)
-            HStack {
-                Text(label(grid.edges.first)); Spacer(); Text(label(grid.edges.count > 5 ? grid.edges[5] : nil)); Spacer(); Text(label(grid.edges.last))
-            }
-            .font(AppTypography.denseBadge).foregroundStyle(.secondary).monospacedDigit()
+        HStack(spacing: 6) {
+            Text(label(grid.edges.first)).font(AppTypography.denseBadge).foregroundStyle(.secondary).monospacedDigit()
+            LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 0.1).map { WeatherPalette.temperature($0) }, startPoint: .leading, endPoint: .trailing)
+                .frame(width: 70, height: 8).clipShape(Capsule())
+            Text(label(grid.edges.last)).font(AppTypography.denseBadge).foregroundStyle(.secondary).monospacedDigit()
+            Text("coldest to warmest").font(AppTypography.denseBadge).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
         }
-        .padding(.top, 4)
     }
 
     private func label(_ celsius: Double?) -> String { celsius.map { unit.text(celsius: $0) } ?? "" }

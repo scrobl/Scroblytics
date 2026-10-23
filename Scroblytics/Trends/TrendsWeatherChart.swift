@@ -38,6 +38,10 @@ struct TrendsWeatherGroup: View {
     private var unitWord: String { metric == .plays ? "scrobbles" : "listening time" }
 
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let adjust: Bool; let inputs: Inputs }
+    /// What each card's shared version is drawn from: when it changes, the card is made again.
+    private struct TilesShareKey: Equatable { let result: TrendsWeatherResult; let metric: TrendsMetric }
+    private struct GridShareKey: Equatable { let result: TrendsWeatherResult; let unit: TemperatureUnit }
+    private struct TimelineShareKey: Equatable { let result: TrendsWeatherResult; let unit: TemperatureUnit; let metric: TrendsMetric }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -163,6 +167,7 @@ struct TrendsWeatherGroup: View {
             TrendsWeatherTiles(tiles: result.tiles, previousLifts: result.previousLifts, metric: metric, onSelect: { openCondition($0) })
                 .shareChartArea()
                 .shareSummary(tilesSummary(result))
+                .shareNative(id: TilesShareKey(result: result, metric: metric)) { TrendsShareCharts.tiles(result: result, metric: metric, caption: tilesSubtitle(result)) }
             footnote(result)
         }
     }
@@ -172,6 +177,7 @@ struct TrendsWeatherGroup: View {
             TrendsWeatherGridView(grid: result.grid, unit: unit, onSelect: { openCell(row: $0, column: $1, edges: result.grid.edges) })
                 .shareChartArea()
                 .shareSummary(ShareChartSummary(headline: "", change: nil, detail: "How much more or less than usual you play, by temperature and time of day"))
+                .shareNative(id: GridShareKey(result: result, unit: unit)) { TrendsShareCharts.grid(result: result, unit: unit) }
             Text("Cells with fewer than \(TrendsWeatherGridView.minimumPlays) plays are left blank.")
                 .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
         }
@@ -181,6 +187,7 @@ struct TrendsWeatherGroup: View {
         TrendsWeatherTimeline(weeks: result.buckets, unit: unit, metric: metric, onSelect: { openBucket($0, days: result.bucketDays) })
             .shareChartArea()
             .shareSummary(ShareChartSummary(headline: "", change: nil, detail: "Each \(result.bucketDays == 1 ? "day" : "week")’s \(unitWord) over its temperature"))
+            .shareNative(id: TimelineShareKey(result: result, unit: unit, metric: metric)) { TrendsShareCharts.timeline(result: result, unit: unit, metric: metric) }
     }
 
     private func footnote(_ result: TrendsWeatherResult) -> some View {
@@ -248,6 +255,21 @@ private struct ShareSummaryModifier: ViewModifier {
     }
 }
 
+/// Hands the card around this chart the chart drawn for it, rebuilt whenever what it is drawn from (`id`) changes.
+private struct ShareNativeModifier<ID: Equatable>: ViewModifier {
+    let id: ID
+    let build: () -> ShareNativeChart?
+    @Environment(\.shareChartCapture) private var capture
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: id) { capture?.native = build() }
+            .onDisappear { capture?.native = nil }
+    }
+}
+
 extension View {
+    func shareNative<ID: Equatable>(id: ID, build: @escaping () -> ShareNativeChart?) -> some View { modifier(ShareNativeModifier(id: id, build: build)) }
+
     func shareSummary(_ summary: ShareChartSummary?) -> some View { modifier(ShareSummaryModifier(summary: summary)) }
 }

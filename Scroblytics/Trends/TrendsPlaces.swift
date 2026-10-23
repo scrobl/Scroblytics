@@ -155,50 +155,12 @@ enum TrendsPlacesEngine {
     }
 }
 
-/// Trends › Weather & places › Where you listened.
-struct TrendsPlacesCard: View {
-    let inputs: TrendsWeatherGroup.Inputs
-    let unit: TemperatureUnit
-    let openQuery: (QuerySpec, String) -> Void
-
-    @AppStorage("trends.weather.drillTarget") private var drillTargetRaw = QueryTarget.track.rawValue
-    @State private var result: TrendsPlacesResult?
-
-    private var drillTarget: QueryTarget { QueryTarget(rawValue: drillTargetRaw) ?? .track }
+/// Plays a day through the period, the trips shaded and home's rate as a dashed line. Drawn on screen and, larger, on a shared card.
+struct TrendsPlacesChart: View {
+    let result: TrendsPlacesResult
+    var height: CGFloat = 200
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let result {
-                if result.trips.isEmpty {
-                    Text("No trips in this period. Add where you were away, and for which dates, in Settings › Weather › Trips, and each one gets a comparison with home here.")
-                        .font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    SettingsLink { Text("Open Settings") }
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        chart(result)
-                        VStack(spacing: 6) {
-                            ForEach(result.trips.prefix(8)) { trip in stayRow(trip, result: result) }
-                            if result.trips.count > 8 {
-                                Text("and \(result.trips.count - 8) earlier trips").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
-                            }
-                            if let home = result.home { stayRow(home, result: result) }
-                        }
-                    }
-                    .shareChartArea()
-                    .shareSummary(summary(result))
-                    Text("A day counts as a trip day when the trip covers its middle. “A day” is plays divided by those days, so a day away with no listening counts against the trip.")
-                        .font(AppTypography.compactMetadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-            } else {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 120)
-            }
-        }
-        .task(id: inputs, priority: .utility) { await recompute() }
-    }
-
-    // MARK: Chart
-
-    private func chart(_ result: TrendsPlacesResult) -> some View {
         let peak = max(result.buckets.map(\.perDay).max() ?? 1, 1) * 1.15
         let homeRate = result.home?.perDay ?? 0
         return Chart {
@@ -229,12 +191,55 @@ struct TrendsPlacesCard: View {
         }
         .chartYScale(domain: 0...peak)
         .chartYAxisLabel("plays a day", position: .leading)
-        .frame(height: 200)
+        .frame(height: height)
     }
 
     private func away(_ bucket: TrendsPlaceBucket, _ result: TrendsPlacesResult) -> Bool {
         let middle = bucket.start.addingTimeInterval(Double(bucket.days) * 43_200)
         return result.trips.contains { middle >= $0.from && middle < max($0.until, $0.from.addingTimeInterval(86_400)) }
+    }
+}
+
+/// Trends › Weather & places › Where you listened.
+struct TrendsPlacesCard: View {
+    let inputs: TrendsWeatherGroup.Inputs
+    let unit: TemperatureUnit
+    let openQuery: (QuerySpec, String) -> Void
+
+    @AppStorage("trends.weather.drillTarget") private var drillTargetRaw = QueryTarget.track.rawValue
+    @State private var result: TrendsPlacesResult?
+
+    private var drillTarget: QueryTarget { QueryTarget(rawValue: drillTargetRaw) ?? .track }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let result {
+                if result.trips.isEmpty {
+                    Text("No trips in this period. Add where you were away, and for which dates, in Settings › Weather › Trips, and each one gets a comparison with home here.")
+                        .font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    SettingsLink { Text("Open Settings") }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TrendsPlacesChart(result: result)
+                        VStack(spacing: 6) {
+                            ForEach(result.trips.prefix(8)) { trip in stayRow(trip, result: result) }
+                            if result.trips.count > 8 {
+                                Text("and \(result.trips.count - 8) earlier trips").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                            }
+                            if let home = result.home { stayRow(home, result: result) }
+                        }
+                    }
+                    .shareChartArea()
+                    .shareSummary(summary(result))
+                    .shareNative(id: result) { TrendsShareCharts.places(result: result, unit: unit) }
+                    Text("A day counts as a trip day when the trip covers its middle. “A day” is plays divided by those days, so a day away with no listening counts against the trip.")
+                        .font(AppTypography.compactMetadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 120)
+            }
+        }
+        .task(id: inputs, priority: .utility) { await recompute() }
     }
 
     // MARK: Rows

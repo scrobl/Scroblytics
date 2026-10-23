@@ -341,7 +341,7 @@ struct TrendsSection<Content: View>: View {
                     Text(subtitle).font(AppTypography.metadata).foregroundStyle(.secondary)
                 }
                 Spacer()
-                ShareButton(card: { makeShareCard() }, isEnabled: capture.hasChart)
+                ShareButton(card: { makeShareCard() }, isEnabled: capture.hasChart || capture.native != nil)
                     .controlSize(.small)
             }
             content
@@ -351,6 +351,12 @@ struct TrendsSection<Content: View>: View {
 
     /// A card of the chart as it is drawn now, with the period (and what it is compared with) it covers.
     private func makeShareCard() -> ShareCard? {
+        if let native = capture.native {
+            return ShareCard(
+                title: title, period: shareInfo.period, measure: comparison ? (shareInfo.compare ?? "") : "", rows: [], valueLabel: "", hasMovement: false,
+                kindID: "trends." + title.lowercased().replacingOccurrences(of: " ", with: "-") + ".native", native: native
+            )
+        }
         guard let image = capture.image() else { return nil }
         // A chart that states its own comparison with the number carries it there; otherwise the card names what it is compared with.
         let summary = capture.summary

@@ -25,6 +25,7 @@ struct TrendsDiscoveryChart: View {
     @State private var hovered: TrendsDiscovery.Point?
     @Environment(\.shareChartCapture) private var shareCapture
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool }
 
     private func changeText(_ discovery: TrendsDiscovery) -> (text: String, positive: Bool)? {
         guard let compare = discovery.comparePercent else { return nil }
@@ -71,6 +72,9 @@ struct TrendsDiscoveryChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(metric: metric, inputs: inputs), ready: discovery != nil)) {
+            discovery.map { TrendsShareCharts2.discovery(discovery: $0, metric: metric) }
+        }
     }
 
     private var legend: some View {

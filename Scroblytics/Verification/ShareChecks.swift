@@ -363,8 +363,8 @@ enum ShareChecks {
             var rhBlank = ShareOptions(); rhBlank.customTitle = "   "
             let rhProfile = ShareCard(title: "Page", period: "", measure: "", rows: [], valueLabel: "", hasMovement: false, kindID: "x", profile: ShareProfile(kind: "", subtitle: "", heroImageURL: nil, stats: [], chips: [], trend: []))
             let blankIsNone = rhCard.displayTitle(for: rhBlank) == "Down the rabbit hole"
-            let profileKeeps = rhProfile.displayTitle(for: rhTitle) == "Page"
-            check("a title of only spaces counts as none, and only list cards take one", blankIsNone && profileKeeps)
+            let profileTakes = rhProfile.displayTitle(for: rhTitle) == "My Friday detour" && rhProfile.displayTitle(for: rhBlank) == "Page"
+            check("a title of only spaces counts as none, and every kind of card takes a typed one", blankIsNone && profileTakes)
             check("the typed title is not remembered with the options", { let data = try? JSONEncoder().encode(rhTitle); return data.flatMap { try? JSONDecoder().decode(ShareOptions.self, from: $0) }?.customTitle == "" }())
             var rhMatch = ShareOptions(); rhMatch.valueColumn = 2
             check("the match score can be the column shown", rhCard.valueText(rhCard.rows[1], options: rhMatch) == "80%" && rhCard.valueName(for: rhMatch) == "Match score")
@@ -692,6 +692,96 @@ enum ShareChecks {
                 check("page card, \(size.label): the hero picture and the identity footer change the image", withHero != png && withFooter != png)
                 let bare = ShareCard(title: "日本語のとても長いタイトルがここに入りますよ and a very long name that never fits on a single line of a card", period: "A very long period name", measure: "", rows: [], valueLabel: "Plays", hasMovement: false, kindID: "page.artist", profile: ShareProfile(kind: "Artist", subtitle: "", heroImageURL: nil, stats: [ShareStat(label: "Scrobbles", value: "1")], chips: [], trend: []))
                 check("page card, \(size.label): one tile, no chips and no trend still renders", (ShareRenderer.png(card: bare, options: o, identity: named, images: [:]).flatMap { NSBitmapImageRep(data: $0) }?.pixelsWide ?? 0) == Int(size.points.width) * 2)
+            }
+
+            // MARK: Titles, subtitles and chart cards drawn for the card
+            func differs(_ a: Data?, _ b: Data?) -> Bool { a != nil && b != nil && a != b }
+            @MainActor func rendered(_ card: ShareCard, _ options: ShareOptions, images: [String: NSImage] = [:]) -> Data? {
+                ShareRenderer.png(card: card, options: options, identity: .anonymous, images: images)
+            }
+            var typedTitle = ShareOptions(); typedTitle.customTitle = "My own title"
+            var typedSubtitle = ShareOptions(); typedSubtitle.customSubtitle = "My own subtitle"
+            check("every kind of card takes a typed title: the page card, the list and the picture of a chart", (typedTitle.customTitle == "My own title") && profileCard.displayTitle(for: typedTitle) == "My own title" && card.displayTitle(for: typedTitle) == "My own title" && chartCard.displayTitle(for: typedTitle) == "My own title" && profileCard.displayTitle(for: ShareOptions()) == "Album A")
+            check("…and a typed subtitle replaces the artist line or the measure", profileCard.displaySubtitle(for: typedSubtitle) == "My own subtitle" && card.displaySubtitle(for: typedSubtitle) == "My own subtitle" && profileCard.displaySubtitle(for: ShareOptions()) == "Artist A" && card.displaySubtitle(for: ShareOptions()) == "Ranked by scrobbles")
+            for (name, target) in [("page card", profileCard), ("list card", card), ("chart picture card", chartCard)] {
+                var plain = target.defaultOptions
+                var titled = plain; titled.customTitle = "A different title"
+                var subtitled = plain; subtitled.customSubtitle = "A different subtitle"
+                plain.size = .square; titled.size = .square; subtitled.size = .square
+                check("\(name): a typed title and a typed subtitle each change the image", differs(rendered(target, plain), rendered(target, titled)) && differs(rendered(target, plain), rendered(target, subtitled)))
+                check("\(name): the text copies use the typed title", ShareText.plain(target, options: titled).contains("A different title") && ShareText.markdownList(target, options: titled).contains("A different title"))
+            }
+            // A chart card with its own controls, drawn at the card's size.
+            let framework = ShareNativeChart(
+                id: "test", caption: "What it shows, in a sentence", footnote: "How it is worked out", preferredSize: .wide,
+                controls: [ShareNativeControl(id: "extra", label: "Extra", kind: .toggle(defaultValue: true)), ShareNativeControl(id: "rows", label: "Rows", kind: .count(range: 1...5, defaultValue: 3)), ShareNativeControl(id: "mode", label: "Mode", kind: .choice(["a", "b"], defaultValue: "a"))],
+                textLines: ["first line", "second line"]
+            ) { layout, options, _ in
+                AnyView(VStack(spacing: 4) {
+                    ForEach(0..<options.number("rows", 3), id: \.self) { _ in Rectangle().fill(options.flag("extra", true) ? Color.red : Color.blue).frame(height: 30) }
+                    Text(options.pick("mode", "a")).foregroundStyle(.white)
+                })
+            }
+            let nativeCard = ShareCard(title: "Native chart", period: "Last 6 months", measure: "", rows: [], valueLabel: "", hasMovement: false, kindID: "test.native", native: framework)
+            check("a native chart card opens on the shape the chart prefers, is not a list, and has no pictures to load", nativeCard.defaultOptions.size == .wide && !nativeCard.isList && nativeCard.pictureURLs(for: ShareOptions()).isEmpty && !nativeCard.fitsChart(for: nativeCard.defaultOptions))
+            for size in ShareSize.allCases {
+                var o = nativeCard.defaultOptions; o.size = size
+                let image = rendered(nativeCard, o).flatMap { NSBitmapImageRep(data: $0) }
+                check("native chart card, \(size.label): a PNG at 2x the card size, not blank", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+            }
+            let base = nativeCard.defaultOptions
+            var noExtra = base; noExtra.flags["extra"] = false
+            var fewer = base; fewer.numbers["rows"] = 1
+            var modeB = base; modeB.picks["mode"] = "b"
+            var noCaption = base; noCaption.flags["caption"] = false
+            var withFootnote = base; withFootnote.flags["footnote"] = true
+            var typedCaption = base; typedCaption.customCaption = "My own caption"
+            check("a toggle, a count and a choice each change what the chart draws", differs(rendered(nativeCard, base), rendered(nativeCard, noExtra)) && differs(rendered(nativeCard, base), rendered(nativeCard, fewer)) && differs(rendered(nativeCard, base), rendered(nativeCard, modeB)))
+            check("the caption can be left off, retyped, and the method line added", differs(rendered(nativeCard, base), rendered(nativeCard, noCaption)) && differs(rendered(nativeCard, base), rendered(nativeCard, typedCaption)) && differs(rendered(nativeCard, base), rendered(nativeCard, withFootnote)))
+            let nativeText = ShareText.plain(nativeCard, options: base)
+            check("the text copy has the title, the caption and the lines", nativeText.contains("Native chart") && nativeText.contains("What it shows, in a sentence") && nativeText.contains("• first line") && !nativeText.contains("How it is worked out"))
+            check("…a retyped caption replaces the sentence, an off caption removes it, the method line follows its switch", ShareText.plain(nativeCard, options: typedCaption).contains("My own caption") && !ShareText.plain(nativeCard, options: typedCaption).contains("What it shows") && !ShareText.plain(nativeCard, options: noCaption).contains("What it shows") && ShareText.plain(nativeCard, options: withFootnote).contains("How it is worked out"))
+            check("…and the Markdown forms use bullets", ShareText.markdownList(nativeCard, options: base).contains("- first line") && ShareText.markdownTable(nativeCard, options: base).contains("- second line"))
+            let suiteNative = UserDefaults(suiteName: "share-native-\(UUID().uuidString)")!
+            var chosenNative = noExtra; chosenNative.numbers["rows"] = 2; chosenNative.picks["mode"] = "b"; chosenNative.customCaption = "not remembered"
+            ShareSettings.save(chosenNative, for: nativeCard.kindID, defaults: suiteNative)
+            let remembered = ShareSettings.options(for: nativeCard.kindID, fallback: nativeCard.defaultOptions, defaults: suiteNative)
+            check("the choices are remembered per kind of card, a typed caption is not", remembered.flags["extra"] == false && remembered.numbers["rows"] == 2 && remembered.picks["mode"] == "b" && remembered.customCaption.isEmpty)
+            check("options saved before these controls existed still load", (try? JSONDecoder().decode(ShareOptions.self, from: Data("{\"size\":\"wide\"}".utf8)))?.flags.isEmpty == true)
+            // The Weather & places charts as cards, on made-up listening.
+            let natives = await DetailSnapshots.nativeShareCards()
+            check("every Trends chart drawn for the card makes one: the five weather and places charts and the nine others", natives.map(\.name) == ["tiles", "grid", "timeline", "leanings", "places", "volume", "heatmap", "discovery", "taste", "eras", "flow", "loyalty", "rankings", "longtail", "volumecompare"], "\(natives.map(\.name))")
+            for (name, nativeChartCard, images) in natives {
+                for size in ShareSize.allCases {
+                    var o = nativeChartCard.defaultOptions; o.size = size
+                    let image = rendered(nativeChartCard, o, images: images).flatMap { NSBitmapImageRep(data: $0) }
+                    check("\(name) card, \(size.label): a PNG at 2x the card size, with the chart drawn", image?.pixelsWide == Int(size.points.width) * 2 && image?.pixelsHigh == Int(size.points.height) * 2 && (image.map { luminanceSpread($0) > 0.05 } ?? false))
+                }
+                let o = nativeChartCard.defaultOptions
+                check("\(name) card: has a caption, controls and lines to copy", !(nativeChartCard.native?.caption.isEmpty ?? true) && !(nativeChartCard.native?.controls.isEmpty ?? true) && ShareText.plain(nativeChartCard, options: o).contains(nativeChartCard.title))
+            }
+            let toggles = [
+                "tiles": "detail", "grid": "values", "timeline": "markers", "leanings": "artwork", "places": "home", "volume": "area", "heatmap": "hours",
+                "discovery": "legend", "taste": "bars", "eras": "legend", "flow": "bars", "loyalty": "summary", "rankings": "points", "longtail": "stats",
+            ]
+            for (name, nativeChartCard, images) in natives {
+                guard let control = toggles[name] else { continue }
+                var on = nativeChartCard.defaultOptions, off = on
+                on.flags[control] = true; off.flags[control] = false
+                check("\(name) card: turning “\(control)” off changes the picture", differs(rendered(nativeChartCard, on, images: images), rendered(nativeChartCard, off, images: images)))
+            }
+            if let compared = natives.first(where: { $0.name == "volumecompare" }), let native = compared.card.native {
+                let off = compared.card.defaultOptions
+                var on = off; on.flags["compare"] = true
+                check("the comparison is left out until asked for: nothing about it in the sentence, under the title or in the text", !native.displayCaption(for: off).contains(" vs ") && compared.card.displaySubtitle(for: off).isEmpty && !ShareText.plain(compared.card, options: off).contains("Compared with"))
+                check("…and including it adds the comparison to the sentence, the subtitle, the text and the chart", native.displayCaption(for: on).contains(" vs ") && compared.card.displaySubtitle(for: on).hasPrefix("Compared with") && ShareText.plain(compared.card, options: on).contains("Compared with") && differs(rendered(compared.card, off, images: compared.images), rendered(compared.card, on, images: compared.images)))
+                check("every comparison control starts off", native.controls.filter { $0.id == "compare" }.allSatisfy { if case .toggle(let value) = $0.kind { !value } else { false } } && !native.controls.filter { $0.id == "compare" }.isEmpty)
+                var typed = off; typed.customSubtitle = "My subtitle"
+                check("a typed subtitle shows whether or not the comparison is in", compared.card.displaySubtitle(for: typed) == "My subtitle")
+            }
+            if let leanings = natives.first(where: { $0.name == "leanings" }) {
+                check("the leanings card loads the artwork its rows show", !leanings.images.isEmpty && !leanings.card.pictureURLs(for: leanings.card.defaultOptions).isEmpty, "\(leanings.images.count)")
+                check("its text lists the rows with their plays and days", ShareText.plain(leanings.card, options: leanings.card.defaultOptions).contains("plays on"))
             }
 
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")

@@ -33,6 +33,8 @@ struct ShareCard: Sendable, Equatable {
     var snapshot: ShareSnapshot? = nil
     /// The chart's headline numbers, printed above its picture.
     var chartSummary: ShareChartSummary? = nil
+    /// A chart drawn for the card at its own size (instead of `snapshot`, a photograph of the window).
+    var native: ShareNativeChart? = nil
     /// Track titles drawn a little smaller, so long ones fit (a path of songs).
     var compactTitles = false
     /// Whether an item with no picture of its own (the library's total) can show a trophy or the Last.fm logo, chosen in the preview.
@@ -206,10 +208,19 @@ struct ShareOptions: Codable, Equatable, Sendable {
     var layout = ShareLayout.list
     /// A title the person typed to replace the card's own (a list card); empty keeps the card's. Not remembered: it belongs to one share.
     var customTitle = ""
+    /// A line under the title typed to replace the card's own subtitle (the period, the artist, what it is compared with). Not remembered either.
+    var customSubtitle = ""
+    /// What a natively drawn chart card includes, excludes or chooses (`ShareNativeControl`), by control id; a control the person hasn't
+    /// touched takes its own default. Remembered per kind of card.
+    var flags: [String: Bool] = [:]
+    var numbers: [String: Int] = [:]
+    var picks: [String: String] = [:]
+    /// A chart card's sentence about what it shows ("Rain is your music weather: +23%"), typed to replace the written one. Not remembered either.
+    var customCaption = ""
     /// Which value column of a query card the image shows. Not remembered: the columns differ from one query to the next.
     var valueColumn: Int? = nil
 
-    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, showWeather, fitToChart, layout }
+    private enum CodingKeys: String, CodingKey { case size, rowCount, showValues, showMovement, showDate, icon, showNotes, showWeather, fitToChart, layout, flags, numbers, picks }
 
     init(size: ShareSize = .square, rowCount: Int = 10, showValues: Bool = true, showMovement: Bool = true, showDate: Bool = true, icon: ShareIcon = .trophy) {
         self.size = size
@@ -234,6 +245,9 @@ struct ShareOptions: Codable, Equatable, Sendable {
         // Chart choices remembered before this existed take the fitted card; no other kind of card reads it.
         fitToChart = try c.decodeIfPresent(Bool.self, forKey: .fitToChart) ?? true
         layout = try c.decodeIfPresent(ShareLayout.self, forKey: .layout) ?? .list
+        flags = (try? c.decodeIfPresent([String: Bool].self, forKey: .flags)) ?? [:]
+        numbers = (try? c.decodeIfPresent([String: Int].self, forKey: .numbers)) ?? [:]
+        picks = (try? c.decodeIfPresent([String: String].self, forKey: .picks)) ?? [:]
     }
 
     static let rowCounts = [5, 10, 15, 20]
@@ -272,6 +286,7 @@ extension ShareCard {
     /// The pictures a card with these options draws, for the renderer to load first: a list's visible rows (the first one is also the
     /// background), a profile's one hero picture.
     func pictureURLs(for options: ShareOptions) -> [String?] {
+        if let native { return native.imageURLs }
         if snapshot != nil { return [] }
         if let profile { return [profile.heroImageURL] + profile.highlights.map(\.imageURL) }
         if options.layout == .tree, let tree {
@@ -301,7 +316,16 @@ extension ShareCard {
     /// The title the card shows with these options: the person's own when they typed one.
     func displayTitle(for options: ShareOptions) -> String {
         let typed = options.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        return typed.isEmpty || !isList ? title : typed
+        return typed.isEmpty ? title : typed
+    }
+
+    /// The line under the title: the person's own when they typed one, else the card's (a profile card's artist line, or a list's measure).
+    func displaySubtitle(for options: ShareOptions) -> String {
+        let typed = options.customSubtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        // A drawn chart's own subtitle is what it is compared with, so it goes when the comparison is left out.
+        if native != nil, !options.includesComparison { return "" }
+        return profile?.subtitle ?? measure
     }
 
     /// Whether this card is drawn as a tree with these options.
@@ -311,6 +335,7 @@ extension ShareCard {
     var defaultOptions: ShareOptions {
         var options = ShareOptions()
         if snapshot != nil { options.size = .wide; options.fitToChart = true }
+        if let native { options.size = native.preferredSize }
         return options
     }
 
@@ -334,5 +359,5 @@ extension ShareCard {
     }
 
     /// Whether the Rows and values options mean anything for this card.
-    var isList: Bool { profile == nil && snapshot == nil }
+    var isList: Bool { profile == nil && snapshot == nil && native == nil }
 }

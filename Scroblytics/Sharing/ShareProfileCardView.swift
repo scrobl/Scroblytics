@@ -56,7 +56,7 @@ struct ShareProfileCardView: View {
         } else {
             let square = options.size == .square
             // A long name and artist need the room the picture would take.
-            let longNames = card.title.count + profile.subtitle.count > 70
+            let longNames = card.displayTitle(for: options).count + card.displaySubtitle(for: options).count > 70
             VStack(spacing: 0) {
                 kickerRow
                 Spacer(minLength: 12)
@@ -76,14 +76,14 @@ struct ShareProfileCardView: View {
     /// The name and the artist: long ones wrap onto more lines and shrink before they are cut.
     private func milestoneTitle(size: CGFloat, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 6) {
-            Text(card.title)
+            Text(card.displayTitle(for: options))
                 .font(.system(size: size, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(3)
                 .minimumScaleFactor(0.45)
                 .multilineTextAlignment(alignment == .center ? .center : .leading)
-            if !profile.subtitle.isEmpty {
-                Text(profile.subtitle)
+            if !card.displaySubtitle(for: options).isEmpty {
+                Text(card.displaySubtitle(for: options))
                     .font(.system(size: size * 0.5, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.68))
                     .lineLimit(2)
@@ -166,13 +166,13 @@ struct ShareProfileCardView: View {
 
     private func titleBlock(titleSize: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(card.title)
+            Text(card.displayTitle(for: options))
                 .font(.system(size: titleSize, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(3)
                 .minimumScaleFactor(0.5)
-            if !profile.subtitle.isEmpty {
-                Text(profile.subtitle)
+            if !card.displaySubtitle(for: options).isEmpty {
+                Text(card.displaySubtitle(for: options))
                     .font(.system(size: titleSize * 0.46, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.68))
                     .lineLimit(2)

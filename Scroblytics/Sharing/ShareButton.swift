@@ -195,6 +195,32 @@ private struct SharePopover: View {
         return choices.contains(options.rowCount) ? options.rowCount : (choices.last { $0 <= options.rowCount } ?? choices[0])
     }
 
+    private func flagBinding(_ id: String, _ defaultValue: Bool) -> Binding<Bool> {
+        Binding(get: { options.flag(id, defaultValue) }, set: { options.flags[id] = $0 })
+    }
+
+    /// One include / exclude / choose control of a natively drawn chart card.
+    @ViewBuilder
+    private func nativeControl(_ control: ShareNativeControl) -> some View {
+        switch control.kind {
+        case .toggle(let defaultValue):
+            Toggle(control.label, isOn: flagBinding(control.id, defaultValue))
+        case .count(let range, let defaultValue):
+            Stepper(value: Binding(get: { options.number(control.id, defaultValue) }, set: { options.numbers[control.id] = $0 }), in: range) {
+                Text("\(control.label): \(options.number(control.id, defaultValue))")
+            }
+        case .choice(let choices, let defaultValue):
+            HStack {
+                Text(control.label)
+                Picker(control.label, selection: Binding(get: { options.pick(control.id, defaultValue) }, set: { options.picks[control.id] = $0 })) {
+                    ForEach(choices, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                Spacer()
+            }
+        }
+    }
+
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
             if card.snapshot != nil {
@@ -223,9 +249,16 @@ private struct SharePopover: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
-            if card.isList {
-                TextField("Title", text: $options.customTitle, prompt: Text(card.title))
+            TextField("Title", text: $options.customTitle, prompt: Text(card.title))
+                .textFieldStyle(.roundedBorder)
+            TextField("Subtitle", text: $options.customSubtitle, prompt: Text(card.displaySubtitle(for: ShareOptions()).isEmpty ? "Add a line under the title" : card.displaySubtitle(for: ShareOptions())))
+                .textFieldStyle(.roundedBorder)
+            if let native = card.native {
+                TextField("Caption", text: $options.customCaption, prompt: Text(native.caption))
                     .textFieldStyle(.roundedBorder)
+                Toggle("Show the caption", isOn: flagBinding("caption", true))
+                ForEach(native.controls) { control in nativeControl(control) }
+                if native.footnote != nil { Toggle("Show how it’s worked out", isOn: flagBinding("footnote", false)) }
             }
             if card.iconChoice {
                 HStack {

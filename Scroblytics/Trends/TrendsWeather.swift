@@ -1,7 +1,7 @@
 import Foundation
 
 /// Everything the three weather views in Trends draw for one period, worked out from the plays and the weather of the same hours.
-struct TrendsWeatherResult: Sendable {
+struct TrendsWeatherResult: Sendable, Equatable {
     let tiles: [TrendsWeatherTile]
     /// Each weather's lift in the comparison period, when there is one.
     let previousLifts: [WeatherCondition: Double]

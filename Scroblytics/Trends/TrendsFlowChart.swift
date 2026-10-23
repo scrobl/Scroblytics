@@ -52,6 +52,7 @@ struct TrendsFlowChart: View {
     private var gridMode: GridMode { GridMode(rawValue: gridModeRaw) ?? .counts }
     private var noun: String { granularity == .artist ? "artist" : "genre" }
     private struct ComputeKey: Equatable { let granularity: TrendsFlow.Granularity; let gap: Int; let minTransitions: Int; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -83,6 +84,10 @@ struct TrendsFlowChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(granularity: granularity, gap: gap, minTransitions: minTransitions, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(granularity: granularity, gap: gap, minTransitions: minTransitions, inputs: inputs), ready: data != nil)) {
+            guard let data, data.nodes.count >= 5, data.edges.count >= 3 else { return nil }
+            return TrendsShareCharts2.flow(data: data, noun: noun, gapText: gap >= 60 ? "\(gap / 60) hr" : "\(gap) min")
+        }
     }
 
     // MARK: - Controls

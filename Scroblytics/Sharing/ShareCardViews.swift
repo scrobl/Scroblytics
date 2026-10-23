@@ -94,7 +94,9 @@ struct ShareCardView: View {
     let images: [String: NSImage]
 
     var body: some View {
-        if let snapshot = card.snapshot {
+        if let native = card.native {
+            ShareNativeChartCardView(card: card, native: native, options: options, identity: identity, images: images)
+        } else if let snapshot = card.snapshot {
             ShareChartCardView(card: card, snapshot: snapshot, options: options, identity: identity)
         } else if card.drawsTree(for: options) {
             ShareTreeCardView(card: card, options: options, identity: identity, images: images)
@@ -142,8 +144,8 @@ struct ShareListHeader: View {
                 .foregroundStyle(.white)
                 .lineLimit(longTitle ? 2 : 1)
                 .minimumScaleFactor(0.5)
-            if !card.measure.isEmpty {
-                Text(card.measure)
+            if !card.displaySubtitle(for: options).isEmpty {
+                Text(card.displaySubtitle(for: options))
                     .font(.system(size: 32, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.68))
                     .lineLimit(1)

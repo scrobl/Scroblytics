@@ -21,6 +21,7 @@
 		09A3E4DC98BC1A065D761F92 /* QueryTimeMachineTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE52C47DCFF00DD92BC63A7 /* QueryTimeMachineTemplates.swift */; };
 		0A018C81A9220C12DDE4F196 /* ImportStatusStrips.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06AC6D84063B6907DCB5AC3 /* ImportStatusStrips.swift */; };
 		0AAEB8678A9F5007D8F6234D /* GlobalSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AEFE98ECC5F9E457E010E89 /* GlobalSearchOverlay.swift */; };
+		0B36FBA6D083EF5A7EFD9271 /* ShareNativeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3B61A79908B20DB4FE1A58 /* ShareNativeChart.swift */; };
 		0C25F436149C9CA4BA052C9E /* FadingFavoritesEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD766E1015B595F2C849E708 /* FadingFavoritesEngine.swift */; };
 		0C7941F2B9AF54C9F2128D45 /* QuerySimilarityFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23FC627494ECDB319782FB8D /* QuerySimilarityFields.swift */; };
 		0D924834104BC2F360F16E18 /* ShareChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7298E077B1A6006FDDB4426 /* ShareChecks.swift */; };
@@ -124,6 +125,7 @@
 		662F9867273E67A979618371 /* TrendsDiscoveryChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEEA1F768CBEFC4F69FD27A /* TrendsDiscoveryChart.swift */; };
 		668FD20B0E3A48E4FBCB7DDC /* DeezerAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2D83D18781B0DFDE04BAEF /* DeezerAPIClient.swift */; };
 		6842915DA707764C59B32297 /* LastfmSigning.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E8CD3478E72189FBCCD020 /* LastfmSigning.swift */; };
+		68678E15A15A55944AB6BAD9 /* TrendsShareCharts2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2D6B78764CA46D191E43 /* TrendsShareCharts2.swift */; };
 		692A648EA98681F553A32D8F /* OverviewDrillChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4AF8C87C92292F68F7CB1A /* OverviewDrillChecks.swift */; };
 		69C9D85CEFCFE51EE5957FA6 /* EntityTagsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE49A1EF817D44A35A7DDBD5 /* EntityTagsEngine.swift */; };
 		69F88297B3904CC5646495E7 /* DetailLoadMemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F63838339CB68FE4110025 /* DetailLoadMemo.swift */; };
@@ -132,6 +134,7 @@
 		6B1BB97F0A7C049655D094CA /* ShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A07F9C251D4CBB1DE39289 /* ShareCard.swift */; };
 		6C54A3DA9AEDCC90EB379A9A /* TrackDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABEC7C605198B4546CB60A1 /* TrackDetailView.swift */; };
 		6C9BCF707927FD2F50DC734C /* LovedTracksEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50975E90A0F20009307C588F /* LovedTracksEngine.swift */; };
+		6E37BB5CB2D769A664B1A497 /* TrendsShareCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC64266F5CA1258C40B9594 /* TrendsShareCharts.swift */; };
 		6F39241ABCEEC823E69B9C04 /* TrendsPlaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18B68AB57728FEAD3EEE97B /* TrendsPlaces.swift */; };
 		6F9135C26E9D41277D096954 /* QueryIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF6A533CB7D00CC49267AE5 /* QueryIdentity.swift */; };
 		70091AC3CAA5C8666D6DF7D9 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90810DA5598B14F663A676C7 /* HelpView.swift */; };
@@ -447,6 +450,7 @@
 		5E875056E57025D1CB6FDF78 /* QuerySpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuerySpec.swift; sourceTree = "<group>"; };
 		5ED8DCFE7B5B3D101F122FA3 /* RecentScrobblesEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentScrobblesEngine.swift; sourceTree = "<group>"; };
 		60169FA9A2E48E18118ED88D /* AskLLM.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskLLM.swift; sourceTree = "<group>"; };
+		61DF2D6B78764CA46D191E43 /* TrendsShareCharts2.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsShareCharts2.swift; sourceTree = "<group>"; };
 		63A99EB41FFB476C0B022B9F /* TestProfile.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestProfile.swift; sourceTree = "<group>"; };
 		640182F05471471A2F4F4D5D /* TrendsMetric.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsMetric.swift; sourceTree = "<group>"; };
 		64F48A25FE8100606440F57F /* LibraryGapsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryGapsView.swift; sourceTree = "<group>"; };
@@ -456,6 +460,7 @@
 		694049D25C9E2B4B2659041C /* QueryConditionsEditor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryConditionsEditor.swift; sourceTree = "<group>"; };
 		6975629FBBF5349F2ABE1CF8 /* TestProfileLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestProfileLauncher.swift; sourceTree = "<group>"; };
 		69C4A6525E4B1A3132499FCD /* ImportEstimate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImportEstimate.swift; sourceTree = "<group>"; };
+		6A3B61A79908B20DB4FE1A58 /* ShareNativeChart.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareNativeChart.swift; sourceTree = "<group>"; };
 		6AE51BF0DB87DF2CC8061E07 /* QueryWeatherFields.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryWeatherFields.swift; sourceTree = "<group>"; };
 		6C62FDE003685B4814E2ADBF /* AppleMusicMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicMatcher.swift; sourceTree = "<group>"; };
 		6CCD6B341E970BDCE14EEC73 /* OverviewSyncEventSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewSyncEventSections.swift; sourceTree = "<group>"; };
@@ -532,6 +537,7 @@
 		ABC3EA26E5EA1B6ABCE53D8F /* AskModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskModel.swift; sourceTree = "<group>"; };
 		ACB66BDBB2C1610EBD73CAA8 /* ShareCards.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareCards.swift; sourceTree = "<group>"; };
 		AD766E1015B595F2C849E708 /* FadingFavoritesEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FadingFavoritesEngine.swift; sourceTree = "<group>"; };
+		ADC64266F5CA1258C40B9594 /* TrendsShareCharts.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsShareCharts.swift; sourceTree = "<group>"; };
 		AE1ADE3F955DA53D9DF84400 /* TrendsRankBump.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsRankBump.swift; sourceTree = "<group>"; };
 		AFB1989CDEE4933BD193CC49 /* UpdateStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateStore.swift; sourceTree = "<group>"; };
 		B154D5F4081B0B1ADB94185E /* QueryTurnoverFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryTurnoverFields.swift; sourceTree = "<group>"; };
@@ -1084,6 +1090,7 @@
 				CF99019D496068838648850F /* ShareSnapshot.swift */,
 				254E0749D2363433CFAF15B4 /* ShareChartCardView.swift */,
 				CA81FD3AF7F89F425D7C75B8 /* ShareAvatar.swift */,
+				6A3B61A79908B20DB4FE1A58 /* ShareNativeChart.swift */,
 			);
 			name = Sharing;
 			path = Sharing;
@@ -1177,6 +1184,8 @@
 				06CEAD1557F3DB883C224DA4 /* TrendsWeatherChart.swift */,
 				BD6A1F078FE586685E70D6E5 /* TrendsWeatherLeanings.swift */,
 				B18B68AB57728FEAD3EEE97B /* TrendsPlaces.swift */,
+				ADC64266F5CA1258C40B9594 /* TrendsShareCharts.swift */,
+				61DF2D6B78764CA46D191E43 /* TrendsShareCharts2.swift */,
 			);
 			path = Trends;
 			sourceTree = "<group>";
@@ -1635,6 +1644,9 @@
 				ACBAB2C10533C8A423691F5A /* PlayWeatherCells.swift in Sources */,
 				744004BE0AA5DDF30B4C2095 /* TrendsWeatherLeanings.swift in Sources */,
 				6F39241ABCEEC823E69B9C04 /* TrendsPlaces.swift in Sources */,
+				0B36FBA6D083EF5A7EFD9271 /* ShareNativeChart.swift in Sources */,
+				6E37BB5CB2D769A664B1A497 /* TrendsShareCharts.swift in Sources */,
+				68678E15A15A55944AB6BAD9 /* TrendsShareCharts2.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

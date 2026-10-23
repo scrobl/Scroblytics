@@ -137,6 +137,17 @@ enum TrendsLeaningsEngine {
         return TrendsLeaningsResult(toward: Array(toward), away: Array(away), eligible: items.count, totalPlays: total, baselineShare: overall, adjusted: adjust)
     }
 
+    /// The artwork a row shows: the picture saved for the item (a custom one first), then the one its plays carried.
+    static func imageURL(for item: TrendsLeaningItem, lookup: [String: String]) -> String? {
+        let imageTarget: ImageTarget
+        switch item.id.target {
+        case .artist: imageTarget = ImageTarget(kind: .artist, artist: item.artist, album: nil, track: nil)
+        case .album: imageTarget = ImageTarget(kind: .album, artist: item.artist, album: item.name, track: nil)
+        case .track: imageTarget = ImageTarget(kind: .track, artist: item.artist, album: item.album, track: item.name)
+        }
+        return ImageResolutionEngine.effectiveImageURL(for: imageTarget, lookup: lookup, fallbackURL: item.fallbackImageURL)
+    }
+
     /// The plays one item's row counts, as a Query: exactly the plays of it made in that weather (an artist opens as its tracks).
     static func drillSpec(for item: TrendsLeaningItem, choice: String, range: DateRange) -> QuerySpec {
         let isBand = TemperatureBand(rawValue: choice) != nil
@@ -168,6 +179,7 @@ struct TrendsLeaningsCard: View {
 
     private var target: QueryTarget { QueryTarget(rawValue: targetRaw) ?? .artist }
     private struct ComputeKey: Equatable { let choice: String; let target: QueryTarget; let adjust: Bool; let inputs: TrendsWeatherGroup.Inputs }
+    private struct LeanShareKey: Equatable { let result: TrendsLeaningsResult?; let choice: String; let target: QueryTarget; let away: Bool }
 
     private var weatherWord: String {
         TemperatureBand(rawValue: choice) != nil ? "when it is \(choice.lowercased())" : "in \(choice.lowercased() == "clear" ? "clear weather" : choice.lowercased())"
@@ -191,6 +203,9 @@ struct TrendsLeaningsCard: View {
             }
             .shareChartArea()
             .shareSummary(summary)
+            .shareNative(id: LeanShareKey(result: result, choice: choice, target: target, away: showsAway)) {
+                result.map { TrendsShareCharts.leanings(result: $0, choice: choice, target: target, away: showsAway, imageLookup: inputs.imageLookup) }
+            }
             if let result, !(showsAway ? result.away : result.toward).isEmpty { footnote(result) }
         }
         .task(id: ComputeKey(choice: choice, target: target, adjust: adjust, inputs: inputs), priority: .utility) { await recompute() }
@@ -233,15 +248,7 @@ struct TrendsLeaningsCard: View {
     }
 
     /// The same artwork Top Charts and Query show: the picture saved for the item (a custom one first), then the one its plays carried.
-    private func imageURL(for item: TrendsLeaningItem) -> String? {
-        let imageTarget: ImageTarget
-        switch item.id.target {
-        case .artist: imageTarget = ImageTarget(kind: .artist, artist: item.artist, album: nil, track: nil)
-        case .album: imageTarget = ImageTarget(kind: .album, artist: item.artist, album: item.name, track: nil)
-        case .track: imageTarget = ImageTarget(kind: .track, artist: item.artist, album: item.album, track: item.name)
-        }
-        return ImageResolutionEngine.effectiveImageURL(for: imageTarget, lookup: inputs.imageLookup, fallbackURL: item.fallbackImageURL)
-    }
+    private func imageURL(for item: TrendsLeaningItem) -> String? { TrendsLeaningsEngine.imageURL(for: item, lookup: inputs.imageLookup) }
 
     private func row(_ rank: Int, _ item: TrendsLeaningItem) -> some View {
         let strength = min(1, abs(item.lift - 1) / 1.0)

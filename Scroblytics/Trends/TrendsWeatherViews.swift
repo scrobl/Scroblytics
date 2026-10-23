@@ -104,6 +104,8 @@ struct TrendsWeatherTiles: View {
     var previousLifts: [WeatherCondition: Double] = [:]
     var metric = TrendsMetric.plays
     var onSelect: (WeatherCondition) -> Void = { _ in }
+    /// False in a shared card that leaves the plays-and-hours line off.
+    var showsDetail = true
 
     private var maximum: Double { max(tiles.map(\.perDay).max() ?? 1, tiles.first?.average ?? 1, 0.0001) }
 
@@ -163,9 +165,11 @@ struct TrendsWeatherTiles: View {
             Text("\(amount(tile.perDay)) a day · average \(amount(tile.average))")
                 .font(AppTypography.compactMetadata).foregroundStyle(.secondary).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.8)
-            Text(detail(tile))
-                .font(AppTypography.supportingDense).foregroundStyle(.tertiary).monospacedDigit()
-                .lineLimit(1).minimumScaleFactor(0.75)
+            if showsDetail {
+                Text(detail(tile))
+                    .font(AppTypography.supportingDense).foregroundStyle(.tertiary).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.75)
+            }
         }
         .padding(12)
         .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -190,6 +194,11 @@ struct TrendsWeatherGridView: View {
     let grid: TrendsWeatherGrid
     let unit: TemperatureUnit
     var onSelect: (_ row: Int, _ column: Int) -> Void = { _, _ in }
+    /// False in a shared card: no hover hint, and the cells' own height and values are set by the card.
+    var interactive = true
+    var cellHeight: CGFloat = 40
+    var showsValues = true
+    var showsLegend = true
     @State private var hovered: HoverCell?
 
     struct HoverCell: Equatable { let row: Int; let column: Int }
@@ -208,11 +217,13 @@ struct TrendsWeatherGridView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(hoverText).font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary).lineLimit(2)
-                HStack(spacing: 16) {
-                    temperatureScale
-                    Spacer()
-                    legend
+                if interactive { Text(hoverText).font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary).lineLimit(2) }
+                if showsLegend {
+                    HStack(spacing: 16) {
+                        temperatureScale
+                        Spacer()
+                        legend
+                    }
                 }
             }
             .padding(.leading, 74)
@@ -223,9 +234,9 @@ struct TrendsWeatherGridView: View {
         let enough = cell.plays >= Self.minimumPlays && cell.lift != nil
         return RoundedRectangle(cornerRadius: 7, style: .continuous)
             .fill(enough ? WeatherPalette.lift(cell.lift) : Color.secondary.opacity(0.08))
-            .frame(minWidth: 34, maxWidth: .infinity, minHeight: 40, maxHeight: 40)
+            .frame(minWidth: 34, maxWidth: .infinity, minHeight: cellHeight, maxHeight: cellHeight)
             .overlay {
-                if enough, let lift = cell.lift {
+                if showsValues, enough, let lift = cell.lift {
                     Text(WeatherPalette.percent(lift)).font(AppTypography.denseBadge).monospacedDigit().foregroundStyle(Color.primary.opacity(0.88))
                 }
             }
@@ -277,6 +288,12 @@ struct TrendsWeatherTimeline: View {
     let unit: TemperatureUnit
     var metric = TrendsMetric.plays
     var onSelect: (TrendsWeatherWeek) -> Void = { _ in }
+    /// What a shared card can leave out, and the chart's height (the card sets it to fill its space).
+    var chartHeight: CGFloat = 240
+    var showsLegend = true
+    var showsTemperature = true
+    var showsMarkers = true
+    var showsAverage = true
     @State private var hovered: TrendsWeatherWeek?
 
     private var span: Int { weeks.first?.days ?? 7 }
@@ -293,7 +310,7 @@ struct TrendsWeatherTimeline: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Chart {
-                ForEach(weeks) { week in
+                ForEach(showsTemperature ? weeks : []) { week in
                     RectangleMark(
                         xStart: .value("Start", week.start), xEnd: .value("End", week.start.addingTimeInterval(Double(week.days) * 86_400)),
                         yStart: .value("From", 0), yEnd: .value("To", peak)
@@ -311,6 +328,7 @@ struct TrendsWeatherTimeline: View {
                         .foregroundStyle(Color.primary.opacity(0.92))
                         .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round))
                 }
+                if showsAverage {
                 RuleMark(y: .value("Average", average))
                     .foregroundStyle(Color.primary.opacity(0.65))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
@@ -319,7 +337,8 @@ struct TrendsWeatherTimeline: View {
                             .font(AppTypography.denseBadge).foregroundStyle(.white.opacity(0.9))
                             .padding(.horizontal, 6).padding(.vertical, 2).background(.black.opacity(0.45), in: Capsule())
                     }
-                ForEach(weeks.filter { $0.precipitation != .none }) { week in
+                }
+                ForEach(showsMarkers ? weeks.filter { $0.precipitation != .none } : []) { week in
                     PointMark(x: .value("When", middle(week)), y: .value("Marker", peak * 0.04))
                         .symbol(week.precipitation == .rain ? .circle : .diamond)
                         .symbolSize(week.precipitation == .rain ? 22 : 30)
@@ -361,9 +380,9 @@ struct TrendsWeatherTimeline: View {
                         .onTapGesture { location in if let week = week(at: location, proxy: proxy, geometry: geometry) { onSelect(week) } }
                 }
             }
-            .frame(height: 240)
+            .frame(height: chartHeight)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            legend
+            if showsLegend { legend }
         }
     }
 

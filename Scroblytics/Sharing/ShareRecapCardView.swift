@@ -39,7 +39,7 @@ struct ShareRecapCardView: View {
         let square = options.size == .square
         return VStack(alignment: .leading, spacing: square ? 22 : 28) {
             kickerRow
-            Text(card.title)
+            Text(card.displayTitle(for: options))
                 .font(.system(size: 84, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -67,7 +67,7 @@ struct ShareRecapCardView: View {
             .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: 30) {
                 kickerRow
-                Text(card.title)
+                Text(card.displayTitle(for: options))
                     .font(.system(size: 96, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(2)

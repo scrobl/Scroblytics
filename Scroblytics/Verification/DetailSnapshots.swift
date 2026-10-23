@@ -212,6 +212,87 @@ enum DetailSnapshots {
     /// The leanings and places cards on made-up listening: four months at home (Oslo) with two trips, artists that favour rain, cold or neither.
     @MainActor
     static func leaningsAndPlaces() -> some View {
+        let inputs = syntheticTrendsInputs()
+        return VStack(alignment: .leading, spacing: 18) {
+            weatherCard("Leaning into the weather", "The artists, albums and tracks you play more (or less) than usual in a kind of weather") {
+                TrendsLeaningsCard(inputs: inputs, adjust: true, openQuery: { _, _ in })
+            }
+            weatherCard("Where you listened", "Your trips against home: how much you played, what was new, and the weather") {
+                TrendsPlacesCard(inputs: inputs, unit: .celsius, openQuery: { _, _ in })
+            }
+        }
+    }
+
+    /// Every Weather & places chart as the card it makes, from the made-up listening above, for each shape (the shared cards' own renders).
+    @MainActor
+    static func nativeShareCards() async -> [(name: String, card: ShareCard, images: [String: NSImage])] {
+        let inputs = syntheticTrendsInputs()
+        let range = inputs.range
+        let result = TrendsWeatherEngine.compute(
+            scrobbles: inputs.scrobbles, weather: inputs.weather, range: range, compareRange: nil, metric: .plays, durations: .empty, adjustForSeason: true
+        )
+        let leanings = TrendsLeaningsEngine.compute(scrobbles: inputs.canonical, weather: inputs.weather, range: range, target: .artist, choice: "Rain", adjust: true)
+        let places = TrendsPlacesEngine.compute(scrobbles: inputs.canonical, weather: inputs.weather, range: range)
+        let natives: [(String, String, ShareNativeChart)] = [
+            ("tiles", "Weather and listening", TrendsShareCharts.tiles(result: result, metric: .plays, caption: "Rain is your music weather: +23% against an average day")),
+            ("grid", "Temperature and time of day", TrendsShareCharts.grid(result: result, unit: .celsius)),
+            ("timeline", "Listening against the weather", TrendsShareCharts.timeline(result: result, unit: .celsius, metric: .plays)),
+            ("leanings", "Leaning into the weather", TrendsShareCharts.leanings(result: leanings, choice: "Rain", target: .artist, away: false, imageLookup: inputs.imageLookup)),
+            ("places", "Where you listened", TrendsShareCharts.places(result: places, unit: .celsius)),
+        ]
+        // The other nine Trends charts: from the same plays where an engine makes them, by hand where it needs data this made-up library lacks.
+        let calendar = AppCalendars.listening
+        let volume = TrendsEngine.volume(scrobbles: inputs.canonical, range: range, compareRange: nil, metric: .plays, durations: .empty)
+        let heatmap = TrendsEngine.heatmap(scrobbles: inputs.canonical, range: range, compareRange: nil, metric: .plays, durations: .empty)
+        let discovery = TrendsDiscoveryEngine.compute(scrobbles: inputs.canonical, range: range, compareRange: nil, metric: .plays, durations: .empty)
+        let tags = TrendsTags(
+            rows: [("indie rock", 940, 800), ("dream pop", 610, 700), ("folk", 480, 480), ("shoegaze", 300, 120), ("ambient", 220, nil)].map { TrendsTags.Row(tag: $0.0, plays: $0.1, comparePlays: $0.2) },
+            range: range, compareRange: range, totalPlays: 2_600, taggedPlays: 2_550, pendingPlays: 50, metric: .plays, pendingRuntime: 0
+        )
+        let months = (0..<6).map { index -> TrendsDecadeRiver.Point in
+            let start = calendar.date(byAdding: .month, value: index - 6, to: calendar.startOfDay(for: range.to))!
+            return TrendsDecadeRiver.Point(index: index, start: start, from: start, to: start.addingTimeInterval(86_400 * 28), counts: [5, 12, 30 + index * 4, 60, 80 - index * 6, 120 + index * 10, 40], years: [:], pending: 0, noDate: 0)
+        }
+        let eras = TrendsDecadeRiver(target: .track, bucketing: .month, range: range, compareRange: nil, metric: .plays, points: months, comparePoints: nil)
+        let flowEdges = [("Artist A", "Artist B", 31), ("Artist C", "Artist A", 27), ("Artist B", "Artist D", 22), ("Artist D", "Artist E", 18), ("Artist E", "Artist A", 14), ("Artist A", "Artist D", 11)]
+            .map { TrendsFlow.Edge(source: $0.0, target: $0.1, count: $0.2, status: .shared, previousCount: nil) }
+        let flow = TrendsFlow(granularity: .artist, gapMinutes: 30, minTransitions: 3, range: range, compareRange: nil, sessionCount: 480, totalTransitions: 2_300, nodes: [], edges: flowEdges)
+        func loyaltyItems(_ names: [String]) -> [LoyaltyItem] { names.enumerated().map { LoyaltyItem(id: QueryEntityID(target: .artist, artist: $1, name: $1), plays: 90 - $0 * 9, spread: 40, value: 90 - $0 * 9) } }
+        let quadrants: [(quadrant: LoyaltyQuadrant, count: Int, tops: [LoyaltyItem])] = [
+            (.lifers, 41, loyaltyItems(["Artist A", "Artist B", "Artist C", "Artist D"])), (.obsessions, 18, loyaltyItems(["Artist E", "Artist F", "Artist G"])),
+            (.background, 66, loyaltyItems(["Artist H", "Artist I", "Artist J", "Artist K"])), (.passing, 52, loyaltyItems(["Artist L", "Artist M"])),
+        ]
+        var more: [(String, String, ShareNativeChart)] = [
+            ("volume", "Volume over time", TrendsShareCharts2.volume(volume: volume, metric: .plays, mode: "Per period")),
+            ("heatmap", "When you listen", TrendsShareCharts2.heatmap(heatmap: heatmap, metric: .plays)),
+            ("discovery", "Discovery", TrendsShareCharts2.discovery(discovery: discovery, metric: .plays)),
+            ("taste", "Taste", TrendsShareCharts2.taste(tags: tags, metric: .plays)),
+            ("eras", "Eras", TrendsShareCharts2.eras(data: eras, colors: [.blue, .orange, .green, .pink, .purple, .yellow, .red])),
+            ("flow", "Listening flow", TrendsShareCharts2.flow(data: flow, noun: "artist", gapText: "30 min")),
+            ("loyalty", "Loyalty", TrendsShareCharts2.loyalty(noun: "artists", quadrants: quadrants, population: 177, minPlays: 3, metric: .plays)),
+        ]
+        if let ranked = TrendsRankBumpEngine.compute(scrobbles: inputs.canonical, target: .artist, topN: 5, range: range, metric: .plays, durations: .empty), ranked.buckets.count >= 2 {
+            more.append(("rankings", "Rankings", TrendsShareCharts2.rankings(data: ranked, metric: .plays)))
+        }
+        if let tail = TrendsLongTailEngine.compute(scrobbles: inputs.canonical, snapshots: QuerySnapshots(), target: .artist, metric: .plays, range: range), tail.stats != nil {
+            more.append(("longtail", "Long tail", TrendsShareCharts2.longTail(data: tail, entity: .artist, metric: .plays, topPercent: 10)))
+        }
+        // The same volume chart with a comparison period (the first 60 days against the last 60), to check the comparison is left out until asked for.
+        let halfway = calendar.date(byAdding: .day, value: -60, to: range.to) ?? range.to
+        let lastHalf = DateRange(from: halfway, to: range.to), firstHalf = DateRange(from: range.from, to: halfway.addingTimeInterval(-1))
+        let compared = TrendsEngine.volume(scrobbles: inputs.canonical, range: lastHalf, compareRange: firstHalf, metric: .plays, durations: .empty)
+        more.append(("volumecompare", "Volume over time", TrendsShareCharts2.volume(volume: compared, metric: .plays, mode: "Per period")))
+        var out: [(String, ShareCard, [String: NSImage])] = []
+        for (slug, title, native) in natives + more {
+            let card = ShareCard(title: title, period: "Last 120 days", measure: slug == "volumecompare" ? "Compared with the 60 days before" : "", rows: [], valueLabel: "", hasMovement: false, kindID: "trends.\(slug).native", native: native)
+            let images = await ShareArtwork.load(card.pictureURLs(for: ShareOptions()))
+            out.append((slug, card, images))
+        }
+        return out
+    }
+
+    @MainActor
+    static func syntheticTrendsInputs() -> TrendsWeatherGroup.Inputs {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let end = calendar.startOfDay(for: Date())
@@ -265,15 +346,7 @@ enum DetailSnapshots {
                 lookup[ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: name, album: nil, track: nil))] = file.absoluteString
             }
         }
-        let inputs = TrendsWeatherGroup.Inputs(scrobbles: plays, canonical: plays, imageLookup: lookup, durations: .empty, weather: snapshot, range: range, compareRange: nil, version: 1)
-        return VStack(alignment: .leading, spacing: 18) {
-            weatherCard("Leaning into the weather", "The artists, albums and tracks you play more (or less) than usual in a kind of weather") {
-                TrendsLeaningsCard(inputs: inputs, adjust: true, openQuery: { _, _ in })
-            }
-            weatherCard("Where you listened", "Your trips against home: how much you played, what was new, and the weather") {
-                TrendsPlacesCard(inputs: inputs, unit: .celsius, openQuery: { _, _ in })
-            }
-        }
+        return TrendsWeatherGroup.Inputs(scrobbles: plays, canonical: plays, imageLookup: lookup, durations: .empty, weather: snapshot, range: range, compareRange: nil, version: 1)
     }
 
     /// Settings › Weather › Trips with two trips (one open), and the sheet that adds one. Seeds the scratch trips file.
@@ -391,6 +464,15 @@ enum DetailSnapshots {
             }
             for (width, dark) in [(1000, true), (1000, false), (640, true)] as [(CGFloat, Bool)] {
                 await render(leaningsAndPlaces(), width: width, dark: dark, container: container, to: base.appending(path: "trends-new-\(Int(width))-\(dark ? "dark" : "light").png"))
+            }
+            for (name, card, images) in await nativeShareCards() {
+                for size in ShareSize.allCases {
+                    var options = card.defaultOptions
+                    options.size = size
+                    if let png = ShareRenderer.png(card: card, options: options, identity: ShareIdentity(name: nil, showsFooter: true), images: images, scale: 1) {
+                        try? png.write(to: base.appending(path: "share-native-\(name)-\(size.rawValue).png"))
+                    }
+                }
             }
             await render(weatherTrends(unit: .fahrenheit), width: 640, dark: true, container: container, to: base.appending(path: "trends-weather-640-dark.png"))
             for dark in [true, false] {

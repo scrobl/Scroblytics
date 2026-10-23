@@ -27,6 +27,7 @@ struct TrendsTagsChart: View {
     @State private var tags: TrendsTags?
     @State private var isLoading = true
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool }
 
     private func maxValue(_ tags: TrendsTags) -> Int { tags.rows.map { max($0.plays, $0.comparePlays ?? 0) }.max() ?? 0 }
     private func format(_ v: Int) -> String { TrendsWeight.format(v, metric: metric) }
@@ -89,6 +90,10 @@ struct TrendsTagsChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(metric: metric, inputs: inputs), ready: tags != nil)) {
+            guard let tags, !tags.rows.isEmpty else { return nil }
+            return TrendsShareCharts2.taste(tags: tags, metric: metric)
+        }
     }
 
     private func change(_ row: TrendsTags.Row) -> Double? {

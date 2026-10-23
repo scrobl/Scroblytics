@@ -447,6 +447,53 @@ enum QueryCapChecks {
         let sentence = "Show me the top song from each Band X album"
         let restated = #"["the top song from each album — grouping by album isn’t something a field can express"]"#
 
+        // The plays to count: only those made at certain times or in certain weather.
+        func playKeys(weekdays: String = "[]", months: String = "[]", from: String = "null", to: String = "null", weather: String = "[]", temperature: String = "[]") -> String {
+            "\"playWeekdays\":\(weekdays),\"playMonths\":\(months),\"playFromHour\":\(from),\"playToHour\":\(to),\"playWeather\":\(weather),\"playTemperature\":\(temperature),"
+        }
+        let coldRainySunday = read(reply(sorts: playsDescending, limit: "10", caps: playKeys(weekdays: #"["Sunday"]"#, from: "5", to: "11", weather: #"["Rain"]"#, temperature: #"["Cold"]"#)), request: "top 10 songs when it is cold and raining on a sunday morning")
+        let expectedPlay = QueryPlayFilter(weekdays: [0], fromHour: 5, toHour: 11, months: nil, weatherConditions: ["Rain"], temperatureBands: ["Cold"])
+        check("“top 10 songs when it is cold and raining on a Sunday morning” becomes a play filter: Sunday, 5–11, rain, cold",
+              coldRainySunday?.interpretation.spec.playFilter == expectedPlay && coldRainySunday?.interpretation.spec.groups.isEmpty == true, "\(String(describing: coldRainySunday?.interpretation.spec.playFilter))")
+        check("…sorted by plays, 10 results, with nothing dropped and nothing 'unsupported'",
+              coldRainySunday?.interpretation.spec.limit == 10 && coldRainySunday?.interpretation.spec.sorts.count == 1 && coldRainySunday?.interpretation.dropped.isEmpty == true && coldRainySunday?.interpretation.unsupported.isEmpty == true)
+        var playSpec = QuerySpec(target: .track)
+        playSpec.playFilter = expectedPlay
+        let playChips = AskChips.describe(playSpec, registry: .standard, weatherReady: true)
+        check("the chip says what is counted, in words", playChips.contains { $0.text == "Only plays: Sunday, 5 AM–11 AM, in rain, when cold" && $0.caveat == nil }, "\(playChips.map(\.text))")
+        let notReady = AskChips.describe(playSpec, registry: .standard, weatherReady: false)
+        check("with weather off or not downloaded the chip warns that nothing can match", notReady.first { $0.text.hasPrefix("Only plays:") }?.caveat?.contains("Settings › Weather") == true)
+        var daySpec = QuerySpec(target: .track)
+        daySpec.playFilter = QueryPlayFilter(weekdays: [0], fromHour: nil, toHour: nil)
+        let noWeatherChip = AskChips.describe(daySpec, registry: .standard, weatherReady: false)
+        check("a day filter with no weather in it never warns about weather", noWeatherChip.first { $0.text.hasPrefix("Only plays:") }?.caveat == nil)
+        let winterPlayReading = read(reply(sorts: playsDescending, caps: playKeys(months: "[12, 1, 2]")), request: "what did I play most in winter")
+        check("winter as months 12, 1, 2 reads as a filter and shows as the season", winterPlayReading?.interpretation.spec.playFilter?.months == [1, 2, 12] && winterPlayReading?.interpretation.spec.playFilter?.label(hemisphere: .north) == "Winter (Dec–Feb)")
+        let wrapNight = read(reply(sorts: playsDescending, caps: playKeys(weekdays: #"["friday"]"#, from: "21", to: "4")), request: "top songs on friday nights")
+        check("night wraps past midnight (21 to 4) and a day name in lower case is accepted", wrapNight?.interpretation.spec.playFilter == QueryPlayFilter(weekdays: [5], fromHour: 21, toHour: 4))
+        let loose = read(reply(sorts: playsDescending, caps: playKeys(weekdays: #"["Sat", "Sun"]"#, months: #"["12", 1.0]"#, from: "5.0", to: #""11""#, weather: #"["rainy", "Storm", "sunny"]"#, temperature: #"["cold", "HOT"]"#)), request: "x")
+        check("abbreviated days, months and hours written as text or decimals, and everyday weather words are all understood",
+              loose?.interpretation.spec.playFilter == QueryPlayFilter(weekdays: [0, 6], fromHour: 5, toHour: 11, months: [1, 12], weatherConditions: ["Clear", "Rain", "Thunderstorm"], temperatureBands: ["Cold", "Hot"]), "\(String(describing: loose?.interpretation.spec.playFilter))")
+        check("…and none of that was dropped", loose?.interpretation.dropped.isEmpty == true, "\(String(describing: loose?.interpretation.dropped))")
+        let bad = read(reply(sorts: playsDescending, caps: playKeys(weekdays: #"["Funday", "Monday"]"#, months: "[13, 0, 6]", from: "5", to: "null", weather: #"["Monsoon", "Rain"]"#, temperature: #"["Lukewarm"]"#)), request: "x")
+        check("what doesn't fit is dropped with a reason and the rest stays: Monday, June, rain; no hours (a start alone), no Funday, 13, 0, Monsoon or Lukewarm",
+              bad?.interpretation.spec.playFilter == QueryPlayFilter(weekdays: [1], fromHour: nil, toHour: nil, months: [6], weatherConditions: ["Rain"], temperatureBands: nil) && bad?.interpretation.dropped.count == 6, "\(String(describing: bad?.interpretation.spec.playFilter)) \(bad?.interpretation.dropped.count ?? -1)")
+        check("a reply that sets no play keys at all (an older model answer) has no filter", read(reply(sorts: playsDescending), request: "x")?.interpretation.spec.playFilter == nil)
+        check("a request that is only a time or weather is understood, not 'nothing to search for'", read(reply(caps: playKeys(weather: #"["Snow"]"#)), request: "x")?.interpretation.isEmpty == false)
+        let counted = coldRainySunday?.interpretation.spec.playFilter
+        let sundayNine = AppCalendars.listening.date(from: DateComponents(year: 2025, month: 1, day: 5, hour: 9))!   // a Sunday
+        check("the filter the model's words made passes a Sunday 9 AM play and fails a Sunday 3 PM one (before weather)", counted?.matches(sundayNine, weather: .empty) == false && QueryPlayFilter(weekdays: [0], fromHour: 5, toHour: 11).matches(sundayNine) == true && QueryPlayFilter(weekdays: [0], fromHour: 5, toHour: 11).matches(sundayNine.addingTimeInterval(6 * 3600)) == false)
+        let schemaText = String(data: AskPortableSchema.build(registry: .standard).data, encoding: .utf8) ?? ""
+        check("the schema the model must follow names the six play keys and the weather and temperature choices",
+              ["playWeekdays", "playMonths", "playFromHour", "playToHour", "playWeather", "playTemperature", "Thunderstorm", "Cold", "Saturday"].allSatisfy { schemaText.contains($0) })
+        let promptNorth = AskPrompt.system(registry: .standard, context: .none, now: Date(), hemisphere: .north)
+        let promptSouth = AskPrompt.system(registry: .standard, context: .none, now: Date(), hemisphere: .south)
+        check("the prompt explains the play keys and gives the person's seasons as months: northern winter 12, 1, 2; southern winter 6, 7, 8",
+              promptNorth.contains("playWeather") && promptNorth.contains("winter 12, 1, 2") && promptNorth.contains("summer 6, 7, 8") && promptSouth.contains("winter 6, 7, 8") && promptSouth.contains("summer 12, 1, 2"))
+        let shownToModels = AskExamples.renderedForModels(registry: .standard)
+        check("the hosted models are shown the play-filter examples, with its keys, and not the older day-field example for ranking",
+              shownToModels.contains("top 10 songs when it is cold and raining on a Sunday morning") && shownToModels.contains("\"playFilter\"") && !shownToModels.contains("top songs I play on Friday nights"))
+
         // A season is asked for with the Season field, using its own choices.
         let winterCondition = #"[{"field":"peakSeason","op":"textIs","value":null,"valueTo":null,"text":"Winter","date":null,"dateTo":null,"tags":[],"parameters":[],"scope":null,"comparedAgo":null}]"#
         let winterReading = read(reply(conditions: winterCondition, sorts: playsDescending), request: "top songs I play in winter")

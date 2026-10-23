@@ -115,6 +115,9 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
                 parts.append(Set(months).sorted().map { MonthNames.short[$0 - 1] }.joined(separator: ", "))
             }
         }
+        if let fromHour, let toHour {
+            parts.append(fromHour == toHour ? Self.hourLabel(fromHour) : "\(Self.hourLabel(fromHour))–\(Self.hourLabel(toHour))")
+        }
         if let conditions = weatherConditions, !conditions.isEmpty {
             let ordered = WeatherCondition.allCases.map(\.rawValue).filter(conditions.contains).map { $0.lowercased() }
             parts.append("in " + ordered.joined(separator: " or "))
@@ -122,9 +125,6 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         if let bands = temperatureBands, !bands.isEmpty {
             let ordered = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains).map { $0.lowercased() }
             parts.append("when " + ordered.joined(separator: " or "))
-        }
-        if let fromHour, let toHour {
-            parts.append(fromHour == toHour ? Self.hourLabel(fromHour) : "\(Self.hourLabel(fromHour))–\(Self.hourLabel(toHour))")
         }
         return parts.joined(separator: ", ")
     }

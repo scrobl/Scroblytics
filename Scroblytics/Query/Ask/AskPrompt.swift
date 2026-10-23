@@ -6,7 +6,10 @@ import Foundation
 /// the idioms people actually use ("top 10", "in the title", "the 90s"). It names no field that isn't also in a
 /// validated example.
 enum AskPrompt {
-    static func system(registry: QueryFieldRegistry, context: AskContext, now: Date, calendar: Calendar = AppCalendars.listening) -> String {
+    static func system(registry: QueryFieldRegistry, context: AskContext, now: Date, calendar: Calendar = AppCalendars.listening, hemisphere: Hemisphere = SeasonSettings.hemisphere) -> String {
+        let seasons = Season.allCases.map { season in
+            "\(season.label.lowercased()) \(season.months(in: hemisphere).map(String.init).joined(separator: ", "))"
+        }.joined(separator: "; ")
         let today = now.formatted(.iso8601.year().month().day())
         let weekday = now.formatted(.dateTime.weekday(.wide))
         let offsetMinutes = calendar.timeZone.secondsFromGMT(for: now) / 60
@@ -64,6 +67,23 @@ enum AskPrompt {
         - Anything no field measures — mood, feeling, lyrics, how something sounds, "for a road trip" — goes in "unsupported" \
         in plain words. Never replace it with a different field, and never invent a name, artist or tag the request didn't say. \
         If nothing in the request can be expressed, return no conditions and say why in "unsupported".
+
+        PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature keys)
+        - These keys count ONLY the plays made at that time or in that weather, before anything else is worked out. Use them when the request \
+        ranks, counts or lists music by what was played then: "my top songs on Sunday mornings", "what I played most in winter", "artists I played \
+        when it rained", "top 10 songs when it is cold and raining on a Sunday morning". For "top", "most played" and similar, also sort by plays \
+        descending: the plays are then the ones made at that time.
+        - Use the day-of-week, time-of-day, season and weather FIELDS instead (not these keys) when the request describes the item itself: "songs I \
+        mostly play at night", "artists I usually listen to on weekends", "tracks that are mostly rainy-day music".
+        - playWeekdays: day names, Sunday to Saturday. playMonths: calendar months as numbers 1–12, in any year ("December" → 12). Seasons for this \
+        person (\(hemisphere.label.lowercased())): \(seasons).
+        - playFromHour and playToHour: whole hours 0–23, both inclusive; give both or neither. Morning 5 to 11, afternoon 12 to 16, evening 17 to 20, \
+        night 21 to 4 (a start after the end runs past midnight). "Sunday morning" is playWeekdays [Sunday] with 5 to 11.
+        - playWeather: Rain, Snow, Fog, Thunderstorm, Clear or Cloudy ("raining", "rainy" → Rain; "snowing" → Snow; "sunny" → Clear). playTemperature: \
+        Cold, Mild or Hot, judged against the person's own place ("cold", "chilly", "freezing" → Cold; "hot", "scorching" → Hot; "mild" → Mild). Both can be \
+        given: the plays must match both.
+        - Leave the keys empty (empty lists, null hours) when the request names no such time or weather. These are supported: never put them in \
+        "unsupported". Weather needs the person to have turned weather on; the app tells them if it isn't, so don't mention it.
 
         NEW MUSIC SIMILAR TO SOMETHING (the similarSeed / similarKind / similarArtist / similarLimit keys)
         - Some requests aren't a filter over the person's own history at all: they ask for NEW music like a specific artist, album or \

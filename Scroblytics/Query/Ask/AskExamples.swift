@@ -15,6 +15,9 @@ enum AskExamples {
         let query: AskWire.Query
         /// Vague phrases the answer turned into numbers (shown to model engines only).
         var resolvedTerms: [AskResolvedTerm] = []
+        /// An example of the older way (a day or season FIELD for a request about when plays were made), kept for the on-device model,
+        /// which has no play filter. The hosted and local models are shown the play-filter version instead.
+        var onDeviceOnly = false
     }
 
     private static func cond(_ field: String, _ op: String, value: Double? = nil, valueTo: Double? = nil, text: String? = nil, date: String? = nil, dateTo: String? = nil,
@@ -49,10 +52,9 @@ enum AskExamples {
             groups: [[cond("dayOfWeek", "textIs", text: "Sunday"), cond("peakTimeOfDay", "textIs", text: "Morning")]], unsupported: [])),
         Example(request: "top songs I play on Friday nights", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("dayOfWeek", "textIs", text: "Friday"), cond("peakTimeOfDay", "textIs", text: "Night")]],
-            sorts: [.init(field: "plays", direction: "descending")], unsupported: [])),
-        Example(request: "top songs I play in winter", target: .track, ordered: true, query: AskWire.Query(
-            groups: [[cond("peakSeason", "textIs", text: "Winter")]],
-            sorts: [.init(field: "plays", direction: "descending")], unsupported: [])),
+            sorts: [.init(field: "plays", direction: "descending")], unsupported: []), onDeviceOnly: true),
+        Example(request: "artists I mostly play in winter", target: .artist, ordered: false, query: AskWire.Query(
+            groups: [[cond("peakSeason", "textIs", text: "Winter")]], unsupported: [])),
         Example(request: "songs tagged running that I haven't loved", target: .track, ordered: false, query: AskWire.Query(
             groups: [[AskWire.Condition(field: "tags", op: "tagsIsAny", tags: ["running"]), cond("loved", "isFalse")]], unsupported: [])),
         Example(request: "songs that give me chills", target: .track, ordered: false, query: AskWire.Query(
@@ -74,6 +76,18 @@ enum AskExamples {
     /// describes. Deliberately different sentences from the evaluation set (`AskEval`), so a high score there means the
     /// model generalised, not that it was shown the answer.
     static let modelExtras: [Example] = [
+        Example(request: "top 10 songs when it is cold and raining on a Sunday morning", target: .track, ordered: true, query: AskWire.Query(
+            groups: [], sorts: [.init(field: "plays", direction: "descending")], limit: 10, unsupported: [],
+            playFilter: AskWire.PlayFilter(weekdays: ["Sunday"], fromHour: 5, toHour: 11, weather: ["Rain"], temperature: ["Cold"]))),
+        Example(request: "my top 5 artists on Friday nights", target: .artist, ordered: true, query: AskWire.Query(
+            groups: [], sorts: [.init(field: "plays", direction: "descending")], limit: 5, unsupported: [],
+            playFilter: AskWire.PlayFilter(weekdays: ["Friday"], fromHour: 21, toHour: 4))),
+        Example(request: "which albums did I play most in December", target: .album, ordered: true, query: AskWire.Query(
+            groups: [], sorts: [.init(field: "plays", direction: "descending")], unsupported: [], playFilter: AskWire.PlayFilter(months: [12]))),
+        Example(request: "songs I played at least 5 times when it was snowing", target: .track, ordered: false, query: AskWire.Query(
+            groups: [[cond("plays", "greaterThanOrEqual", value: 5)]], unsupported: [], playFilter: AskWire.PlayFilter(weather: ["Snow"]))),
+        Example(request: "tracks I mostly play on rainy days", target: .track, ordered: false, query: AskWire.Query(
+            groups: [[cond("weatherCondition", "textIs", text: "Rain")]], unsupported: [])),
         Example(request: "show me the top song from each album by Artist A", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("artist", "textIs", text: "Artist A")]], sorts: [.init(field: "plays", direction: "descending")], unsupported: [], perAlbum: 1)),
         Example(request: "my most played album from every release year", target: .album, ordered: true, query: AskWire.Query(
@@ -120,7 +134,7 @@ enum AskExamples {
     /// Every example that still validates, as the model engines' prompt shows it — the same flat shape the schema asks for.
     static func renderedForModels(registry: QueryFieldRegistry) -> String {
         let encoder = JSONEncoder()
-        return (all + modelExtras).filter { isValid($0, registry: registry) }.map { example in
+        return (all + modelExtras).filter { !$0.onDeviceOnly && isValid($0, registry: registry) }.map { example in
             var object = ((try? JSONSerialization.jsonObject(with: encoder.encode(example.query))) as? [String: Any]) ?? [:]
             object["target"] = example.target.rawValue
             if !example.resolvedTerms.isEmpty { object["resolvedTerms"] = example.resolvedTerms.map { ["phrase": $0.phrase, "meaning": $0.meaning] } }

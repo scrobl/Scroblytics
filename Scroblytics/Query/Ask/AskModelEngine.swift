@@ -163,7 +163,7 @@ struct AskModelWire: Decodable {
         return shift
     }
 
-    private enum Keys: String, CodingKey { case target, groups, sorts, limit, perArtist, perAlbum, perReleaseYear, unsupported, resolvedTerms, similarSeed, similarKind, similarArtist, similarLimit }
+    private enum Keys: String, CodingKey { case target, groups, sorts, limit, perArtist, perAlbum, perReleaseYear, playWeekdays, playMonths, playFromHour, playToHour, playWeather, playTemperature, unsupported, resolvedTerms, similarSeed, similarKind, similarArtist, similarLimit }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -176,6 +176,19 @@ struct AskModelWire: Decodable {
         func cap(_ key: Keys) -> Int? {
             ((try? c.decodeIfPresent(Lenient.self, forKey: key)) ?? nil).flatMap { $0.number.isFinite && $0.number >= 1 && $0.number < 1_000_000 ? Int($0.number) : nil }
         }
+        // The plays to count. Lists may be missing or null (none); months and hours may be written as 12, 12.0 or "12".
+        func names(_ key: Keys) -> [String]? {
+            let list = ((try? c.decodeIfPresent([String].self, forKey: key)) ?? nil)?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            return (list?.isEmpty ?? true) ? nil : list
+        }
+        func whole(_ key: Keys) -> Int? {
+            ((try? c.decodeIfPresent(Lenient.self, forKey: key)) ?? nil).flatMap { $0.number.isFinite && abs($0.number) < 1_000 ? Int($0.number.rounded()) : nil }
+        }
+        let monthList = ((try? c.decodeIfPresent([Lenient].self, forKey: .playMonths)) ?? nil)?.compactMap { $0.number.isFinite && abs($0.number) < 1_000 ? Int($0.number.rounded()) : nil }
+        let playFilter = AskWire.PlayFilter(
+            weekdays: names(.playWeekdays), months: (monthList?.isEmpty ?? true) ? nil : monthList, fromHour: whole(.playFromHour), toHour: whole(.playToHour),
+            weather: names(.playWeather), temperature: names(.playTemperature)
+        )
         let seed = ((try? c.decodeIfPresent(String.self, forKey: .similarSeed)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if seed.isEmpty {
             similar = nil
@@ -201,7 +214,8 @@ struct AskModelWire: Decodable {
             } },
             sorts: sorts.map { AskWire.Sort(field: $0.field, direction: $0.direction, parameters: parameters($0.parameters), scope: $0.scope?.wire, comparedAgo: Self.shift($0.comparedAgo)) },
             limit: limitValue, unsupported: unsupported,
-            perArtist: cap(.perArtist), perAlbum: cap(.perAlbum), perReleaseYear: cap(.perReleaseYear)
+            perArtist: cap(.perArtist), perAlbum: cap(.perAlbum), perReleaseYear: cap(.perReleaseYear),
+            playFilter: playFilter.isEmpty ? nil : playFilter
         )
     }
 }

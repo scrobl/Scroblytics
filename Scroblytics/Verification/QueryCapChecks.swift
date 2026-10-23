@@ -270,7 +270,7 @@ enum QueryCapChecks {
         var spec = QuerySpec(target: .artist)
         spec.playFilter = winter
         let again = (try? QuerySpec.decode(spec.encoded()))
-        check("months survive saving, at schema version 6", again?.playFilter?.months == [12, 1, 2] && again?.schemaVersion == 6)
+        check("months survive saving, at schema version 7", again?.playFilter?.months == [12, 1, 2] && again?.schemaVersion == 7)
         let old = Data(#"{"schemaVersion": 5, "target": "artist", "groups": [], "sorts": [], "columns": [], "playFilter": {"weekdays": [0], "fromHour": 5, "toHour": 11}}"#.utf8)
         let decodedOld = try? QuerySpec.decode(old)
         check("a set saved with only days and hours (before months) still loads, with every month", decodedOld?.playFilter?.weekdays == [0] && decodedOld?.playFilter?.months == nil && decodedOld?.playFilter?.matches(day(2024, 7, 7, 9)) == true)
@@ -389,8 +389,8 @@ enum QueryCapChecks {
             let oldJSON = Data(#"{"schemaVersion":4,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8)
             let decodedOld = try? QuerySpec.decode(oldJSON)
             check("a query saved before the display order existed still decodes, with none", decodedOld != nil && decodedOld?.resultSorts == nil && decodedOld?.showInRankOrder == nil)
-            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 6)
-            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":7,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
+            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 7)
+            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":8,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
         } catch {
             check("the engine runs a per-release-year cap", false, "\(error)")
         }

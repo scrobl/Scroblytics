@@ -53,12 +53,32 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// Calendar months, 1 = January … 12 = December, of any year ("winter" is 12, 1, 2). nil or empty = every month. Optional, and last, so
     /// sets saved before it existed decode unchanged.
     var months: [Int]?
+    /// Only plays made in one of these kinds of weather (`WeatherCondition` names: "Rain", "Snow"…), at the home place's weather for the hour
+    /// of the play. nil or empty = any weather.
+    var weatherConditions: [String]?
+    /// Only plays made when it was one of these for the place (`TemperatureBand` names: "Cold", "Mild", "Hot"). Combined with
+    /// `weatherConditions` as "and": cold rain or cold snow.
+    var temperatureBands: [String]?
 
-    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty }
+    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather }
 
-    func matches(_ date: Date, calendar: Calendar = AppCalendars.listening) -> Bool {
+    /// Whether the filter looks at the weather, so counting plays needs it.
+    var usesWeather: Bool { !(weatherConditions ?? []).isEmpty || !(temperatureBands ?? []).isEmpty }
+
+    /// Whether a play at `date` passes. A weather filter needs the weather for that hour: with none (weather off, not downloaded, or an
+    /// hour before the downloaded years) the play does not match, rather than being counted as if it did.
+    func matches(_ date: Date, calendar: Calendar = AppCalendars.listening, weather: WeatherSnapshot = .empty) -> Bool {
         if let weekdays, !weekdays.isEmpty, !weekdays.contains(calendar.component(.weekday, from: date) - 1) { return false }
         if let months, !months.isEmpty, !months.contains(calendar.component(.month, from: date)) { return false }
+        if usesWeather {
+            guard let sample = weather.sample(at: date) else { return false }
+            if let conditions = weatherConditions, !conditions.isEmpty {
+                guard let condition = sample.condition, conditions.contains(condition.rawValue) else { return false }
+            }
+            if let bands = temperatureBands, !bands.isEmpty {
+                guard let band = weather.band(for: sample), bands.contains(band.rawValue) else { return false }
+            }
+        }
         if let from = fromHour, let to = toHour {
             let hour = calendar.component(.hour, from: date)
             return from <= to ? (hour >= from && hour <= to) : (hour >= from || hour <= to)
@@ -69,6 +89,8 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     func validate() throws {
         if let weekdays, weekdays.contains(where: { !(0...6).contains($0) }) { throw QueryError.unsupported("a weekday outside Sunday–Saturday") }
         if let months, months.contains(where: { !(1...12).contains($0) }) { throw QueryError.unsupported("a month outside January–December") }
+        if let weatherConditions, weatherConditions.contains(where: { WeatherCondition(rawValue: $0) == nil }) { throw QueryError.unsupported("a kind of weather that isn’t Clear, Cloudy, Fog, Rain, Snow or Thunderstorm") }
+        if let temperatureBands, temperatureBands.contains(where: { TemperatureBand(rawValue: $0) == nil }) { throw QueryError.unsupported("a temperature band that isn’t Cold, Mild or Hot") }
         if (fromHour == nil) != (toHour == nil) { throw QueryError.unsupported("an hour range needs both a start and an end") }
         if let fromHour, let toHour, !(0...23).contains(fromHour) || !(0...23).contains(toHour) { throw QueryError.unsupported("hours run from 0 to 23") }
     }
@@ -92,6 +114,14 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
             } else {
                 parts.append(Set(months).sorted().map { MonthNames.short[$0 - 1] }.joined(separator: ", "))
             }
+        }
+        if let conditions = weatherConditions, !conditions.isEmpty {
+            let ordered = WeatherCondition.allCases.map(\.rawValue).filter(conditions.contains).map { $0.lowercased() }
+            parts.append("in " + ordered.joined(separator: " or "))
+        }
+        if let bands = temperatureBands, !bands.isEmpty {
+            let ordered = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains).map { $0.lowercased() }
+            parts.append("when " + ordered.joined(separator: " or "))
         }
         if let fromHour, let toHour {
             parts.append(fromHour == toHour ? Self.hourLabel(fromHour) : "\(Self.hourLabel(fromHour))–\(Self.hourLabel(toHour))")
@@ -136,8 +166,9 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 4: a `playFilter` (only plays on some weekdays / hours). Older sets decode unchanged.
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
-    /// 6: a `playFilter` may also name calendar months (seasons). Older sets decode unchanged.
-    static let currentSchemaVersion = 6
+    /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. Older sets
+    /// decode unchanged.
+    static let currentSchemaVersion = 7
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget
@@ -297,13 +328,13 @@ extension QuerySpec {
 
 extension QuerySpec {
     /// The plays this query counts: those inside its `period` and matching its `playFilter`.
-    func countedPlays(_ scrobbles: [ScrobbleSnapshot]) -> [ScrobbleSnapshot] {
+    func countedPlays(_ scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot = .empty) -> [ScrobbleSnapshot] {
         let filter = (playFilter?.isEmpty ?? true) ? nil : playFilter
         guard period != nil || filter != nil else { return scrobbles }
         let calendar = AppCalendars.listening
         return scrobbles.filter { s in
             if let period, s.playedAt < period.from || s.playedAt > period.to { return false }
-            return filter?.matches(s.playedAt, calendar: calendar) ?? true
+            return filter?.matches(s.playedAt, calendar: calendar, weather: weather) ?? true
         }
     }
 }

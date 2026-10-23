@@ -761,11 +761,11 @@ struct QueryView: View {
                     DatePicker("To", selection: Binding(get: { period.to }, set: { model.spec.period?.to = $0 }), displayedComponents: .date)
                         .help("Last day whose plays count.")
                 }
-                Toggle("Only count plays on certain days, months or hours", isOn: Binding(
+                Toggle("Only count plays at certain times or in certain weather", isOn: Binding(
                     get: { model.spec.playFilter != nil },
                     set: { model.spec.playFilter = $0 ? QueryPlayFilter(weekdays: [], fromHour: nil, toHour: nil) : nil }
                 ))
-                .help("Ignore plays made on other days of the week, in other months or at other times of day before anything is counted — “Sunday mornings” or “winter” mean the plays made then, in every year. Uses your local time.")
+                .help("Ignore plays made on other days of the week, in other months, at other times of day or in other weather before anything is counted — “Sunday mornings”, “winter” or “rainy hours” mean the plays made then, in every year. Days and times use your local time; weather is the weather at your home place (Settings › Weather).")
                 if let filter = model.spec.playFilter {
                     PlayFilterEditor(filter: Binding(get: { filter }, set: { model.spec.playFilter = $0 }))
                 }
@@ -1411,9 +1411,11 @@ extension QueryView {
 
 
 /// Weekday chips (Sun–Sat, none picked = every day), season and month chips (none picked = every month) and an optional hour range.
-private struct PlayFilterEditor: View {
+struct PlayFilterEditor: View {
     @Binding var filter: QueryPlayFilter
     @AppStorage(SeasonSettings.hemisphereKey) private var hemisphereRaw = Hemisphere.north.rawValue
+    @AppStorage(WeatherSettings.enabledKey) private var weatherEnabled = false
+    @State private var weatherStatus = WeatherStatus.shared
 
     private let days = ["S", "M", "T", "W", "T", "F", "S"]
     private var hemisphere: Hemisphere { Hemisphere(rawValue: hemisphereRaw) ?? .north }
@@ -1439,6 +1441,42 @@ private struct PlayFilterEditor: View {
                 chip(season.label, on: on, width: 58, help: "\(season.label): \(season.rangeLabel(in: hemisphere)) (\(hemisphere.label.lowercased()); change it in Settings › General)") {
                     filter.months = on ? [] : months
                 }
+            }
+        }
+    }
+
+    /// Kinds of weather and temperature bands: a play counts if its hour's weather is any of the chosen kinds AND (when bands are chosen)
+    /// any of the chosen bands.
+    private var weatherChips: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("In this weather").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            ForEach([[WeatherCondition.rain, .snow, .fog], [.thunderstorm, .clear, .cloudy]], id: \.first) { row in
+                HStack(spacing: 4) {
+                    ForEach(row, id: \.self) { condition in
+                        let on = filter.weatherConditions?.contains(condition.rawValue) ?? false
+                        chip(condition == .thunderstorm ? "Storm" : condition.rawValue, on: on, width: 80, help: condition.rawValue) {
+                            var set = Set(filter.weatherConditions ?? [])
+                            if on { set.remove(condition.rawValue) } else { set.insert(condition.rawValue) }
+                            filter.weatherConditions = WeatherCondition.allCases.map(\.rawValue).filter(set.contains)
+                        }
+                    }
+                }
+            }
+            Text("How warm it was for your place").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(TemperatureBand.allCases, id: \.self) { band in
+                    let on = filter.temperatureBands?.contains(band.rawValue) ?? false
+                    chip(band.rawValue, on: on, width: 80, help: "\(band.rawValue): judged against your own place’s hourly temperatures (percentages in Settings › Weather)") {
+                        var set = Set(filter.temperatureBands ?? [])
+                        if on { set.remove(band.rawValue) } else { set.insert(band.rawValue) }
+                        filter.temperatureBands = TemperatureBand.allCases.map(\.rawValue).filter(set.contains)
+                    }
+                }
+            }
+            if filter.usesWeather && (!weatherEnabled || weatherStatus.coverageText == nil) {
+                Text("Weather is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather.")
+                    .font(AppTypography.supporting).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -1488,6 +1526,7 @@ private struct PlayFilterEditor: View {
             }
             seasonChips
             monthChips
+            weatherChips
             Toggle("Only certain hours", isOn: Binding(
                 get: { filter.fromHour != nil },
                 set: { filter.fromHour = $0 ? 5 : nil; filter.toHour = $0 ? 11 : nil }

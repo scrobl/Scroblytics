@@ -284,7 +284,7 @@ enum AskSuggestionCheck {
         for reading in suggestion.readings {
             let interpreted = AskInterpreter.interpret(reading, target: suggestion.target, registry: registry, now: now, count: nil, ordered: reading.limit != nil && (reading.sorts ?? []).isEmpty)
             guard interpreted.dropped.isEmpty, let validated = try? interpreted.spec.validate(against: registry) else { continue }
-            let run = QueryRun(target: suggestion.target, asOf: now, scrobbles: validated.spec.countedPlays(scrobbles), allTimeScrobbles: scrobbles, snapshots: snapshots)
+            let run = QueryRun(target: suggestion.target, asOf: now, scrobbles: validated.spec.countedPlays(scrobbles, weather: snapshots.weather), allTimeScrobbles: scrobbles, snapshots: snapshots)
             best = max(best, QueryEngine.evaluate(validated, run: run).rows.count)
             if best >= AskSuggestion.minimumRows { break }
         }

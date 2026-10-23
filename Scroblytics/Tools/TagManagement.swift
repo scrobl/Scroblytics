@@ -301,7 +301,7 @@ enum TagQuerySource {
         )
         let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
             let asOf = validated.spec.asOf ?? Date()
-            let run = QueryRun(target: .track, asOf: asOf, scrobbles: validated.spec.countedPlays(scrobbles), allTimeScrobbles: scrobbles, snapshots: snapshots)
+            let run = QueryRun(target: .track, asOf: asOf, scrobbles: validated.spec.countedPlays(scrobbles, weather: snapshots.weather), allTimeScrobbles: scrobbles, snapshots: snapshots)
             return QueryEngine.evaluate(validated, run: run)
         }.value
         return result.rows.compactMap { row in

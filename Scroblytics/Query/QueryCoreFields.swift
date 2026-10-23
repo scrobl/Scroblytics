@@ -178,7 +178,7 @@ extension QueryFieldRegistry {
                     (entity.id, peaks[entity.id].map { .value(.text(labels[$0])) } ?? .missing)
                 })
             }))
-        field.caveat = "The season field matches each item’s most common season, not every one of its plays. To count only the plays made in a season, use “Only count plays on certain days, months or hours” in the scope."
+        field.caveat = "The season field matches each item’s most common season, not every one of its plays. To count only the plays made in a season, use “Only count plays at certain times or in certain weather” in the scope."
         return field
     }
 

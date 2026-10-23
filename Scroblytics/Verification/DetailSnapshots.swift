@@ -129,6 +129,20 @@ enum DetailSnapshots {
         return TrackPlaysList(history: history, weather: snapshot, unit: .celsius)
     }
 
+    /// The scope's days / months / weather chips, as the narrow Query panel shows them (with weather ticked but off, to show its note).
+    private struct PlayFilterHost: View {
+        @State var filter: QueryPlayFilter
+        var body: some View {
+            VStack(alignment: .leading) {
+                Toggle("Only count plays at certain times or in certain weather", isOn: .constant(true))
+                PlayFilterEditor(filter: $filter)
+            }
+        }
+    }
+
+    @MainActor
+    static func playFilter(_ filter: QueryPlayFilter) -> some View { PlayFilterHost(filter: filter) }
+
     @MainActor
     static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, to url: URL) async {
         let view = content
@@ -203,6 +217,12 @@ enum DetailSnapshots {
                 for dark in [true, false] {
                     let mode = dark ? "dark" : "light"
                     await render(playsList(withWeather: true), width: width, dark: dark, container: container, to: base.appending(path: "plays-weather-\(Int(width))-\(mode).png"))
+                }
+            }
+            let chosen = QueryPlayFilter(weekdays: [0], fromHour: nil, toHour: nil, months: Season.winter.months(in: .north), weatherConditions: ["Rain", "Snow"], temperatureBands: ["Cold"])
+            for width in [330, 280] as [CGFloat] {
+                for dark in [true, false] {
+                    await render(playFilter(chosen), width: width, dark: dark, container: container, to: base.appending(path: "playfilter-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
             await render(playsList(withWeather: false), width: 700, dark: true, container: container, to: base.appending(path: "plays-plain-700-dark.png"))

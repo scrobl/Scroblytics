@@ -443,6 +443,47 @@ enum WeatherChecks {
         check("a condition on the share of rainy plays keeps A and E", Set(rainy.keys) == ["A", "E"], "\(rainy.keys.sorted())")
         let wintry = cells(QueryFieldRef("plays"), conditions: [[QueryCondition("weatherCondition", .textIs, [.text("Clear")])]])
         check("a condition on the weather keeps B and C", Set(wintry.keys) == ["B", "C"], "\(wintry.keys.sorted())")
+        // The play filter: only the plays made in certain weather are counted.
+        func counted(_ filter: QueryPlayFilter?, weather: WeatherSnapshot = snapshot) -> [String: Int] {
+            var spec = QuerySpec(target: .artist)
+            spec.playFilter = filter
+            spec.columns = [QueryFieldRef("plays")]
+            guard let validated = try? spec.validate(against: .standard) else { return ["invalid": 1] }
+            var snapshots = QuerySnapshots()
+            snapshots.weather = weather
+            let run = QueryRun(target: .artist, asOf: date(2025, 2, 1), scrobbles: spec.countedPlays(plays, weather: weather), allTimeScrobbles: plays, snapshots: snapshots)
+            let result = QueryEngine.evaluate(validated, run: run)
+            let key = result.columns.first?.cacheKey ?? ""
+            var out: [String: Int] = [:]
+            for row in result.rows { if case .value(.number(let n))? = row.cells[key] { out[row.entity.name] = Int(n) } }
+            return out
+        }
+        func filter(_ conditions: [String] = [], _ bands: [String] = [], months: [Int]? = nil) -> QueryPlayFilter {
+            QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: months, weatherConditions: conditions, temperatureBands: bands)
+        }
+        check("only the plays made in rain: A's three 7 o'clock plays and E's covered one", counted(filter(["Rain"])) == ["A": 3, "E": 1], "\(counted(filter(["Rain"])))")
+        check("only the plays made in snow: B's 20:00 play", counted(filter(["Snow"])) == ["B": 1], "\(counted(filter(["Snow"])))")
+        check("rain or snow keeps both kinds", counted(filter(["Rain", "Snow"])) == ["A": 3, "E": 1, "B": 1])
+        check("only the plays made when it was cold for the place: C's 2 and 3 o'clock plays", counted(filter([], ["Cold"])) == ["C": 2], "\(counted(filter([], ["Cold"])))")
+        check("only the plays made when it was hot: B's 20:00 and C's 22:00", counted(filter([], ["Hot"])) == ["B": 1, "C": 1])
+        check("snow AND cold means both at once: B's snowy hour was hot, so nothing", counted(filter(["Snow"], ["Cold"])).isEmpty)
+        check("snow AND hot keeps B's snowy hot hour", counted(filter(["Snow"], ["Hot"])) == ["B": 1])
+        check("clear AND mild: A's noon play and B's noon and 1 PM plays", counted(filter(["Clear"], ["Mild"])) == ["A": 1, "B": 2], "\(counted(filter(["Clear"], ["Mild"])))")
+        check("a weather filter combines with months: winter rain is the same plays, summer rain none", counted(filter(["Rain"], months: Season.winter.months(in: .north))) == ["A": 3, "E": 1] && counted(filter(["Rain"], months: Season.summer.months(in: .north))).isEmpty)
+        check("a play before the downloaded weather never matches a weather filter (D, E's 2024 play)", counted(filter(["Rain", "Snow", "Clear", "Cloudy", "Fog", "Thunderstorm"])).keys.sorted() == ["A", "B", "C", "E"])
+        check("with no weather at all a weather filter counts nothing, instead of everything", counted(filter(["Rain"]), weather: .empty).isEmpty)
+        check("with no weather but no weather choice every play still counts (A 4, B 3, C 3, D 1, E 2)", counted(filter(), weather: .empty) == ["A": 4, "B": 3, "C": 3, "D": 1, "E": 2], "\(counted(filter(), weather: .empty))")
+        check("a filter that only ticks weather is not empty; empty lists are", !filter(["Rain"]).isEmpty && filter().isEmpty && filter([], ["Cold"]).usesWeather && !filter().usesWeather)
+        check("an unknown kind of weather or band is refused", (try? filter(["Monsoon"]).validate()) == nil && (try? filter([], ["Lukewarm"]).validate()) == nil && (try? filter(["Rain"], ["Cold"]).validate()) != nil)
+        check("the label reads as a sentence, in a fixed order", filter(["Snow", "Rain"]).label(hemisphere: .north) == "in rain or snow" && filter([], ["Cold"]).label(hemisphere: .north) == "when cold" && filter(["Rain"], ["Cold", "Hot"], months: Season.winter.months(in: .north)).label(hemisphere: .north) == "Winter (Dec–Feb), in rain, when cold or hot", filter(["Rain"], ["Cold", "Hot"], months: Season.winter.months(in: .north)).label(hemisphere: .north))
+        var weatherSpec = QuerySpec(target: .track)
+        weatherSpec.playFilter = filter(["Rain", "Snow"], ["Cold"])
+        let weatherAgain = try? QuerySpec.decode(weatherSpec.encoded())
+        check("a weather filter survives saving at schema version 7", weatherAgain?.playFilter?.weatherConditions == ["Rain", "Snow"] && weatherAgain?.playFilter?.temperatureBands == ["Cold"] && weatherAgain?.schemaVersion == 7)
+        let v6 = Data(#"{"schemaVersion": 6, "target": "artist", "groups": [], "sorts": [], "columns": [], "playFilter": {"months": [12, 1, 2]}}"#.utf8)
+        let decodedV6 = try? QuerySpec.decode(v6)
+        check("a set saved before weather filters still loads, with any weather", decodedV6?.playFilter?.months == [12, 1, 2] && decodedV6?.playFilter?.usesWeather == false)
+
         let reg = QueryFieldRegistry.standard
         check("the weather fields are in the registry for artists, albums and tracks", ["weatherCondition", "weatherTemperatureBand", "weatherAverageTemperature", "weatherShare", "weatherLift"].allSatisfy { id in
             (try? reg.field(id)).map { $0.targets == [.artist, .album, .track] } ?? false

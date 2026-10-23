@@ -307,7 +307,7 @@ final class QueryBuilderModel {
             let started = Date()
             let asOf = validated.spec.asOf ?? Date()
             let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
-                let inScope = validated.spec.countedPlays(scrobbles)
+                let inScope = validated.spec.countedPlays(scrobbles, weather: snapshots.weather)
                 let run = QueryRun(target: validated.spec.target, asOf: asOf, scrobbles: inScope, allTimeScrobbles: scrobbles, snapshots: snapshots)
                 return QueryEngine.evaluate(validated, run: run)
             }.value
@@ -461,8 +461,9 @@ final class QueryBuilderModel {
         let scopedSpec = spec
         let snapshot = turnover
         let cache = turnoverGroups
+        let weatherNow = weather
         let requests: [AlbumTurnoverEngine.TracklistRequest] = await Task.detached(priority: .userInitiated) {
-            let inScope = scopedSpec.countedPlays(scope)
+            let inScope = scopedSpec.countedPlays(scope, weather: weatherNow)
             var seen = Set<String>()
             return cache.groups(for: inScope, separating: snapshot.separateEditions).values.flatMap { $0 }.compactMap { snapshot.missingRequest(for: $0) }
                 .filter { seen.insert(AlbumTurnoverEngine.tracklistCacheKey(artist: $0.artist, album: $0.album)).inserted }

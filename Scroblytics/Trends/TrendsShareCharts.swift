@@ -168,7 +168,7 @@ enum TrendsShareCharts {
         }
         return ShareNativeChart(
             id: "weather.map", caption: caption,
-            footnote: "Size is plays, the ring is how far above usual the artist leans, across is its average temperature in its cell. " + (mode == .affinity ? "Each artist is placed where it leans furthest against what is usual, with \(TrendsWeatherMapEngine.minimumPlays)+ plays with weather." : "Each artist is placed where it is played most."),
+            footnote: "Size is plays, the ring is how strongly the artist leans against the others shown (the key gives the range), across is its average temperature in its cell. " + (mode == .affinity ? "Each artist is placed where it leans furthest against what is usual, with \(TrendsWeatherMapEngine.minimumPlays)+ plays with weather." : "Each artist is placed where it is played most."),
             preferredSize: .wide, controls: controls, imageURLs: urls, textLines: lines,
             zoomForShape: { $0 == .wide ? 1.5 : 1.75 }
         ) { layout, options, images in
@@ -177,8 +177,8 @@ enum TrendsShareCharts {
             return AnyView(
                 TrendsWeatherMapChart(
                     bubbles: shown, result: result, unit: unit, height: layout.logical.height, interactive: false,
-                    labelCount: options.flag("labels", true) ? (shown.count <= 25 ? 14 : 8) : 0,
-                    showsDensity: options.flag("density", true), showsLegend: legend, artwork: artwork, images: images, showsArtwork: options.flag("artwork", true)
+                    labelCount: options.flag("labels", true) ? (shown.count <= 10 ? 10 : (shown.count <= 25 ? 10 : 6)) : 0,
+                    showsDensity: options.flag("density", true), showsLegend: legend, artwork: artwork, images: images, showsArtwork: options.flag("artwork", true), artworkMinimumRadius: TrendsWeatherMapEngine.artworkMinimumRadius * 1.5 / max(layout.zoom, 1)
                 )
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             )

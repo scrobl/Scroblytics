@@ -8,6 +8,8 @@ struct TrendsStay: Identifiable, Equatable, Sendable {
     let id: String
     let city: String
     let isHome: Bool
+    /// What decides its colour: the place itself, so every trip to the same city is the same colour (a group of trips is one place already).
+    var colorKey = ""
     /// The stretch inside the chosen period (a trip that began before it, or is still going, is cut to the period and to now).
     let from: Date
     let until: Date
@@ -37,6 +39,8 @@ struct TrendsStay: Identifiable, Equatable, Sendable {
 struct TrendsTripSpan: Equatable, Sendable {
     /// The id of the `TrendsStay` it belongs to.
     let group: String
+    /// The place it was to, which decides its colour (see `TrendsStay.colorKey`).
+    var colorKey = ""
     let from: Date
     let until: Date
 }
@@ -87,11 +91,14 @@ enum TrendsPlacesEngine {
         guard from <= end else { return .empty }
 
         // Which stay each trip belongs to: itself by city, or every trip to the same region or country together.
-        var groupOf: [UUID: (id: String, label: String)] = [:]
+        var groupOf: [UUID: (id: String, label: String, color: String)] = [:]
         for trip in trips {
-            groupOf[trip.id] = level == .city
-                ? (trip.id.uuidString, trip.shortName)
-                : ("\(level.rawValue):" + PlaceNames.key(trip.place.name(at: level)), trip.place.name(at: level))
+            if level == .city {
+                groupOf[trip.id] = (trip.id.uuidString, trip.shortName, "city:" + PlaceNames.key(trip.place.name))
+            } else {
+                let id = "\(level.rawValue):" + PlaceNames.key(trip.place.name(at: level))
+                groupOf[trip.id] = (id, trip.place.name(at: level), id)
+            }
         }
         func groupID(_ trip: WeatherTrip?) -> String { trip.flatMap { groupOf[$0.id]?.id } ?? "home" }
 
@@ -162,13 +169,13 @@ enum TrendsPlacesEngine {
         result.home = stay(id: "home", city: homeCity, isHome: true, from: from, until: end)
         result.home?.cities = [homeCity]
         // The trips that happened in the period, earliest first, gathered into their stays.
-        struct Group { var label: String; var from: Date; var until: Date; var count = 0; var cities: [String] = [] }
+        struct Group { var label: String; var color = ""; var from: Date; var until: Date; var count = 0; var cities: [String] = [] }
         var groups: [String: Group] = [:]
         for trip in trips.sorted(by: { $0.from < $1.from }) {
             guard (tripDays[trip.id] ?? 0) > 0 || (tripPlays[trip.id] ?? 0) > 0, let info = groupOf[trip.id] else { continue }
             let tripFrom = max(trip.from, from), tripUntil = max(tripFrom, min(trip.until ?? now, end))
-            result.spans.append(TrendsTripSpan(group: info.id, from: tripFrom, until: tripUntil))
-            var group = groups[info.id] ?? Group(label: info.label, from: tripFrom, until: tripUntil)
+            result.spans.append(TrendsTripSpan(group: info.id, colorKey: info.color, from: tripFrom, until: tripUntil))
+            var group = groups[info.id] ?? Group(label: info.label, color: info.color, from: tripFrom, until: tripUntil)
             group.from = min(group.from, tripFrom)
             group.until = max(group.until, tripUntil)
             group.count += 1
@@ -178,6 +185,7 @@ enum TrendsPlacesEngine {
         result.trips = groups.map { id, group in
             var grouped = stay(id: id, city: group.label, isHome: false, from: group.from, until: group.until)
             grouped.tripCount = group.count
+            grouped.colorKey = group.color
             grouped.cities = group.cities
             return grouped
         }
@@ -210,16 +218,22 @@ enum TrendsPlacesEngine {
 }
 
 extension TrendsPlacesResult {
-    /// One colour for each trip, in the order the trips happened (so neighbours in time get different colours), used for its shading on the
-    /// chart, its bars, and the dot in front of its row. Home is grey.
+    /// One colour for each place, in the order you first went there (so neighbours in time get different colours), used for its shading
+    /// on the chart, its bars, and the dot in front of its row. Every trip to the same city (or, grouped, the same region or country) is the
+    /// same colour. Home is grey.
     static let tripColors: [Color] = [.blue, .orange, .green, .purple, .teal, .pink, .yellow, .red, .indigo, .mint]
 
-    func tint(for stay: TrendsStay) -> Color { tint(forGroup: stay.id) }
+    func tint(for stay: TrendsStay) -> Color { tint(forKey: stay.colorKey.isEmpty ? stay.id : stay.colorKey) }
 
-    /// The colour of a stay by its id (a trip's stretch on the chart names its stay's id).
-    func tint(forGroup id: String) -> Color {
-        guard let newestFirst = trips.firstIndex(where: { $0.id == id }) else { return .secondary }
-        return Self.tripColors[(trips.count - 1 - newestFirst) % Self.tripColors.count]
+    /// The colour of a place by its key (a trip's stretch on the chart names its place's key).
+    func tint(forKey key: String) -> Color {
+        var order: [String] = []
+        for stay in trips.sorted(by: { ($0.from, $0.id) < ($1.from, $1.id) }) {
+            let stayKey = stay.colorKey.isEmpty ? stay.id : stay.colorKey
+            if !order.contains(stayKey) { order.append(stayKey) }
+        }
+        guard let index = order.firstIndex(of: key) else { return .secondary }
+        return Self.tripColors[index % Self.tripColors.count]
     }
 }
 
@@ -248,7 +262,7 @@ struct TrendsPlacesChart: View {
         return Chart {
             ForEach(Array(result.spans.enumerated()), id: \.offset) { _, span in
                 RectangleMark(xStart: .value("From", span.from), xEnd: .value("Until", max(span.until, span.from.addingTimeInterval(86_400))), yStart: .value("Bottom", 0), yEnd: .value("Top", peak))
-                    .foregroundStyle(result.tint(forGroup: span.group).opacity(0.2))
+                    .foregroundStyle(result.tint(forKey: span.colorKey.isEmpty ? span.group : span.colorKey).opacity(0.2))
             }
             ForEach(result.buckets) { bucket in
                 RectangleMark(
@@ -300,7 +314,7 @@ struct TrendsPlacesChart: View {
     /// The colour of the trip a bucket falls in, nil at home.
     private func tripColor(of bucket: TrendsPlaceBucket) -> Color? {
         let middle = bucket.start.addingTimeInterval(Double(bucket.days) * 43_200)
-        return result.spans.first { middle >= $0.from && middle < max($0.until, $0.from.addingTimeInterval(86_400)) }.map { result.tint(forGroup: $0.group) }
+        return result.spans.first { middle >= $0.from && middle < max($0.until, $0.from.addingTimeInterval(86_400)) }.map { result.tint(forKey: $0.colorKey.isEmpty ? $0.group : $0.colorKey) }
     }
 }
 

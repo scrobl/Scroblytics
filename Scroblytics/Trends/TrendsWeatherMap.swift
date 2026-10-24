@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// How the map picks and places its artists.
 enum TrendsWeatherMapMode: String, CaseIterable, Identifiable, Sendable {
@@ -49,6 +49,40 @@ struct TrendsWeatherMapBubble: Identifiable, Equatable, Sendable {
     let candidate: TrendsWeatherMapCandidate
     let placement: TrendsWeatherMapPlacement
     var id: String { candidate.artist }
+}
+
+/// How a ring is coloured: against the other artists on the map, because the artists that make a Top 10 all lean hard and a fixed scale
+/// would paint every one the same. From the weakest lean shown (pale gold) to a strong one (deep red-orange; the top fifth are all at full
+/// colour so one outlier does not wash the rest out), on a logarithmic scale since a lean of 4× is "twice" 2×. Less than usual (possible in
+/// Most played) stays blue.
+struct TrendsWeatherMapRingScale: Equatable {
+    let low: Double
+    let high: Double
+
+    init(lifts: [Double]) {
+        let above = lifts.filter { $0 >= 1 && $0.isFinite }.sorted()
+        low = above.first ?? 1
+        high = above.isEmpty ? 1 : above[min(above.count - 1, Int((Double(above.count - 1) * 0.8).rounded(.down)))]
+    }
+
+    /// 0 for the weakest lean shown to 1 for the strongest; the middle when they are all about the same.
+    func position(_ lift: Double) -> Double {
+        guard high / max(low, 1e-9) >= 1.1 else { return 0.6 }
+        return min(1, max(0, (log(max(lift, 1)) - log(low)) / (log(high) - log(low))))
+    }
+
+    private static let stops: [(Double, (Double, Double, Double))] = [(0, (1.00, 0.88, 0.55)), (0.5, (0.97, 0.58, 0.15)), (1, (0.84, 0.20, 0.12))]
+
+    func color(_ lift: Double) -> Color {
+        if lift < 1 { return WeatherPalette.lean(lift) }
+        let p = position(lift)
+        let (a, b) = p <= 0.5 ? (Self.stops[0], Self.stops[1]) : (Self.stops[1], Self.stops[2])
+        let f = (p - a.0) / (b.0 - a.0)
+        return Color(red: a.1.0 + (b.1.0 - a.1.0) * f, green: a.1.1 + (b.1.1 - a.1.1) * f, blue: a.1.2 + (b.1.2 - a.1.2) * f)
+    }
+
+    /// The colour at a position along the key.
+    func color(atPosition p: Double) -> Color { color(low * pow(max(high / max(low, 1e-9), 1), min(1, max(0, p)))) }
 }
 
 struct TrendsWeatherMapResult: Equatable, Sendable {
@@ -306,7 +340,7 @@ enum TrendsWeatherMapEngine {
 
     /// A bubble at least this big (points, radius) shows its artist's picture; smaller ones are too small to recognise anyone in and stay a
     /// plain coloured dot.
-    static let artworkMinimumRadius: CGFloat = 13
+    static let artworkMinimumRadius: CGFloat = 9
 
     // MARK: Wording
 

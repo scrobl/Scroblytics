@@ -20,11 +20,17 @@ struct TrendsWeatherMapLayout {
     let size: CGSize
     let labelWidth: CGFloat
     let axisHeight: CGFloat
+    /// How tall each row is against the others: a row with no bubble is shorter, one with many is taller, so the room goes where the bubbles are.
+    let laneWeights: [CGFloat]
     let placed: [Placed]
 
     var plotWidth: CGFloat { max(40, size.width - labelWidth - 6) }
     var plotHeight: CGFloat { max(40, size.height - axisHeight) }
-    var laneHeight: CGFloat { plotHeight / CGFloat(max(rows.count, 1)) }
+    func laneHeight(_ index: Int) -> CGFloat {
+        let total = laneWeights.reduce(0, +)
+        return total > 0 && index < laneWeights.count ? plotHeight * laneWeights[index] / total : plotHeight / CGFloat(max(rows.count, 1))
+    }
+    func laneTop(_ index: Int) -> CGFloat { (0..<index).reduce(0) { $0 + laneHeight($1) } }
     /// The temperatures (°C) the plot spans, from the low edge of its first bin to the high edge of its last.
     var domain: ClosedRange<Double> { TrendsWeatherMapEngine.edges(ofBin: lowBin).low...TrendsWeatherMapEngine.edges(ofBin: highBin).high }
 
@@ -50,7 +56,11 @@ struct TrendsWeatherMapLayout {
             if low > 0 { low -= 1 }
             if high - low < 2, high < bins - 1 { high += 1 }
         }
-        var layout = TrendsWeatherMapLayout(rows: rows, lowBin: low, highBin: high, size: size, labelWidth: labelWidth, axisHeight: axisHeight, placed: [])
+        var perRow = [Int](repeating: 0, count: rows.count)
+        for bubble in bubbles { if let index = rows.firstIndex(of: bubble.placement.condition) { perRow[index] += 1 } }
+        let busiest = Double(max(perRow.max() ?? 1, 1))
+        let weights: [CGFloat] = bubbles.isEmpty ? [CGFloat](repeating: 1, count: rows.count) : perRow.map { $0 == 0 ? 0.5 : CGFloat(0.75 + 0.75 * Double($0) / busiest) }
+        var layout = TrendsWeatherMapLayout(rows: rows, lowBin: low, highBin: high, size: size, labelWidth: labelWidth, axisHeight: axisHeight, laneWeights: weights, placed: [])
         guard !bubbles.isEmpty, !rows.isEmpty else { return layout }
 
         let area = Double(layout.plotWidth * layout.plotHeight)
@@ -59,12 +69,18 @@ struct TrendsWeatherMapLayout {
         let columnWidth = layout.plotWidth * CGFloat(TrendsWeatherMapEngine.binWidth / (layout.domain.upperBound - layout.domain.lowerBound))
         var perCell: [Int: Int] = [:]
         for bubble in bubbles { perCell[(layout.row(of: bubble.placement.condition) ?? 0) * bins + bubble.placement.bin, default: 0] += 1 }
-        let crowded = Double(perCell.values.max() ?? 1)
-        let cellFit = (0.45 * Double(columnWidth * layout.laneHeight) / (Double.pi * crowded)).squareRoot()
-        let maxRadius = max(6, min(CGFloat(max(8, min(30, (area / Double(bubbles.count)).squareRoot() * 0.24))), layout.laneHeight * 0.42, CGFloat(cellFit)))
-        let minRadius = max(3.5, maxRadius * 0.33)
+        // How large the biggest bubble can be: against the room per bubble, and against the most crowded cell holding all of its bubbles.
+        var cellFit = Double.infinity
+        for (cell, count) in perCell {
+            let fit = (0.7 * Double(columnWidth * layout.laneHeight(cell / bins)) / (Double.pi * Double(count))).squareRoot()
+            cellFit = min(cellFit, fit)
+        }
+        let maxRadius = max(7, min(CGFloat(max(9, min(36, (area / Double(bubbles.count)).squareRoot() * 0.30))), CGFloat(cellFit)))
+        // Sizes differ by plays but never shrink to a speck: the smallest is at least half the largest, so more artists get a recognisable picture.
+        let minRadius = max(5, maxRadius * 0.5)
         func radius(_ bubble: TrendsWeatherMapBubble) -> CGFloat {
-            minRadius + (maxRadius - minRadius) * CGFloat((Double(bubble.candidate.plays) / biggest).squareRoot())
+            let wanted = minRadius + (maxRadius - minRadius) * CGFloat((Double(bubble.candidate.plays) / biggest).squareRoot())
+            return min(wanted, layout.laneHeight(layout.row(of: bubble.placement.condition) ?? 0) * 0.46)
         }
 
         var placed: [Placed] = []
@@ -75,15 +91,18 @@ struct TrendsWeatherMapLayout {
             let r = radius(bubble)
             let edges = TrendsWeatherMapEngine.edges(ofBin: bubble.placement.bin)
             let left = layout.x(forCelsius: edges.low), right = layout.x(forCelsius: edges.high)
-            let x0 = min(max(layout.x(forCelsius: bubble.placement.temperature), left), right)
-            let y0 = layout.laneHeight * (CGFloat(rowIndex) + 0.5)
-            let reach = max(0, layout.laneHeight / 2 - r - 1)
+            // Kept whole inside its range of temperatures where it can be, so a bubble never straddles the edge of the map or of its cell.
+            let inset = min(r * 0.8, (right - left) / 2)
+            let (low, high) = (left + inset, right - inset)
+            let x0 = min(max(layout.x(forCelsius: bubble.placement.temperature), low), high)
+            let y0 = layout.laneTop(rowIndex) + layout.laneHeight(rowIndex) / 2
+            let reach = max(0, layout.laneHeight(rowIndex) / 2 - r - 1)
             var best: (x: CGFloat, y: CGFloat, overlap: CGFloat) = (x0, y0, .infinity)
             let step = max(1.5, r / 2.2)
             for i in 0..<500 {
                 let angle = Double(i) * 2.399963, distance = step * CGFloat(Double(i).squareRoot())
                 let x = x0 + distance * CGFloat(cos(angle)), y = y0 + distance * CGFloat(sin(angle))
-                guard x >= left, x <= right, abs(y - y0) <= reach + 0.01 else { continue }
+                guard x >= low - 0.01, x <= high + 0.01, abs(y - y0) <= reach + 0.01 else { continue }
                 var overlap: CGFloat = 0
                 for other in placed {
                     let gap = hypot(other.x - x, other.y - y)
@@ -95,7 +114,7 @@ struct TrendsWeatherMapLayout {
             }
             placed.append(Placed(bubble: bubble, x: best.x, y: best.y, radius: r))
         }
-        layout = TrendsWeatherMapLayout(rows: rows, lowBin: low, highBin: high, size: size, labelWidth: labelWidth, axisHeight: axisHeight, placed: placed)
+        layout = TrendsWeatherMapLayout(rows: rows, lowBin: low, highBin: high, size: size, labelWidth: labelWidth, axisHeight: axisHeight, laneWeights: weights, placed: placed)
         return layout
     }
 
@@ -106,7 +125,7 @@ struct TrendsWeatherMapLayout {
         for item in placed.sorted(by: { ($0.radius, $1.id) > ($1.radius, $0.id) }) where chosen.count < limit {
             let width = CGFloat(item.bubble.candidate.artist.count) * 5.6 + 12
             let laneIndex = row(of: item.bubble.placement.condition) ?? 0
-            let laneBottom = laneHeight * CGFloat(laneIndex + 1)
+            let laneBottom = laneTop(laneIndex) + laneHeight(laneIndex)
             let x = min(max(item.x, labelWidth + width / 2), size.width - width / 2)
             let y = min(item.y + item.radius + 8, laneBottom - 9)
             let rect = CGRect(x: x - width / 2, y: y - 8, width: width, height: 16)
@@ -142,6 +161,9 @@ struct TrendsWeatherMapChart: View {
     var artwork: [String: String] = [:]
     var images: [String: NSImage]?
     var showsArtwork = true
+    /// The smallest bubble (radius, in this chart's own points) that shows a picture; a card drawn larger than it is laid out lowers this so the
+    /// picture is the same size on the card.
+    var artworkMinimumRadius = TrendsWeatherMapEngine.artworkMinimumRadius
     var onSelect: (TrendsWeatherMapBubble) -> Void = { _ in }
     @State private var hovered: String?
 
@@ -175,7 +197,8 @@ struct TrendsWeatherMapChart: View {
         ZStack(alignment: .topLeading) {
             backdrop(layout)
             axis(layout)
-            ForEach(layout.placed) { item in bubbleView(item) }
+            let scale = ringScale
+            ForEach(layout.placed) { item in bubbleView(item, scale: scale) }
             ForEach(layout.labelled(limit: labelCount), id: \.placed.id) { label in
                 Text(label.placed.bubble.candidate.artist)
                     .font(AppTypography.denseBadge).foregroundStyle(.white).lineLimit(1)
@@ -191,21 +214,22 @@ struct TrendsWeatherMapChart: View {
         }
     }
 
-    /// The colour of a bubble's ring (or of the whole dot): how strongly its artist leans there.
-    private func lean(_ item: TrendsWeatherMapLayout.Placed) -> Color { WeatherPalette.lean(item.bubble.placement.lift) }
+    /// The colour of a bubble's ring (or of the whole dot): how strongly its artist leans there, against the others shown.
+    private var ringScale: TrendsWeatherMapRingScale { TrendsWeatherMapRingScale(lifts: bubbles.map(\.placement.lift)) }
 
     @ViewBuilder
-    private func bubbleView(_ item: TrendsWeatherMapLayout.Placed) -> some View {
+    private func bubbleView(_ item: TrendsWeatherMapLayout.Placed, scale: TrendsWeatherMapRingScale) -> some View {
         let isHovered = hovered == item.id
         let diameter = item.radius * 2
-        let dot = Circle().fill(lean(item).opacity(isHovered ? 1 : 0.85))
+        let ring = scale.color(item.bubble.placement.lift)
+        let dot = Circle().fill(ring.opacity(isHovered ? 1 : 0.85))
         Group {
-            if showsArtwork, item.radius >= TrendsWeatherMapEngine.artworkMinimumRadius, let url = artwork[item.bubble.candidate.artist] {
+            if showsArtwork, item.radius >= artworkMinimumRadius, let url = artwork[item.bubble.candidate.artist] {
                 ZStack {
                     dot
                     picture(url, diameter: diameter - 3.5)
                 }
-                .overlay { Circle().stroke(lean(item), lineWidth: 1.75) }
+                .overlay { Circle().stroke(ring, lineWidth: 1.75) }
             } else {
                 dot.overlay { Circle().stroke(Color.white.opacity(isHovered ? 0.9 : 0.4), lineWidth: isHovered ? 2 : 1) }
             }
@@ -234,17 +258,17 @@ struct TrendsWeatherMapChart: View {
         let biggest = Double(max(1, layout.rows.flatMap { row in (layout.lowBin...layout.highBin).map { result.cellTotal(row, bin: $0) } }.max() ?? 1))
         return ZStack(alignment: .topLeading) {
             ForEach(Array(layout.rows.enumerated()), id: \.element) { index, condition in
-                let top = layout.laneHeight * CGFloat(index)
+                let top = layout.laneTop(index), lane = layout.laneHeight(index)
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(index.isMultiple(of: 2) ? 0.045 : 0.02))
-                    .frame(width: layout.plotWidth, height: layout.laneHeight - 2)
-                    .position(x: layout.labelWidth + layout.plotWidth / 2, y: top + layout.laneHeight / 2)
+                    .frame(width: layout.plotWidth, height: lane - 2)
+                    .position(x: layout.labelWidth + layout.plotWidth / 2, y: top + lane / 2)
                 HStack(spacing: 5) {
                     Image(systemName: condition.symbolName).font(.system(size: 12, weight: .semibold)).foregroundStyle(WeatherPalette.tint(condition))
                     Text(condition == .thunderstorm ? "Storm" : condition.rawValue).font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                 }
                 .frame(width: layout.labelWidth - 8, alignment: .trailing)
-                .position(x: (layout.labelWidth - 8) / 2, y: top + layout.laneHeight / 2)
+                .position(x: (layout.labelWidth - 8) / 2, y: top + lane / 2)
                 if showsDensity {
                     ForEach(layout.lowBin...layout.highBin, id: \.self) { bin in
                         let total = result.cellTotal(condition, bin: bin)
@@ -253,8 +277,8 @@ struct TrendsWeatherMapChart: View {
                             let left = layout.x(forCelsius: edges.low), right = layout.x(forCelsius: edges.high)
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(WeatherPalette.tint(condition).opacity(0.05 + 0.30 * (Double(total) / biggest).squareRoot()))
-                                .frame(width: max(2, right - left - 2), height: layout.laneHeight - 6)
-                                .position(x: (left + right) / 2, y: top + layout.laneHeight / 2)
+                                .frame(width: max(2, right - left - 2), height: lane - 6)
+                                .position(x: (left + right) / 2, y: top + lane / 2)
                         }
                     }
                 }
@@ -301,18 +325,31 @@ struct TrendsWeatherMapChart: View {
     }
 
     private var legend: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 14) { legendItems(long: true); Spacer(minLength: 0) }
-            HStack(spacing: 12) { legendItems(long: false); Spacer(minLength: 0) }
+        let scale = ringScale
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) { legendItems(long: true, scale: scale); Spacer(minLength: 0) }
+            HStack(spacing: 12) { legendItems(long: false, scale: scale); Spacer(minLength: 0) }
         }
         .labelStyle(.titleAndIcon)
     }
 
     @ViewBuilder
-    private func legendItems(long: Bool) -> some View {
+    private func legendItems(long: Bool, scale: TrendsWeatherMapRingScale) -> some View {
         Label("size is plays", systemImage: "circle").font(AppTypography.denseBadge).foregroundStyle(.secondary).lineLimit(1).fixedSize()
         if showsDensity { Label(long ? "shading is how much you listened" : "shading is listening", systemImage: "square.fill").font(AppTypography.denseBadge).foregroundStyle(.secondary).lineLimit(1).fixedSize() }
-        Label(long ? "ring is how far above usual (grey usual, orange more)" : "ring is the lean", systemImage: "circle.dashed").font(AppTypography.denseBadge).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+        HStack(spacing: 5) {
+            Image(systemName: "circle.dashed").foregroundStyle(.secondary)
+            Text(long ? "ring is the lean:" : "lean:").foregroundStyle(.secondary)
+            if scale.high / max(scale.low, 1e-9) >= 1.1 {
+                Text(TrendsWeatherMapEngine.timesText(scale.low)).foregroundStyle(.secondary).monospacedDigit()
+                LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 0.25).map { scale.color(atPosition: $0) }, startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 56, height: 6).clipShape(Capsule())
+                Text(TrendsWeatherMapEngine.timesText(scale.high) + "+").foregroundStyle(.secondary).monospacedDigit()
+            } else {
+                Text(TrendsWeatherMapEngine.timesText(scale.low)).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        .font(AppTypography.denseBadge).lineLimit(1).fixedSize()
     }
 }
 
@@ -405,7 +442,7 @@ struct TrendsWeatherMapCard: View {
                     Text(emptyText(result)).font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
                 } else {
-                    TrendsWeatherMapChart(bubbles: shown, result: result, unit: unit, height: 440, labelCount: count <= 10 ? 10 : (count <= 25 ? 14 : (count <= 50 ? 9 : 6)), artwork: artwork(for: shown)) { bubble in
+                    TrendsWeatherMapChart(bubbles: shown, result: result, unit: unit, height: 480, labelCount: count <= 10 ? 10 : (count <= 25 ? 14 : (count <= 50 ? 9 : 6)), artwork: artwork(for: shown)) { bubble in
                         openQuery(TrendsWeatherMapEngine.drillSpec(for: bubble, range: inputs.range), "Scrobbles · \(bubble.candidate.artist) · \(TrendsWeatherMapEngine.phrase(bubble.placement.condition)) at \(TrendsWeatherMapEngine.rangeText(bin: bubble.placement.bin, unit: unit)) · " + TrendsDrill.rangeLabel(from: inputs.range.from, to: inputs.range.to))
                     }
                     .shareChartArea()

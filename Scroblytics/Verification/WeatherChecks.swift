@@ -907,7 +907,13 @@ enum WeatherChecks {
         check("a lean has to be more than luck: 8 plays against 6.4 expected is not, 50 against 29.8 and 25 against 12 are", !lean(8, expected: 6.4) && lean(50, expected: 29.76) && lean(25, expected: 12) && engine.minimumSignificance == 2.5)
         // The ring: grey for usual, orange more, blue less, stronger the further from usual.
         check("a lean is coloured by how far from usual: none at 1×, a modest lean already shows (1.25×), full at 3× and beyond, blue below 1", WeatherPalette.leanStrength(1) == 0 && WeatherPalette.leanStrength(1.25) > 0.3 && WeatherPalette.leanStrength(3) == 1 && WeatherPalette.leanStrength(8) == 1 && WeatherPalette.leanStrength(2) > WeatherPalette.leanStrength(1.5) && WeatherPalette.leanStrength(0.3) > WeatherPalette.leanStrength(0.8) && WeatherPalette.leanStrength(0) == 1, "\(WeatherPalette.leanStrength(1.25))")
-        check("a picture is drawn only on a bubble big enough to recognise anyone in (radius 13 and up); the artist's saved picture is found, and none when there is none", engine.artworkMinimumRadius == 13 && engine.artworkURL(for: "Nobody", lookup: [:]) == nil && engine.artworkURL(for: "R", lookup: [ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: "R", album: nil, track: nil)): "file:///art/r.png"]) == "file:///art/r.png")
+        check("a picture is drawn only on a bubble big enough to recognise anyone in (radius 9 and up); the artist's saved picture is found, and none when there is none", engine.artworkMinimumRadius == 9 && engine.artworkURL(for: "Nobody", lookup: [:]) == nil && engine.artworkURL(for: "R", lookup: [ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: "R", album: nil, track: nil)): "file:///art/r.png"]) == "file:///art/r.png")
+        // The ring: coloured against the others shown, so a Top 10 of strong leans still shows who leans most.
+        let scale = TrendsWeatherMapRingScale(lifts: [1.5, 2, 3, 4, 10])
+        check("the ring scale runs from the weakest lean shown to the 80th percentile (4×), with the strongest beyond it at full colour", near(scale.low, 1.5) && near(scale.high, 4) && near(scale.position(1.5), 0) && near(scale.position(4), 1) && near(scale.position(10), 1) && near(scale.position(2), log(2 / 1.5) / log(4 / 1.5)), "\(scale.low) \(scale.high)")
+        check("each lean has its own colour, the same lean the same colour, and blue below usual", scale.color(1.5) != scale.color(2) && scale.color(2) != scale.color(3) && scale.color(3) != scale.color(4) && scale.color(4) == scale.color(10) && scale.color(2) == scale.color(2) && scale.color(0.5) == WeatherPalette.lean(0.5))
+        let flat = TrendsWeatherMapRingScale(lifts: [2.0, 2.05, 2.1])
+        check("leans that are all about the same share one middle colour instead of being stretched apart", near(flat.position(2.05), 0.6) && flat.color(2.0) == flat.color(2.1))
         // No one cell may take more than a quarter of the map (and never fewer than three).
         func fake(_ name: String, score: Double, condition: WeatherCondition, bin: Int) -> TrendsWeatherMapCandidate {
             let place = TrendsWeatherMapPlacement(condition: condition, bin: bin, plays: 20, expected: 5, days: 8, temperature: 7, score: score)
@@ -931,11 +937,11 @@ enum WeatherChecks {
         let size = CGSize(width: 700, height: 320)
         let placed = TrendsWeatherMapLayout.make(bubbles: affinity, result: result, size: size)
         let c = placed.placed.first { $0.id == "C" }, rr = placed.placed.first { $0.id == "R" }
-        check("each bubble sits in its weather's lane and its temperature's column: C (clear) above R (rain), R colder than C, so left of it", c != nil && rr != nil && c!.y < rr!.y && rr!.x < c!.x && abs(c!.x - placed.x(forCelsius: 10)) <= 0.01 && abs(rr!.x - placed.x(forCelsius: 5)) <= 0.01, "\(String(describing: c)) \(String(describing: rr))")
+        check("each bubble sits in its weather's lane and its temperature's column: C (clear) above R (rain), R colder than C, so left of it", c != nil && rr != nil && c!.y < rr!.y && rr!.x < c!.x && rr!.x >= placed.x(forCelsius: 5) - 0.01 && rr!.x - placed.x(forCelsius: 5) <= rr!.radius && c!.x - placed.x(forCelsius: 10) <= c!.radius, "\(String(describing: c)) \(String(describing: rr))")
         let packed = TrendsWeatherMapResult(revision: UUID(), candidates: (0..<60).map { fake("a\($0)", score: 1, condition: .rain, bin: 5) }, cellTotals: result.cellTotals, conditionTotals: result.conditionTotals, baseline: result.baseline, totalPlays: 210, adjusted: false)
         let crowdLayout = TrendsWeatherMapLayout.make(bubbles: packed.bubbles(mode: .mostPlayed, count: 60), result: packed, size: size)
         let lane = crowdLayout.row(of: .rain) ?? 0
-        let laneTop = crowdLayout.laneHeight * CGFloat(lane), laneBottom = laneTop + crowdLayout.laneHeight
+        let laneTop = crowdLayout.laneTop(lane), laneBottom = laneTop + crowdLayout.laneHeight(lane)
         let columnLeft = crowdLayout.x(forCelsius: 5), columnRight = crowdLayout.x(forCelsius: 10)
         check("sixty bubbles in one cell stay inside it: their lane and their five degrees", crowdLayout.placed.count == 60 && crowdLayout.placed.allSatisfy { $0.x >= columnLeft - 0.01 && $0.x <= columnRight + 0.01 && $0.y - $0.radius >= laneTop - 0.5 && $0.y + $0.radius <= laneBottom + 0.5 })
         func overlaps(_ layout: TrendsWeatherMapLayout) -> Int {
@@ -1007,6 +1013,12 @@ enum WeatherChecks {
         twoTrips.trips = [WeatherSnapshot.TripWeather(trip: trip, series: away), WeatherSnapshot.TripWeather(trip: WeatherTrip(place: WeatherPlace(name: "Oslo, Norway", latitude: 59.9, longitude: 10.7), from: date(2025, 3, 14), until: date(2025, 3, 17)), series: away)]
         let colored = TrendsPlacesEngine.compute(scrobbles: plays, weather: twoTrips, range: range, now: now, calendar: utc)
         check("each trip has its own colour in the order they happened, and home is grey", colored.trips.count == 2 && colored.tint(for: colored.trips[1]) == TrendsPlacesResult.tripColors[0] && colored.tint(for: colored.trips[0]) == TrendsPlacesResult.tripColors[1] && colored.tint(for: colored.home!) == .secondary && TrendsPlacesResult.tripColors[0] != TrendsPlacesResult.tripColors[1])
+        // The same place twice is the same colour: Lisbon, Oslo, then Lisbon again.
+        var revisit = snapshot
+        revisit.trips = twoTrips.trips + [WeatherSnapshot.TripWeather(trip: WeatherTrip(place: lisbon, from: date(2025, 3, 18), until: date(2025, 3, 19)), series: away)]
+        let again = TrendsPlacesEngine.compute(scrobbles: plays, weather: revisit, range: range, now: now, calendar: utc)
+        let lisbons = again.trips.filter { $0.city == "Lisbon" }, oslos = again.trips.filter { $0.city == "Oslo" }
+        check("every trip to the same city is the same colour (two Lisbon trips), and another city has its own", lisbons.count == 2 && oslos.count == 1 && again.tint(for: lisbons[0]) == again.tint(for: lisbons[1]) && again.tint(for: lisbons[0]) != again.tint(for: oslos[0]) && again.spans.filter { $0.colorKey == lisbons[0].colorKey }.count == 2, "\(again.trips.map(\.city))")
         check("trip names that don't collide share a row", TrendsPlacesChart.labelLanes([(x: 10, width: 40), (x: 100, width: 40), (x: 200, width: 40)]) == [0, 0, 0])
         check("names that would run into each other go on other rows, and one is left out when every row is taken", TrendsPlacesChart.labelLanes([(x: 10, width: 40), (x: 30, width: 40), (x: 60, width: 40), (x: 200, width: 40)]) == [0, 1, 0, 0] && TrendsPlacesChart.labelLanes([(x: 10, width: 100), (x: 20, width: 100), (x: 30, width: 100), (x: 40, width: 100)]) == [0, 1, 2, nil])
         // Grouping trips by region or country.
@@ -1034,7 +1046,7 @@ enum WeatherChecks {
         check("its dates run from the first trip to the end of the last", portugal?.from == date(2025, 3, 5) && portugal?.until == date(2025, 3, 15))
         check("whatever the level every play and every day is counted once: stays plus home are the 35 plays and 20 days", [byCity, byRegion, byCountry].allSatisfy { $0.trips.reduce($0.home?.plays ?? 0) { $0 + $1.plays } == 35 && $0.trips.reduce($0.home?.days ?? 0) { $0 + $1.days } == 20 && $0.trips.reduce(0) { $0 + $1.tripCount } == 3 })
         check("the chart still has each trip's own stretch (three), in the colour of its stay", byCountry.spans.count == 3 && Set(byCountry.spans.map(\.group)).count == 2 && byCountry.spans.filter { $0.group == portugal?.id }.count == 2)
-        check("the two Portuguese trips share a colour and Germany has another", portugal.map { byCountry.tint(for: $0) } != byCountry.trips.first { $0.city == "Germany" }.map { byCountry.tint(for: $0) } && byCountry.spans.filter { $0.group == portugal?.id }.map { byCountry.tint(forGroup: $0.group) }.count == 2)
+        check("the two Portuguese trips share a colour and Germany has another", portugal.map { byCountry.tint(for: $0) } != byCountry.trips.first { $0.city == "Germany" }.map { byCountry.tint(for: $0) } && byCountry.spans.filter { $0.group == portugal?.id }.map { byCountry.tint(forKey: $0.colorKey) }.count == 2)
         let portugalDrill = portugal.map { TrendsPlacesEngine.drillSpec(for: $0, target: .track) }
         check("clicking Portugal opens the plays made in either city, between the first trip's start and the last's end", portugalDrill?.playFilter?.cities == ["Lisbon", "Porto"] && portugalDrill?.period?.from == date(2025, 3, 5) && portugalDrill?.period?.to == date(2025, 3, 15))
         check("a group says how many trips it is: “2 trips · 8 days”; a single trip just its days", portugal?.summaryLine == "2 trips · 8 days" && byCity.trips.allSatisfy { $0.tripCount == 1 })

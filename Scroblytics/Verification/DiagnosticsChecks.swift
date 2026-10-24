@@ -165,6 +165,25 @@ enum DiagnosticsChecks {
             }
             check("no log call interpolates an artist, album, track, tag, query, title or account name (\(scanned) calls read)", scanned > 5 && offenders.isEmpty, offenders.joined(separator: "; "))
 
+            // MARK: The sync's own lines say what kind of sync it was and why
+            typealias W = SyncLogWording
+            check("a quick sync that found everything Last.fm added does not escalate, and neither does a first look at a matching total", W.escalation(previousTotal: 100, remoteTotal: 110, found: 10, onThisMac: 100) == nil && W.escalation(previousTotal: 100, remoteTotal: 100, found: 0, onThisMac: 100) == nil && W.escalation(previousTotal: nil, remoteTotal: 100, found: 0, onThisMac: 100) == nil)
+            check("Last.fm's total rising by more than the quick sync found escalates, and says by how much (late plays)", W.escalation(previousTotal: 100, remoteTotal: 110, found: 3, onThisMac: 103) == .totalGrewMoreThanFound(grew: 10, found: 3))
+            check("Last.fm's total falling escalates (deleted plays)", W.escalation(previousTotal: 100, remoteTotal: 95, found: 0, onThisMac: 100) == .totalFell(by: 5))
+            check("with no earlier total, fewer plays here than on Last.fm escalates", W.escalation(previousTotal: nil, remoteTotal: 100, found: 0, onThisMac: 90) == .fewerHereThanLastfm(onThisMac: 90, onLastfm: 100))
+            let syncLines = [
+                W.planLine(mode: .incremental, requestedFull: false, onThisMac: 1_234, onLastfm: 1_240, resumePage: nil),
+                W.planLine(mode: .full, requestedFull: false, onThisMac: 0, onLastfm: 5_000, resumePage: nil),
+                W.planLine(mode: .full, requestedFull: true, onThisMac: 1_234, onLastfm: 1_240, resumePage: nil),
+                W.planLine(mode: .resumedBackfill, requestedFull: false, onThisMac: 800, onLastfm: 5_000, resumePage: 7),
+                W.escalationLine(.totalGrewMoreThanFound(grew: 10, found: 3)), W.escalationLine(.totalFell(by: 5)), W.escalationLine(.fewerHereThanLastfm(onThisMac: 90, onLastfm: 100)),
+                W.recheckResultLine(added: 7, updated: 0, removed: 2, complete: true), W.recheckResultLine(added: 0, updated: 0, removed: 0, complete: false),
+            ]
+            check("each kind of sync has its own plan line with both totals", syncLines[0].contains("quick check") && syncLines[0].contains("1,234") && syncLines[0].contains("1,240") && syncLines[1].contains("first import") && syncLines[2].contains("full resync, as asked") && syncLines[3].contains("resuming") && syncLines[3].contains("page 7"), syncLines.prefix(4).joined(separator: " | "))
+            check("the escalation lines give the reason in numbers, and the result line says what the re-check changed", syncLines[4].contains("went up by 10") && syncLines[4].contains("found 3 new plays") && syncLines[5].contains("went down by 5") && syncLines[6].contains("90") && syncLines[7].contains("added 7") && syncLines[7].contains("removed 2") && syncLines[7].contains("finished") && syncLines[8].contains("paused"), syncLines.dropFirst(4).joined(separator: " | "))
+            let sensitiveWords = try! NSRegularExpression(pattern: "\\b(artist|artists|album|albums|track|tracks|tag|tags|query|username|user|title|name)\\b", options: .caseInsensitive)
+            check("none of those lines can carry music or account words", syncLines.allSatisfy { sensitiveWords.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) == nil }, syncLines.joined(separator: " | "))
+
             // MARK: An unreadable database
             func sqliteError(_ code: Int, cocoa: Int = 256) -> NSError {
                 NSError(domain: NSCocoaErrorDomain, code: cocoa, userInfo: [NSUnderlyingErrorKey: NSError(domain: "NSSQLiteErrorDomain", code: code)])

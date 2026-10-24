@@ -150,6 +150,7 @@ actor SyncEngine {
         } else {
             initialMode = .incremental
         }
+        ActivityLog.record(.sync, SyncLogWording.planLine(mode: initialMode, requestedFull: full, onThisMac: existingCount, onLastfm: remotePlaycount, resumePage: state.backfillNextPage))
         progress(SyncProgress(
             phase: .preparing,
             mode: initialMode,
@@ -227,15 +228,11 @@ actor SyncEngine {
         try modelContext.save()
 
         let previousTotal = state.remoteTotal
-        let shouldEscalate: Bool
-        if let previousTotal {
-            shouldEscalate = added < (remotePlaycount - previousTotal) || remotePlaycount < previousTotal
-        } else {
-            let currentCount = try modelContext.checkedCount(FetchDescriptor<Scrobble>())
-            shouldEscalate = currentCount < remotePlaycount
-        }
+        let currentCount = try modelContext.checkedCount(FetchDescriptor<Scrobble>())
+        let escalation = SyncLogWording.escalation(previousTotal: previousTotal, remoteTotal: remotePlaycount, found: added, onThisMac: currentCount)
 
-        if shouldEscalate {
+        if let escalation {
+            ActivityLog.record(.sync, SyncLogWording.escalationLine(escalation))
             // Backdated plays (or server-side deletions) an incremental `from`
             // filter can never reach — re-walk the entire history and let the
             // per-window reconcile pick up both additions and removals.
@@ -253,6 +250,7 @@ actor SyncEngine {
                 isComplete: backfillResult.isComplete
             )
             let summary = try finishBackfill(combined, state: state, runStartedAt: runStartedAt, escalated: true, remoteTotalOverride: remotePlaycount)
+            ActivityLog.record(.sync, SyncLogWording.recheckResultLine(added: summary.added, updated: summary.updated, removed: summary.removed, complete: summary.isComplete))
             return summary
         }
 

@@ -645,13 +645,23 @@ struct ContentView: View {
         Tour.log("TOUR plays \(history.count), opening the busiest album's artist, album and track")
         let deadline = Date().addingTimeInterval(minutes * 60)
         var round = 0
-        let tabs: [(String, Tab)] = [("overview", .overview), ("library", .library), ("topCharts", .topCharts), ("trends", .trends), ("milestones", .milestones), ("timeline", .timeline), ("tools", .tools)]
+        let tabs: [(String, Tab)] = [("overview", .overview), ("library", .library), ("topCharts", .topCharts), ("milestones", .milestones), ("timeline", .timeline), ("tools", .tools)]
+        // Every Trends group in turn (each works out its own charts), then the stored one is put back.
+        let trendsGroups = ["Listening", "Weather & places", "Taste & eras", "Habits", "Rankings & flow"]
+        let storedGroup = UserDefaults.standard.string(forKey: "trends.group")
+        defer { if let storedGroup { UserDefaults.standard.set(storedGroup, forKey: "trends.group") } else { UserDefaults.standard.removeObject(forKey: "trends.group") } }
         while Date() < deadline {
             round += 1
             for (name, tab) in tabs {
                 monitor.phase = "round \(round): \(name) tab"
                 selectedTab = tab
                 await pause(5)
+            }
+            for group in trendsGroups {
+                monitor.phase = "round \(round): trends, \(group)"
+                UserDefaults.standard.set(group, forKey: "trends.group")
+                selectedTab = .trends
+                await pause(group == "Weather & places" ? 12 : 8)
             }
             monitor.phase = "round \(round): open artist, album, track in Library"
             selectedTab = .library

@@ -125,6 +125,15 @@ import:
    `open -n --env SCROBLYTICS_STORE_PATH=<copy> --env SCROBLYTICS_OFFLINE=1 Scroblytics.app`.
    Watch `ps -o %cpu,rss` and `vmmap -summary <pid> | grep footprint`: with 366k scrobbles the launch takes about 25 s of CPU and peaks
    near 1 GB of footprint, then it should sit at 0% CPU.
+   For a **long history** as well as a large one (weather, Trends and the other things that work by year), shift the clones back by whole
+   years instead of seconds: `ZPLAYEDAT-189345600` is six years, `-378691200` twelve, so three copies of a 5-year library make a history
+   that begins 17 years ago. The weather beside it then has to reach back as far: with the copy's own weather folder and
+   `WeatherTrips.json` beside the store (the app keeps them there while `SCROBLYTICS_STORE_PATH` is set), run
+   `SCROBLYTICS_WEATHERPERF_CHECK=1 SCROBLYTICS_WEATHERPERF_REAL=1 SCROBLYTICS_WEATHERPERF_DOWNLOAD=1` once. It downloads the missing years
+   from Open-Meteo into the copy (about one request a year, the only thing it sends), then times the weather play filter and fields, the
+   city filter, every Trends weather card, the share cards drawn from them and twelve redraws of one card (memory must stay flat), first
+   on made-up data (20 years, 400,000 plays) and then on the copy. Without `…_REAL` it uses only made-up data, which is what
+   `scripts/release.sh` runs. A Release build does each step in well under 3 s on a 368k-play, 17-year library.
 4. For work after an import, do a real first import in an isolated test profile (`scripts/first-run-profile.sh <name> --env
    SCROBLYTICS_PROFILE_SEED_LASTFM=<user>:<key>`, with `SCROBLYTICS_APP_PATH` set to the hooks build) and log CPU every 15 s for the
    half hour after it finishes: it should settle to a few percent. `sample <pid> 30` then names what is busy (use a Debug build for

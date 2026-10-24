@@ -96,15 +96,17 @@ enum TrendsPlacesEngine {
             let first = seen.insert(play.artistName).inserted
             guard play.playedAt >= from, play.playedAt <= end else { continue }
             let stay = WeatherTrip.effective(at: play.playedAt, in: trips)?.id.uuidString ?? "home"
-            var tally = tallies[stay, default: Tally()]
-            tally.plays += 1
-            if first { tally.newArtists += 1 }
-            tally.artists[play.artistName, default: 0] += 1
+            // Changed in place: copying the tally out and back would copy its whole artist dictionary for every play.
+            tallies[stay, default: Tally()].plays += 1
+            if first { tallies[stay, default: Tally()].newArtists += 1 }
+            tallies[stay, default: Tally()].artists[play.artistName, default: 0] += 1
             if let sample = weather.sample(at: play.playedAt) {
-                if let temperature = sample.temperature { tally.temperatureSum += temperature; tally.temperatureCount += 1 }
-                if let condition = sample.condition { tally.conditionKnown += 1; if condition == .rain { tally.rain += 1 } }
+                if let temperature = sample.temperature { tallies[stay, default: Tally()].temperatureSum += temperature; tallies[stay, default: Tally()].temperatureCount += 1 }
+                if let condition = sample.condition {
+                    tallies[stay, default: Tally()].conditionKnown += 1
+                    if condition == .rain { tallies[stay, default: Tally()].rain += 1 }
+                }
             }
-            tallies[stay] = tally
             perDay[calendar.startOfDay(for: play.playedAt), default: 0] += 1
         }
 

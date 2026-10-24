@@ -196,6 +196,7 @@ struct ScroblyticsApp: App {
         BPMChecks.runSeedDumpIfRequested(container: modelContainer)
         HelpClaimChecks.runStoreCheckIfRequested(container: modelContainer)
         ConsistencyChecks.runHeadlessIfRequested(container: modelContainer)
+        WeatherPerfChecks.runHeadlessIfRequested(container: modelContainer)
         OfflineChecks.runHeadlessIfRequested(container: modelContainer)
         TimelineDebugDump.runHeadlessIfRequested(container: modelContainer)
         AlbumTurnoverDebugDump.runHeadlessIfRequested(container: modelContainer)

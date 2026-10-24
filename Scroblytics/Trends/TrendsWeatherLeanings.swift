@@ -114,13 +114,15 @@ enum TrendsLeaningsEngine {
         let monthShare = (0...12).map { monthKnown[$0] > 0 ? Double(monthHits[$0]) / Double(monthKnown[$0]) : overall }
         var accumulators: [QueryEntityID: Accumulator] = [:]
         for record in records {
-            var accumulator = accumulators[record.entity, default: Accumulator()]
-            accumulator.plays += 1
-            accumulator.expected += adjust ? monthShare[record.month] : overall
-            if record.hit { accumulator.hits += 1; accumulator.days.insert(record.day) }
-            if !record.album.isEmpty { accumulator.album = record.album }
-            if let url = record.imageURL, !url.isEmpty, !TextNormalization.isLastfmPlaceholderImage(url) { accumulator.imageURL = url }
-            accumulators[record.entity] = accumulator
+            // Changed in place (copying the accumulator out and back would copy its set of days for every play).
+            accumulators[record.entity, default: Accumulator()].plays += 1
+            accumulators[record.entity, default: Accumulator()].expected += adjust ? monthShare[record.month] : overall
+            if record.hit {
+                accumulators[record.entity, default: Accumulator()].hits += 1
+                accumulators[record.entity, default: Accumulator()].days.insert(record.day)
+            }
+            if !record.album.isEmpty { accumulators[record.entity, default: Accumulator()].album = record.album }
+            if let url = record.imageURL, !url.isEmpty, !TextNormalization.isLastfmPlaceholderImage(url) { accumulators[record.entity, default: Accumulator()].imageURL = url }
         }
         let items = accumulators.compactMap { id, a -> TrendsLeaningItem? in
             a.plays >= minimumPlays ? TrendsLeaningItem(id: id, plays: a.plays, inWeather: a.hits, expected: a.expected, days: a.days.count, album: a.album, fallbackImageURL: a.imageURL) : nil

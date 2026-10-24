@@ -18,7 +18,7 @@ struct AskInterpretation: Sendable {
     /// Parts of the request the model said it could not express — shown to the user, never silently lost.
     var unsupported: [String]
     /// True when the model gave nothing usable at all (no conditions, no sort, and nothing flagged).
-    var isEmpty: Bool { spec.groups.isEmpty && spec.sorts.isEmpty && spec.limit == nil && unsupported.isEmpty }
+    var isEmpty: Bool { spec.groups.isEmpty && spec.sorts.isEmpty && spec.limit == nil && unsupported.isEmpty && spec.playFilter == nil }
 }
 
 enum AskInterpreter {
@@ -32,7 +32,7 @@ enum AskInterpreter {
     /// `count` is the number of results the request asked for (found in stage 1), applied as the limit.
     static func interpret(
         _ query: AskWire.Query, target: QueryTarget, registry: QueryFieldRegistry, now: Date, calendar: Calendar = AppCalendars.listening, count: Int? = nil, ordered: Bool = false,
-        knownTags: Set<String>? = nil
+        knownTags: Set<String>? = nil, knownCities: [String]? = nil
     ) -> AskInterpretation {
         var dropped: [AskInterpretation.Dropped] = []
         var spec = QuerySpec(target: target)
@@ -85,11 +85,93 @@ enum AskInterpreter {
             if limit >= 1 { spec.limit = limit } else { dropped.append(.init(what: "limit \(limit)", reason: "a limit below 1")) }
         }
 
+        spec.playFilter = playFilter(query.playFilter, dropped: &dropped, knownCities: knownCities)
+
         spec.groupLimit = groupLimit(perArtist: query.perArtist, perAlbum: query.perAlbum, perReleaseYear: query.perReleaseYear, target: target, dropped: &dropped)
 
         spec.columns = columns(for: spec, target: target, registry: registry)
         let unsupported = (query.unsupported ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.contains { $0.isLetter || $0.isNumber } }
         return AskInterpretation(spec: spec, dropped: dropped, unsupported: unsupported)
+    }
+
+    /// The plays to count, as the model named them, kept only where the app would accept them: day names become weekday numbers, months
+    /// must be 1–12, hours 0–23 and both given, weather and temperature names one of the app's own. Anything that doesn't fit is dropped
+    /// and explained, never kept; what is left still applies.
+    static func playFilter(_ wire: AskWire.PlayFilter?, dropped: inout [AskInterpretation.Dropped], knownCities: [String]? = nil) -> QueryPlayFilter? {
+        guard let wire, !wire.isEmpty else { return nil }
+        var filter = QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil)
+
+        var weekdays: [Int] = []
+        for name in wire.weekdays ?? [] {
+            let lowered = name.lowercased()
+            if let index = QueryPlayFilter.dayNames.firstIndex(where: { $0.lowercased() == lowered || (lowered.count >= 3 && $0.lowercased().hasPrefix(lowered)) }) {
+                if !weekdays.contains(index) { weekdays.append(index) }
+            } else {
+                dropped.append(.init(what: "the day “\(name)”", reason: "not a day of the week"))
+            }
+        }
+        if !weekdays.isEmpty { filter.weekdays = weekdays.sorted() }
+
+        var months: [Int] = []
+        for month in wire.months ?? [] {
+            if (1...12).contains(month) { if !months.contains(month) { months.append(month) } }
+            else { dropped.append(.init(what: "the month \(month)", reason: "months run from 1 (January) to 12 (December)")) }
+        }
+        if !months.isEmpty { filter.months = months.sorted() }
+
+        switch (wire.fromHour, wire.toHour) {
+        case (nil, nil): break
+        case (let from?, let to?) where (0...23).contains(from) && (0...23).contains(to):
+            filter.fromHour = from
+            filter.toHour = to
+        case (let from?, let to?):
+            dropped.append(.init(what: "the hours \(from) to \(to)", reason: "hours run from 0 to 23"))
+        default:
+            dropped.append(.init(what: "an hour range", reason: "an hour range needs both a start and an end"))
+        }
+
+        var conditions: [String] = []
+        for name in wire.weather ?? [] {
+            if let condition = weatherCondition(named: name) { if !conditions.contains(condition.rawValue) { conditions.append(condition.rawValue) } }
+            else { dropped.append(.init(what: "the weather “\(name)”", reason: "not Clear, Cloudy, Fog, Rain, Snow or Thunderstorm")) }
+        }
+        if !conditions.isEmpty { filter.weatherConditions = WeatherCondition.allCases.map(\.rawValue).filter(conditions.contains) }
+
+        var bands: [String] = []
+        for name in wire.temperature ?? [] {
+            if let band = TemperatureBand.allCases.first(where: { $0.rawValue.lowercased() == name.lowercased() }) { if !bands.contains(band.rawValue) { bands.append(band.rawValue) } }
+            else { dropped.append(.init(what: "the temperature “\(name)”", reason: "not Cold, Mild or Hot")) }
+        }
+        if !bands.isEmpty { filter.temperatureBands = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains) }
+
+        // Cities: only places the person has set (home and trips), matched ignoring case and accents, and written the app's way.
+        var cities: [String] = []
+        let known = knownCities ?? WeatherLocations.knownCities()
+        for name in wire.city ?? [] {
+            if let city = WeatherLocations.match(name, in: known) { if !cities.contains(city) { cities.append(city) } }
+            else {
+                let places = known.isEmpty ? "no home place is set in Settings › Weather" : "your places are " + known.joined(separator: ", ")
+                dropped.append(.init(what: "the city “\(name)”", reason: "not a place you have listened in (\(places))"))
+            }
+        }
+        if !cities.isEmpty { filter.cities = cities }
+
+        return filter.isEmpty ? nil : filter
+    }
+
+    /// A weather word as a person or a model might write it: the app's own names, plus the ones that mean the same.
+    private static func weatherCondition(named name: String) -> WeatherCondition? {
+        let lowered = name.lowercased()
+        if let exact = WeatherCondition.allCases.first(where: { $0.rawValue.lowercased() == lowered }) { return exact }
+        switch lowered {
+        case "rainy", "raining", "rains", "drizzle", "showers", "wet": return .rain
+        case "snowy", "snowing", "snows": return .snow
+        case "storm", "storms", "stormy", "thunder", "thunderstorms": return .thunderstorm
+        case "sunny", "sun", "sunshine", "fine": return .clear
+        case "overcast", "cloud", "clouds", "grey", "gray": return .cloudy
+        case "foggy", "mist", "misty": return .fog
+        default: return nil
+        }
     }
 
     /// The most results one cap may keep.

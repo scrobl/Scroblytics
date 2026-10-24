@@ -51,6 +51,7 @@ struct TrackDetailView: View {
                         onEditDuration: { showingDurationEdit = true },
                         onEditTempo: { showingBPMEdit = true }
                     ),
+                    shareWeather: EntityWeatherLean.fact(for: model.weatherLean),
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -66,7 +67,7 @@ struct TrackDetailView: View {
                 }
 
                 if !model.scrobbleHistory.isEmpty {
-                    scrobbleHistorySection
+                    TrackPlaysList(history: model.scrobbleHistory, weather: model.weather, unit: WeatherSettings.temperatureUnit())
                 }
             }
             .padding()
@@ -75,7 +76,8 @@ struct TrackDetailView: View {
         .navigationTitle(identity.name)
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { return }
+            // The weather may have changed meanwhile (a trip added, a download finished): that alone is read again.
+            if model.isLoaded(for: identity.id) { await model.loadWeather(); await model.loadWeatherLean(range: range); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
@@ -86,7 +88,9 @@ struct TrackDetailView: View {
             async let tags: Void = model.loadTags()
             async let duration: Void = model.loadDuration()
             async let release: Void = model.loadReleaseDate()
-            _ = await (ranks, tags, duration, release)
+            async let weather: Void = model.loadWeather()
+            async let lean: Void = model.loadWeatherLean(range: current)
+            _ = await (ranks, tags, duration, release, weather, lean)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
@@ -96,6 +100,7 @@ struct TrackDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             Task { await refreshAfterSync() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await model.loadWeather(); await model.loadWeatherLean(range: range) } }
         .onReceive(NotificationCenter.default.publisher(for: BPMEngine.progressNotification)) { _ in model.loadBPM() }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await model.loadDuration() }
@@ -133,6 +138,7 @@ struct TrackDetailView: View {
         let current = range
         model.loadStats(range: current)
         model.loadScrobbleHistory(range: current)
+        Task { await model.loadWeatherLean(range: current) }
     }
 
     private func refreshAfterSync() async {
@@ -140,31 +146,5 @@ struct TrackDetailView: View {
         reloadForRange()
         await model.loadYearlyTopRanks()
         await model.loadReleaseDate()
-    }
-
-    // MARK: - Plays
-
-    private var scrobbleHistorySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(model.scrobbleHistory.count.formatted()) plays").font(AppTypography.sectionTitle)
-            VStack(spacing: 0) {
-                ForEach(model.scrobbleHistory) { entry in
-                    scrobbleRow(entry)
-                    if entry.id != model.scrobbleHistory.last?.id { Divider() }
-                }
-            }
-        }
-    }
-
-    private func scrobbleRow(_ entry: ScrobbleHistoryEntry) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "clock").font(AppTypography.supporting).foregroundStyle(.tertiary)
-            Text(entry.playedAt.formatted(date: .abbreviated, time: .omitted) + (entry.album.map { " · \($0)" } ?? ""))
-                .lineLimit(1)
-            Spacer()
-            Text(entry.playedAt.formatted(date: .omitted, time: .shortened))
-                .font(AppTypography.metadata).foregroundStyle(.secondary).monospacedDigit()
-        }
-        .padding(.vertical, 6)
     }
 }

@@ -54,6 +54,8 @@ enum QueryCellStyle: Sendable, Hashable {
     case listeningTime
     /// Beats per minute, "128" or "127.9".
     case tempo
+    /// Degrees in the unit chosen in Settings › Weather, "12.3 °C" / "54.1 °F".
+    case temperature
     case custom(String)
 }
 

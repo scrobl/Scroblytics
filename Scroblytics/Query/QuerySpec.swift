@@ -50,11 +50,55 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// nil = every hour.
     var fromHour: Int?
     var toHour: Int?
+    /// Calendar months, 1 = January … 12 = December, of any year ("winter" is 12, 1, 2). nil or empty = every month. Optional, and last, so
+    /// sets saved before it existed decode unchanged.
+    var months: [Int]?
+    /// Only plays made in one of these kinds of weather (`WeatherCondition` names: "Rain", "Snow"…), at the home place's weather for the hour
+    /// of the play. nil or empty = any weather.
+    var weatherConditions: [String]?
+    /// Only plays made when it was one of these for the place (`TemperatureBand` names: "Cold", "Mild", "Hot"). Combined with
+    /// `weatherConditions` as "and": cold rain or cold snow.
+    var temperatureBands: [String]?
+    /// Only plays made when the temperature was at least `temperatureFrom` and below `temperatureTo` (°C, either may be left out). What
+    /// a Trends weather cell opens: its own range of temperatures, which the three bands can't say. Not in the builder's chips.
+    var temperatureFrom: Double?
+    var temperatureTo: Double?
+    /// Only plays made in one of these cities (the home place's or a trip's short name, "Seattle", "Munich"), wherever the person was at the
+    /// time of the play. nil or empty = anywhere. Optional, and last, so sets saved before it existed decode unchanged.
+    var cities: [String]?
 
-    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil }
+    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather && !usesCity }
 
-    func matches(_ date: Date, calendar: Calendar = AppCalendars.listening) -> Bool {
+    /// Whether the filter looks at where the play was made, so counting plays needs the home place and trips.
+    var usesCity: Bool { !(cities ?? []).isEmpty }
+
+    /// Whether the filter looks at the weather, so counting plays needs it.
+    var usesWeather: Bool { !(weatherConditions ?? []).isEmpty || !(temperatureBands ?? []).isEmpty || temperatureFrom != nil || temperatureTo != nil }
+
+    /// Whether a play at `date` passes. A weather filter needs the weather for that hour: with none (weather off, not downloaded, or an
+    /// hour before the downloaded years) the play does not match, rather than being counted as if it did.
+    func matches(_ date: Date, calendar: Calendar = AppCalendars.listening, weather: WeatherSnapshot = .empty) -> Bool {
         if let weekdays, !weekdays.isEmpty, !weekdays.contains(calendar.component(.weekday, from: date) - 1) { return false }
+        if let months, !months.isEmpty, !months.contains(calendar.component(.month, from: date)) { return false }
+        if let cities, !cities.isEmpty {
+            guard let city = weather.city(at: date) else { return false }
+            let key = PlaceNames.key(city)
+            guard cities.contains(where: { PlaceNames.key($0) == key }) else { return false }
+        }
+        if usesWeather {
+            guard let sample = weather.sample(at: date) else { return false }
+            if let conditions = weatherConditions, !conditions.isEmpty {
+                guard let condition = sample.condition, conditions.contains(condition.rawValue) else { return false }
+            }
+            if let bands = temperatureBands, !bands.isEmpty {
+                guard let band = weather.band(for: sample), bands.contains(band.rawValue) else { return false }
+            }
+            if temperatureFrom != nil || temperatureTo != nil {
+                guard let temperature = sample.temperature else { return false }
+                if let temperatureFrom, temperature < temperatureFrom { return false }
+                if let temperatureTo, temperature >= temperatureTo { return false }
+            }
+        }
         if let from = fromHour, let to = toHour {
             let hour = calendar.component(.hour, from: date)
             return from <= to ? (hour >= from && hour <= to) : (hour >= from || hour <= to)
@@ -64,6 +108,13 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
 
     func validate() throws {
         if let weekdays, weekdays.contains(where: { !(0...6).contains($0) }) { throw QueryError.unsupported("a weekday outside Sunday–Saturday") }
+        if let months, months.contains(where: { !(1...12).contains($0) }) { throw QueryError.unsupported("a month outside January–December") }
+        if let weatherConditions, weatherConditions.contains(where: { WeatherCondition(rawValue: $0) == nil }) { throw QueryError.unsupported("a kind of weather that isn’t Clear, Cloudy, Fog, Rain, Snow or Thunderstorm") }
+        if let temperatureBands, temperatureBands.contains(where: { TemperatureBand(rawValue: $0) == nil }) { throw QueryError.unsupported("a temperature band that isn’t Cold, Mild or Hot") }
+        if let temperatureFrom, !temperatureFrom.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
+        if let temperatureTo, !temperatureTo.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
+        if let temperatureFrom, let temperatureTo, temperatureFrom >= temperatureTo { throw QueryError.unsupported("a temperature range that ends before it starts") }
+        if let cities, cities.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { throw QueryError.unsupported("a city with no name") }
         if (fromHour == nil) != (toHour == nil) { throw QueryError.unsupported("an hour range needs both a start and an end") }
         if let fromHour, let toHour, !(0...23).contains(fromHour) || !(0...23).contains(toHour) { throw QueryError.unsupported("hours run from 0 to 23") }
     }
@@ -74,17 +125,47 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         hour == 0 ? "12 AM" : hour == 12 ? "12 PM" : hour < 12 ? "\(hour) AM" : "\(hour - 12) PM"
     }
 
-    /// "Sunday, Saturday, 5 AM–11 AM" — how the filter reads in the builder and in chips.
-    var label: String {
+    /// "Sunday, Saturday, Winter, 5 AM–11 AM" — how the filter reads in the builder and in chips. Three months that make up a season read as
+    /// the season's name (in the hemisphere chosen in Settings).
+    func label(hemisphere: Hemisphere = SeasonSettings.hemisphere) -> String {
         var parts: [String] = []
         if let weekdays, !weekdays.isEmpty {
             parts.append(weekdays.sorted().map { Self.dayNames[$0] }.joined(separator: ", "))
         }
+        if let months, !months.isEmpty {
+            if let season = Season.matching(months: months, in: hemisphere) {
+                parts.append("\(season.label) (\(season.rangeLabel(in: hemisphere)))")
+            } else {
+                parts.append(Set(months).sorted().map { MonthNames.short[$0 - 1] }.joined(separator: ", "))
+            }
+        }
         if let fromHour, let toHour {
             parts.append(fromHour == toHour ? Self.hourLabel(fromHour) : "\(Self.hourLabel(fromHour))–\(Self.hourLabel(toHour))")
         }
+        if let cities, !cities.isEmpty {
+            parts.append("in " + cities.joined(separator: " or "))
+        }
+        if let conditions = weatherConditions, !conditions.isEmpty {
+            let ordered = WeatherCondition.allCases.map(\.rawValue).filter(conditions.contains).map { $0.lowercased() }
+            parts.append("in " + ordered.joined(separator: " or "))
+        }
+        if let bands = temperatureBands, !bands.isEmpty {
+            let ordered = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains).map { $0.lowercased() }
+            parts.append("when " + ordered.joined(separator: " or "))
+        }
+        if temperatureFrom != nil || temperatureTo != nil {
+            let unit = WeatherSettings.temperatureUnit()
+            switch (temperatureFrom, temperatureTo) {
+            case (let from?, let to?): parts.append("from \(unit.text(celsius: from)) to \(unit.text(celsius: to))")
+            case (let from?, nil): parts.append("at \(unit.text(celsius: from)) or warmer")
+            case (nil, let to?): parts.append("below \(unit.text(celsius: to))")
+            case (nil, nil): break
+            }
+        }
         return parts.joined(separator: ", ")
     }
+
+    var label: String { label() }
 }
 
 /// "For each calendar year": the query is evaluated separately over each year's plays. (One kind of period for now; the struct leaves room
@@ -121,7 +202,9 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 4: a `playFilter` (only plays on some weekdays / hours). Older sets decode unchanged.
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
-    static let currentSchemaVersion = 5
+    /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. 8: and a range of
+    /// temperatures. 9: and cities. Older sets decode unchanged.
+    static let currentSchemaVersion = 9
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget
@@ -281,13 +364,13 @@ extension QuerySpec {
 
 extension QuerySpec {
     /// The plays this query counts: those inside its `period` and matching its `playFilter`.
-    func countedPlays(_ scrobbles: [ScrobbleSnapshot]) -> [ScrobbleSnapshot] {
+    func countedPlays(_ scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot = .empty) -> [ScrobbleSnapshot] {
         let filter = (playFilter?.isEmpty ?? true) ? nil : playFilter
         guard period != nil || filter != nil else { return scrobbles }
         let calendar = AppCalendars.listening
         return scrobbles.filter { s in
             if let period, s.playedAt < period.from || s.playedAt > period.to { return false }
-            return filter?.matches(s.playedAt, calendar: calendar) ?? true
+            return filter?.matches(s.playedAt, calendar: calendar, weather: weather) ?? true
         }
     }
 }

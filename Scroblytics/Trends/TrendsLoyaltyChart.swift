@@ -48,6 +48,7 @@ struct TrendsLoyaltyChart: View {
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
     private var noun: String { entity.rawValue + "s" }
     private struct ComputeKey: Equatable { let entity: QueryTarget; let spread: LoyaltySpread; let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool; let minPlays: Int; let perQuadrant: Int }
 
     private static let quadrantColors: [LoyaltyQuadrant: Color] = [.lifers: .green, .obsessions: .red, .background: .blue, .passing: .purple]
     private func color(_ q: LoyaltyQuadrant) -> Color { Self.quadrantColors[q] ?? .gray }
@@ -206,6 +207,13 @@ struct TrendsLoyaltyChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(entity: entity, spread: spread, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(entity: entity, spread: spread, metric: metric, inputs: inputs), ready: data != nil, minPlays: minPlays, perQuadrant: perQuadrant)) {
+            guard let data else { return nil }
+            let d = derive(data)
+            guard !d.population.isEmpty else { return nil }
+            let quadrants = LoyaltyQuadrant.allCases.map { (quadrant: $0, count: d.counts[$0] ?? 0, tops: d.tops[$0] ?? []) }
+            return TrendsShareCharts2.loyalty(noun: noun, quadrants: quadrants, population: d.population.count, minPlays: minPlays, metric: metric)
+        }
     }
 
     private var controls: some View {

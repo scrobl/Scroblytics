@@ -24,6 +24,7 @@ struct TrendsView: View {
     @State private var hasAnyPlaysInRange: Bool?
     @State private var volumeInputs: TrendsVolumeChart.Inputs?
     @State private var heatmapInputs: TrendsHeatmapChart.Inputs?
+    @State private var weatherInputs: TrendsWeatherGroup.Inputs?
     @State private var tagsInputs: TrendsTagsChart.Inputs?
     @State private var discoveryInputs: TrendsDiscoveryChart.Inputs?
     @State private var canonicalScrobbles: [ScrobbleSnapshot]?
@@ -76,10 +77,10 @@ struct TrendsView: View {
         }
     }
 
-    /// The page is split into four groups, one shown at a time: it keeps each screen short, and only the charts on
+    /// The page is split into five groups, one shown at a time: it keeps each screen short, and only the charts on
     /// screen are computed, so opening Trends does the work of one group rather than of all ten charts.
     private enum Group: String, CaseIterable, Identifiable {
-        case listening = "Listening", taste = "Taste & eras", habits = "Habits", sequence = "Rankings & flow"
+        case listening = "Listening", weather = "Weather & places", taste = "Taste & eras", habits = "Habits", sequence = "Rankings & flow"
         var id: String { rawValue }
     }
     @AppStorage("trends.group") private var groupRaw = Group.listening.rawValue
@@ -107,7 +108,7 @@ struct TrendsView: View {
                     ForEach(Group.allCases) { Text($0.rawValue).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented).labelsHidden()
-                .help("Trends is split into four groups so each screen stays short and only what you’re looking at is calculated.")
+                .help("Trends is split into five groups so each screen stays short and only what you’re looking at is calculated.")
                 if let errorMessage, hasAnyPlaysInRange == nil {
                     ContentUnavailableView("Failed to load Trends", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
                 } else if let hasAnyPlaysInRange {
@@ -131,6 +132,9 @@ struct TrendsView: View {
                             TrendsSection(title: "Discovery", subtitle: "How much of what you play is new to you", comparison: true) {
                                 TrendsDiscoveryChart(inputs: discoveryInputs, openQuery: openQuery)
                             }
+                        }
+                        if group == .weather, let weatherInputs {
+                            TrendsWeatherGroup(inputs: weatherInputs, openQuery: openQuery)
                         }
                         if group == .sequence, let rankBumpInputs {
                             TrendsSection(title: "Rankings", subtitle: "How the leaders of this period rose and fell") {
@@ -177,6 +181,11 @@ struct TrendsView: View {
             applyOverviewFocus()
         }
         .environment(\.trendsShareInfo, shareInfo)
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in
+            // Weather was downloaded, removed or its unit or hot/cold percentages changed: read it again.
+            querySnapshots = nil
+            requestReload()
+        }
         .onChange(of: settings.selectedRangeId) { requestReload() }
         .onChange(of: groupRaw) { requestReload() }
         .onChange(of: trends.compareMode) { requestReload() }
@@ -275,7 +284,7 @@ struct TrendsView: View {
                 guard latestRequestID == requestID else { return }
                 snapshots = QuerySnapshots(
                     durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover,
-                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, images: loaded.images
+                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, weather: loaded.weather, images: loaded.images
                 )
                 querySnapshots = snapshots
                 dataVersion += 1
@@ -294,6 +303,7 @@ struct TrendsView: View {
             canonicalScrobbles = canonical
             volumeInputs = TrendsVolumeChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             heatmapInputs = TrendsHeatmapChart.Inputs(scrobbles: all, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
+            weatherInputs = TrendsWeatherGroup.Inputs(scrobbles: all, canonical: canonical, imageLookup: snapshots.images.lookup, durations: snapshots.durations, weather: snapshots.weather, range: range, compareRange: compareRange, version: dataVersion)
             discoveryInputs = TrendsDiscoveryChart.Inputs(scrobbles: canonical, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             tagsInputs = TrendsTagsChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             flowInputs = TrendsFlowChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
@@ -331,7 +341,7 @@ struct TrendsSection<Content: View>: View {
                     Text(subtitle).font(AppTypography.metadata).foregroundStyle(.secondary)
                 }
                 Spacer()
-                ShareButton(card: { makeShareCard() }, isEnabled: capture.hasChart)
+                ShareButton(card: { makeShareCard() }, isEnabled: capture.hasChart || capture.native != nil)
                     .controlSize(.small)
             }
             content
@@ -341,6 +351,12 @@ struct TrendsSection<Content: View>: View {
 
     /// A card of the chart as it is drawn now, with the period (and what it is compared with) it covers.
     private func makeShareCard() -> ShareCard? {
+        if let native = capture.native {
+            return ShareCard(
+                title: title, period: shareInfo.period, measure: comparison ? (shareInfo.compare ?? "") : "", rows: [], valueLabel: "", hasMovement: false,
+                kindID: "trends." + title.lowercased().replacingOccurrences(of: " ", with: "-") + ".native", native: native
+            )
+        }
         guard let image = capture.image() else { return nil }
         // A chart that states its own comparison with the number carries it there; otherwise the card names what it is compared with.
         let summary = capture.summary

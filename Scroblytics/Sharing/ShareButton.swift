@@ -142,7 +142,10 @@ private struct SharePopover: View {
 
     @ViewBuilder
     private var previewView: some View {
-        let ratio = options.size.points.width / options.size.points.height
+        // A fitted chart card has the shape of the picture the renderer made, not of a chosen size.
+        let ratio: CGFloat = card.fitsChart(for: options) && preview != nil
+            ? (preview.map { $0.size.width / max(1, $0.size.height) } ?? 1)
+            : options.size.points.width / options.size.points.height
         ZStack {
             RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black.opacity(0.25))
             if let preview {
@@ -192,13 +195,44 @@ private struct SharePopover: View {
         return choices.contains(options.rowCount) ? options.rowCount : (choices.last { $0 <= options.rowCount } ?? choices[0])
     }
 
+    private func flagBinding(_ id: String, _ defaultValue: Bool) -> Binding<Bool> {
+        Binding(get: { options.flag(id, defaultValue) }, set: { options.flags[id] = $0 })
+    }
+
+    /// One include / exclude / choose control of a natively drawn chart card.
+    @ViewBuilder
+    private func nativeControl(_ control: ShareNativeControl) -> some View {
+        switch control.kind {
+        case .toggle(let defaultValue):
+            Toggle(control.label, isOn: flagBinding(control.id, defaultValue))
+        case .count(let range, let defaultValue):
+            Stepper(value: Binding(get: { options.number(control.id, defaultValue) }, set: { options.numbers[control.id] = $0 }), in: range) {
+                Text("\(control.label): \(options.number(control.id, defaultValue))")
+            }
+        case .choice(let choices, let defaultValue):
+            HStack {
+                Text(control.label)
+                Picker(control.label, selection: Binding(get: { options.pick(control.id, defaultValue) }, set: { options.picks[control.id] = $0 })) {
+                    ForEach(choices, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                Spacer()
+            }
+        }
+    }
+
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Size", selection: $options.size) {
-                ForEach(ShareSize.allCases) { Text($0.label).tag($0) }
+            if card.snapshot != nil {
+                Toggle("Shape the card to the chart", isOn: $options.fitToChart)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            if !card.fitsChart(for: options) {
+                Picker("Size", selection: $options.size) {
+                    ForEach(ShareSize.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
             if card.isList {
                 HStack {
                     Picker("Rows", selection: Binding(get: { shownRowCount }, set: { options.rowCount = $0 })) {
@@ -215,9 +249,16 @@ private struct SharePopover: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
-            if card.isList {
-                TextField("Title", text: $options.customTitle, prompt: Text(card.title))
+            TextField("Title", text: $options.customTitle, prompt: Text(card.title))
+                .textFieldStyle(.roundedBorder)
+            TextField("Subtitle", text: $options.customSubtitle, prompt: Text(card.displaySubtitle(for: ShareOptions()).isEmpty ? "Add a line under the title" : card.displaySubtitle(for: ShareOptions())))
+                .textFieldStyle(.roundedBorder)
+            if let native = card.native {
+                TextField("Caption", text: $options.customCaption, prompt: Text(native.caption))
                     .textFieldStyle(.roundedBorder)
+                Toggle("Show the caption", isOn: flagBinding("caption", true))
+                ForEach(native.controls) { control in nativeControl(control) }
+                if native.footnote != nil { Toggle("Show how it’s worked out", isOn: flagBinding("footnote", false)) }
             }
             if card.iconChoice {
                 HStack {
@@ -255,6 +296,9 @@ private struct SharePopover: View {
             }
             if card.hasNotes && !card.drawsTree(for: options) {
                 Toggle("Show why each track was chosen", isOn: $options.showNotes)
+            }
+            if card.hasWeather {
+                Toggle("Include the weather it’s played in", isOn: $options.showWeather)
             }
             Toggle("Show today’s date", isOn: $options.showDate)
             if card.hasMovement {

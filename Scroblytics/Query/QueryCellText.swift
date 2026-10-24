@@ -26,6 +26,7 @@ enum QueryCellText {
         case (.year, .number(let n)): return String(Int(n))
         case (.runtime, .number(let n)): return DurationEngine.formatDuration(Int(n))
         case (.tempo, .number(let n)): return BPMEngine.format(n)
+        case (.temperature, .number(let n)): return WeatherSettings.temperatureUnit().text(shown: n, places: 1)
         case (.listeningTime, .number(let n)): return DurationEngine.formatTimeListened(Int(n))
         case (.percent, .number(let n)): return n.formatted(.percent.precision(.fractionLength(0)))
         case (.date, .date(let d)): return date(d, fieldID: column.field.id)

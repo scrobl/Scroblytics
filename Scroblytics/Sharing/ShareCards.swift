@@ -44,10 +44,13 @@ enum ShareCards {
     ) -> ShareCard? {
         guard let stats else { return nil }
         let shown = DetailHeaderCard<EmptyView>.headline(stats: stats, metric: metric, timeListenedSeconds: timeListenedSeconds) + facts
-        let tiles = shown.compactMap { fact -> ShareStat? in
+        func stat(_ fact: DetailFact) -> ShareStat? {
             guard fact.hasValue, fact.displayText != "—" else { return nil }
             return ShareStat(label: fact.label, value: fact.displayText)
         }
+        // The weather tile is optional on the card, so it is kept out of the ordinary tiles.
+        let tiles = shown.filter { $0.id != "weather" }.compactMap(stat)
+        let weather = shown.first { $0.id == "weather" }.flatMap(stat)
         var chips = yearlyTopRanks.map { ShareChip(kind: .rank, text: "#\($0.rank) of \($0.year)") }
         for milestone in stats.milestones.achieved.sorted(by: { $0.milestone > $1.milestone }).prefix(3) {
             let date = milestone.achievedAt.formatted(date: .abbreviated, time: .omitted)
@@ -76,7 +79,7 @@ enum ShareCards {
             generatedAt: now,
             kindID: "page.\(entity.rawValue)",
             profile: ShareProfile(
-                kind: kind, subtitle: subtitle, heroImageURL: imageURL, stats: tiles, chips: chips, trend: stats.trend.map(\.count)
+                kind: kind, subtitle: subtitle, heroImageURL: imageURL, stats: tiles, chips: chips, trend: stats.trend.map(\.count), weather: weather
             )
         )
     }

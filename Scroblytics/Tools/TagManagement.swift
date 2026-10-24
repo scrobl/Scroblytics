@@ -297,11 +297,11 @@ enum TagQuerySource {
         let snapshots = QuerySnapshots(
             popularity: popularity?.snapshot ?? .empty, durations: loaded.durations, releaseDates: loaded.releaseDates,
             turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, flaggedKeys: loaded.flaggedKeys,
-            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, images: loaded.images
+            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, weather: loaded.weather, images: loaded.images
         )
         let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
             let asOf = validated.spec.asOf ?? Date()
-            let run = QueryRun(target: .track, asOf: asOf, scrobbles: validated.spec.countedPlays(scrobbles), allTimeScrobbles: scrobbles, snapshots: snapshots)
+            let run = QueryRun(target: .track, asOf: asOf, scrobbles: validated.spec.countedPlays(scrobbles, weather: snapshots.weather), allTimeScrobbles: scrobbles, snapshots: snapshots)
             return QueryEngine.evaluate(validated, run: run)
         }.value
         return result.rows.compactMap { row in

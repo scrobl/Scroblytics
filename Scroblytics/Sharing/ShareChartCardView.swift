@@ -8,12 +8,26 @@ struct ShareChartCardView: View {
     let options: ShareOptions
     let identity: ShareIdentity
 
-    private var size: CGSize { options.size.points }
+    private var fitted: Bool { card.fitsChart(for: options) }
+    private var size: CGSize { fitted ? CGSize(width: card.fittedWidth, height: 0) : options.size.points }
     private let margin: CGFloat = 64
 
     var body: some View {
+        if fitted {
+            content
+                .background { GeometryReader { proxy in ShareCardBackground(size: proxy.size, imageURL: nil, images: [:]) } }
+                .frame(width: size.width)
+                .environment(\.colorScheme, .dark)
+        } else {
+            content
+                .background { ShareCardBackground(size: size, imageURL: nil, images: [:]) }
+                .frame(width: size.width, height: size.height)
+                .environment(\.colorScheme, .dark)
+        }
+    }
+
+    private var content: some View {
         ZStack {
-            ShareCardBackground(size: size, imageURL: nil, images: [:])
             VStack(alignment: .leading, spacing: 0) {
                 ShareListHeader(card: card, options: options)
                     .padding(.bottom, card.chartSummary == nil ? 28 : 18)
@@ -27,28 +41,28 @@ struct ShareChartCardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: fitted ? nil : .infinity)
                 if ShareCardFooter.isShown(identity) { ShareCardFooter(identity: identity).padding(.top, 20) }
             }
             .padding(margin)
         }
-        .frame(width: size.width, height: size.height)
-        .environment(\.colorScheme, .dark)
     }
 
     /// The headline number, with how it compares in green or red.
     private func summaryView(_ summary: ShareChartSummary) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(summary.headline)
-                .font(.system(size: 58, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
+            if !summary.headline.isEmpty {
+                Text(summary.headline)
+                    .font(.system(size: 58, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
             if let detail = summary.detail {
                 Text(detail)
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.7))
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             if !summary.legend.isEmpty {
                 TagFlowLayout(spacing: 22) {

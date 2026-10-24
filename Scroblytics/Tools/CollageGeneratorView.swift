@@ -326,10 +326,9 @@ struct CollageGeneratorView: View {
         renderer.proposedSize = ProposedViewSize(size)
         renderer.scale = 1
 
-        guard let image = renderer.nsImage,
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
-        return bitmap.representation(using: .png, properties: [:])
+        // Straight from the renderer's bitmap (a round trip through an NSImage's TIFF kept a copy of the picture alive for every export).
+        guard let image = renderer.cgImage else { return nil }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
     }
 
     @MainActor

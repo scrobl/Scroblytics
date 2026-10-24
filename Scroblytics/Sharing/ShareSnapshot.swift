@@ -41,6 +41,8 @@ final class ShareChartCapture {
     private(set) var hasChart = false
     /// The chart's headline numbers, set by the chart when it has computed them (nil for a chart that has none to give).
     var summary: ShareChartSummary?
+    /// The chart drawn for a card, when it can be (the Share button then makes that instead of a picture of the window).
+    var native: ShareNativeChart?
 
     fileprivate func register(_ view: NSView) {
         anchor = view

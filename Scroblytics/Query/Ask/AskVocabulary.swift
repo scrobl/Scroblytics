@@ -136,7 +136,8 @@ enum AskVocabulary {
         its operand. Use only field ids from the list. Never invent a field.
         - Only include what the request says. Do not add conditions it did not ask for. Do not repeat a condition.\(orderedNote)
         - A request about a day of the week or a time of day ("my Sunday morning artists", "Friday night albums") is \
-        expressed by combining the day-of-week field with the time-of-day field.\(tagNote)
+        expressed by combining the day-of-week field with the time-of-day field. A request about a season ("my winter \
+        songs", "artists I play in summer") uses the season field with Winter, Spring, Summer or Autumn.\(tagNote)
         - If the request asks about something no field measures — mood, feeling, lyrics, how a song sounds, similarity \
         to another artist — write it in "unsupported" and do NOT substitute a different field for it.
         - Date operands are calendar days written \(dateFormat); "before 2022" ends at 2021-12-31, "in 2022" spans \
@@ -177,6 +178,8 @@ struct AskContext: Sendable {
     var knownTags: Set<String>?
     /// Every artist name in the library, for validating a code-read "by <artist>" — never shown to the model.
     var knownArtists: Set<String>?
+    /// The cities the person has set (home and trips), for checking a city a model names; nil reads them from the settings.
+    var knownCities: [String]?
     var earliest: Date?
     /// For finding the library item a "similar to X" request names.
     var container: ModelContainer?

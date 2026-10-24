@@ -165,6 +165,9 @@ struct QueryView: View {
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in
+            if isActive { model.refreshSnapshots() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: BPMEngine.progressNotification)) { _ in
             if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
@@ -758,11 +761,11 @@ struct QueryView: View {
                     DatePicker("To", selection: Binding(get: { period.to }, set: { model.spec.period?.to = $0 }), displayedComponents: .date)
                         .help("Last day whose plays count.")
                 }
-                Toggle("Only count plays on certain days or hours", isOn: Binding(
+                Toggle("Only count plays at certain times or in certain weather", isOn: Binding(
                     get: { model.spec.playFilter != nil },
                     set: { model.spec.playFilter = $0 ? QueryPlayFilter(weekdays: [], fromHour: nil, toHour: nil) : nil }
                 ))
-                .help("Ignore plays made on other days of the week or at other times of day before anything is counted — “Sunday mornings” means the plays made then. Uses your local time.")
+                .help("Ignore plays made on other days of the week, in other months, at other times of day or in other weather before anything is counted — “Sunday mornings”, “winter” or “rainy hours” mean the plays made then, in every year. Days and times use your local time; weather is the weather at your home place (Settings › Weather).")
                 if let filter = model.spec.playFilter {
                     PlayFilterEditor(filter: Binding(get: { filter }, set: { model.spec.playFilter = $0 }))
                 }
@@ -1407,11 +1410,154 @@ extension QueryView {
 }
 
 
-/// Weekday chips (Sun–Sat, none picked = every day) and an optional hour range.
-private struct PlayFilterEditor: View {
+/// Weekday chips (Sun–Sat, none picked = every day), season and month chips (none picked = every month) and an optional hour range.
+struct PlayFilterEditor: View {
     @Binding var filter: QueryPlayFilter
+    @AppStorage(SeasonSettings.hemisphereKey) private var hemisphereRaw = Hemisphere.north.rawValue
+    @AppStorage(WeatherSettings.enabledKey) private var weatherEnabled = false
+    @State private var weatherStatus = WeatherStatus.shared
+    /// Home and trip cities, read from the settings (not from the weather download).
+    @State private var knownCities: [String] = WeatherLocations.knownCities()
 
     private let days = ["S", "M", "T", "W", "T", "F", "S"]
+    private var hemisphere: Hemisphere { Hemisphere(rawValue: hemisphereRaw) ?? .north }
+
+    private func chip(_ text: String, on: Bool, width: CGFloat, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .frame(width: width, height: 24)
+                .background(on ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(on ? Color.white : Color.primary)
+                .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// Season chips set the three months of that season; a chip shows as on when exactly those months are chosen.
+    private var seasonChips: some View {
+        HStack(spacing: 4) {
+            ForEach(Season.allCases) { season in
+                let months = season.months(in: hemisphere)
+                let on = Set(filter.months ?? []) == Set(months)
+                chip(season.label, on: on, width: 58, help: "\(season.label): \(season.rangeLabel(in: hemisphere)) (\(hemisphere.label.lowercased()); change it in Settings › General)") {
+                    filter.months = on ? [] : months
+                }
+            }
+        }
+    }
+
+    /// Kinds of weather and temperature bands: a play counts if its hour's weather is any of the chosen kinds AND (when bands are chosen)
+    /// any of the chosen bands.
+    private var weatherChips: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("In this weather").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            ForEach([[WeatherCondition.rain, .snow, .fog], [.thunderstorm, .clear, .cloudy]], id: \.first) { row in
+                HStack(spacing: 4) {
+                    ForEach(row, id: \.self) { condition in
+                        let on = filter.weatherConditions?.contains(condition.rawValue) ?? false
+                        chip(condition == .thunderstorm ? "Storm" : condition.rawValue, on: on, width: 80, help: condition.rawValue) {
+                            var set = Set(filter.weatherConditions ?? [])
+                            if on { set.remove(condition.rawValue) } else { set.insert(condition.rawValue) }
+                            filter.weatherConditions = WeatherCondition.allCases.map(\.rawValue).filter(set.contains)
+                        }
+                    }
+                }
+            }
+            Text("How warm it was for your place").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(TemperatureBand.allCases, id: \.self) { band in
+                    let on = filter.temperatureBands?.contains(band.rawValue) ?? false
+                    chip(band.rawValue, on: on, width: 80, help: "\(band.rawValue): judged against your own place’s hourly temperatures (percentages in Settings › Weather)") {
+                        var set = Set(filter.temperatureBands ?? [])
+                        if on { set.remove(band.rawValue) } else { set.insert(band.rawValue) }
+                        filter.temperatureBands = TemperatureBand.allCases.map(\.rawValue).filter(set.contains)
+                    }
+                }
+            }
+            if filter.temperatureFrom != nil || filter.temperatureTo != nil {
+                // Set by clicking a cell in Trends › Weather; shown so a filter is never hidden.
+                HStack(spacing: 6) {
+                    let unit = WeatherSettings.temperatureUnit()
+                    let text: String = {
+                        switch (filter.temperatureFrom, filter.temperatureTo) {
+                        case (let from?, let to?): "Temperature \(unit.text(celsius: from)) to \(unit.text(celsius: to))"
+                        case (let from?, nil): "Temperature \(unit.text(celsius: from)) or warmer"
+                        case (nil, let to?): "Temperature below \(unit.text(celsius: to))"
+                        case (nil, nil): ""
+                        }
+                    }()
+                    Text(text).font(AppTypography.compactMetadata)
+                    Button("Remove") { filter.temperatureFrom = nil; filter.temperatureTo = nil }
+                        .buttonStyle(.link).font(AppTypography.compactMetadata)
+                }
+            }
+            if filter.usesWeather && (!weatherEnabled || weatherStatus.coverageText == nil) {
+                Text("Weather is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather.")
+                    .font(AppTypography.supporting).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Cities: a play counts if it was made in any of the chosen cities (home, or a trip). Shown once a home place is chosen.
+    @ViewBuilder
+    private var cityChips: some View {
+        let chosen = filter.cities ?? []
+        // A chosen city that is no longer in the settings (a trip removed) stays on the list, so a filter is never hidden.
+        let shown = PlaceNames.unique(knownCities + chosen)
+        if !shown.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("In this city").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                TagFlowLayout(spacing: 4) {
+                    ForEach(shown, id: \.self) { city in
+                        let on = chosen.contains { PlaceNames.key($0) == PlaceNames.key(city) }
+                        Button {
+                            var list = chosen.filter { PlaceNames.key($0) != PlaceNames.key(city) }
+                            if !on { list.append(city) }
+                            filter.cities = list
+                        } label: {
+                            Text(city)
+                                .padding(.horizontal, 10)
+                                .frame(height: 24)
+                                .background(on ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(on ? Color.white : Color.primary)
+                                .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Only the plays made in \(city): your home place, or the trip you were on (Settings › Weather)")
+                    }
+                }
+                if filter.usesCity && knownCities.isEmpty {
+                    Text("No home place is set, so no plays can match. Choose one in Settings › Weather.")
+                        .font(AppTypography.supporting).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var monthChips: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(0..<2, id: \.self) { row in
+                HStack(spacing: 4) {
+                    ForEach(0..<6, id: \.self) { column in
+                        let month = row * 6 + column + 1
+                        let on = filter.months?.contains(month) ?? false
+                        chip(MonthNames.short[month - 1], on: on, width: 38, help: MonthNames.full[month - 1]) {
+                            var set = Set(filter.months ?? [])
+                            if on { set.remove(month) } else { set.insert(month) }
+                            filter.months = set.sorted()
+                        }
+                    }
+                }
+            }
+            // On its own line: beside the chips it has no room in the narrow scope panel and wraps a letter at a time.
+            if (filter.months ?? []).isEmpty {
+                Text("every month").foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1434,6 +1580,10 @@ private struct PlayFilterEditor: View {
                 }
                 Text(filter.weekdays?.isEmpty ?? true ? "every day" : "").foregroundStyle(.secondary)
             }
+            seasonChips
+            monthChips
+            cityChips
+            weatherChips
             Toggle("Only certain hours", isOn: Binding(
                 get: { filter.fromHour != nil },
                 set: { filter.fromHour = $0 ? 5 : nil; filter.toHour = $0 ? 11 : nil }
@@ -1447,6 +1597,7 @@ private struct PlayFilterEditor: View {
                 .help("The hours are inclusive: 5 AM through 11 AM covers 5:00 to 11:59. A start after the end wraps past midnight.")
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in knownCities = WeatherLocations.knownCities() }
     }
 
     private func hourMenu(_ title: String, value: Int, set: @escaping (Int) -> Void) -> some View {

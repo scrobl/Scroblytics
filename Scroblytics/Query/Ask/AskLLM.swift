@@ -428,6 +428,14 @@ enum AskPortableSchema {
             "perArtist": nullable(integer),
             "perAlbum": nullable(integer),
             "perReleaseYear": nullable(integer),
+            // The plays to count, only those made at certain times or in certain weather: flat keys, empty lists / null when none.
+            "playWeekdays": ["type": "array", "items": ["type": "string", "enum": QueryPlayFilter.dayNames], "description": "only plays made on these days of the week; empty for any day"],
+            "playMonths": ["type": "array", "items": integer, "description": "only plays made in these calendar months (1 = January … 12 = December), in any year; empty for any month"],
+            "playFromHour": nullable(integer),
+            "playToHour": nullable(integer),
+            "playWeather": ["type": "array", "items": ["type": "string", "enum": WeatherCondition.allCases.map(\.rawValue)], "description": "only plays made in this weather; empty for any"],
+            "playTemperature": ["type": "array", "items": ["type": "string", "enum": TemperatureBand.allCases.map(\.rawValue)], "description": "only plays made when it was this warm for the person's place; empty for any"],
+            "playCity": ["type": "array", "items": string, "description": "only plays made in these cities, as the person wrote them (\"Munich\"); empty for anywhere"],
             "unsupported": ["type": "array", "items": string, "description": "Parts of the request no field can express, in plain words."],
             "resolvedTerms": ["type": "array", "items": term, "description": "Vague phrases turned into numbers, e.g. a lot → at least 50 plays."],
             // New music similar to something (Similar Sounds): flat keys, not a nested object, to keep the schema small

@@ -38,6 +38,7 @@ struct TrendsVolumeChart: View {
     @Environment(\.shareChartCapture) private var shareCapture
 
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool; let mode: Mode }
 
     private func value(_ p: TrendsVolume.Point) -> Int { mode == .perPeriod ? p.count : p.cumulative }
     private func compareValue(_ p: TrendsVolume.Point) -> Int? { mode == .perPeriod ? p.compareCount : p.cumulativeCompare }
@@ -93,6 +94,9 @@ struct TrendsVolumeChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(metric: metric, inputs: inputs), ready: volume != nil, mode: mode)) {
+            volume.map { TrendsShareCharts2.volume(volume: $0, metric: metric, mode: mode.rawValue) }
+        }
     }
 
     private func chart(_ volume: TrendsVolume) -> some View {

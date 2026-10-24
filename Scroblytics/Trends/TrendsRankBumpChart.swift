@@ -27,6 +27,7 @@ struct TrendsRankBumpChart: View {
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
     private static let palette: [Color] = [.blue, .green, .orange, .purple, .red, .teal, .pink, .yellow, .indigo, .brown]
     private struct ComputeKey: Equatable { let entity: QueryTarget; let topN: Int; let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -50,6 +51,10 @@ struct TrendsRankBumpChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(entity: entity, topN: topN, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(entity: entity, topN: topN, metric: metric, inputs: inputs), ready: data != nil)) {
+            guard let data, data.buckets.count >= 2 else { return nil }
+            return TrendsShareCharts2.rankings(data: data, metric: metric)
+        }
     }
 
     private var controls: some View {

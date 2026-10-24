@@ -44,6 +44,7 @@ struct ArtistDetailView: View {
                     entity: .artist, name: identity.name, subtitle: nil, tertiary: nil,
                     imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
+                    facts: EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? [],
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -74,7 +75,8 @@ struct ArtistDetailView: View {
             async let ranks: Void = model.loadYearlyTopRanks()
             async let tags: Void = model.loadTags()
             async let time: Void = model.loadTimeListened(range: range)
-            _ = await (ranks, tags, time)
+            async let lean: Void = model.loadWeatherLean(range: range)
+            _ = await (ranks, tags, time, lean)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
@@ -87,12 +89,16 @@ struct ArtistDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await model.loadTimeListened(range: range) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in
+            Task { await model.loadWeatherLean(range: range) }
+        }
     }
 
     private func reloadForRange() {
         let current = range
         model.loadStats(range: current)
         Task { await model.loadTimeListened(range: current) }
+        Task { await model.loadWeatherLean(range: current) }
     }
 
     private func refreshAfterSync() async {

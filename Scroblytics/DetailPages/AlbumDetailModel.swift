@@ -51,9 +51,21 @@ final class AlbumDetailModel {
     var turnoverState = AlbumTurnoverState.unavailable
     var currentGroup: AlbumGroup?
 
+    /// What weather this album is played in more than usual (Settings › Weather); no tile unless there is something to say.
+    var weatherLean = EntityWeatherLean.Result.unavailable
+
+    func loadWeatherLean(range: DateRange) async {
+        guard let context else { return }
+        let requested = identity
+        let result = await EntityWeatherLeanLoader.album(container: context.container, artist: requested.artist, album: requested.name, range: range)
+        guard !Task.isCancelled, identity.id == requested.id else { return }
+        weatherLean = result
+    }
+
     func bind(identity: AlbumIdentity, context: ModelContext) {
         self.identity = identity
         self.context = context
+        weatherLean = .unavailable
         stats = nil
         errorMessage = nil
         yearlyTopRanks = []

@@ -150,5 +150,5 @@ extension QueryFieldRegistry {
 
     // MARK: The registry the app uses
 
-    static let standard = QueryFieldRegistry(fields: coreFields + fadingFields + popularityFields + durationFields + bpmFields + releaseDateFields + climbingFields + milestoneFields + turnoverFields + lovedFields + libraryFields + flaggedFields + tagFields + imageFields + matchFields + editionFields)
+    static let standard = QueryFieldRegistry(fields: coreFields + fadingFields + popularityFields + durationFields + bpmFields + releaseDateFields + climbingFields + milestoneFields + turnoverFields + lovedFields + libraryFields + flaggedFields + tagFields + imageFields + matchFields + editionFields + weatherFields)
 }

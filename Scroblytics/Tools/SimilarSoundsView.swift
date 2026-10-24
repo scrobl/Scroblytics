@@ -317,7 +317,7 @@ struct SimilarSoundsView: View {
             snapshots = QuerySnapshots(
                 popularity: popularityStore.snapshot, durations: loaded.durations, releaseDates: loaded.releaseDates,
                 turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, flaggedKeys: loaded.flaggedKeys, entityTags: loaded.entityTags,
-                libraryPresence: loaded.libraryPresence, images: loaded.images
+                libraryPresence: loaded.libraryPresence, weather: loaded.weather, images: loaded.images
             )
             tagVocabulary = loaded.entityTags.vocabulary.map { QueryTagSuggestion(tag: $0.tag, items: $0.items) }
         } catch {

@@ -62,8 +62,8 @@ enum ShareText {
 
     private static func profileHeader(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity, markdown: Bool) -> String {
         let text: (String) -> String = { markdown ? escape($0) : $0 }
-        let subtitle = card.profile?.subtitle ?? ""
-        var line = markdown ? "**\(text(card.title))**" : card.title
+        let subtitle = card.displaySubtitle(for: options)
+        var line = markdown ? "**\(text(card.displayTitle(for: options)))**" : card.displayTitle(for: options)
         if !subtitle.isEmpty { line += " — \(text(subtitle))" }
         line += " · \(text(card.period))"
         if options.showDate { line += " · \(text(dateText(card)))" }
@@ -133,8 +133,29 @@ enum ShareText {
         return text
     }
 
+    /// A chart drawn for the card: its title and period, the sentence about it (unless left off) and its lines (the rows it shows).
+    private static func nativeText(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity, markdown: Bool) -> String {
+        guard let native = card.native else { return "" }
+        let text: (String) -> String = { markdown ? escape($0) : $0 }
+        var head = markdown ? "**\(text(card.displayTitle(for: options)))**" : card.displayTitle(for: options)
+        let subtitle = card.displaySubtitle(for: options)
+        if !subtitle.isEmpty { head += " — \(text(subtitle))" }
+        if !card.period.isEmpty { head += " · \(text(card.period))" }
+        if options.showDate { head += " · \(text(dateText(card)))" }
+        if let name = identity.name, !name.isEmpty { head += " · \(text(name))" }
+        var lines = [head]
+        let caption = native.displayCaption(for: options)
+        if options.showsCaption, !caption.isEmpty { lines += ["", text(caption)] }
+        if !native.textLines.isEmpty { lines.append("") }
+        lines += native.textLines.map { (markdown ? "- " : "• ") + text($0) }
+        if options.showsFootnote, let footnote = native.footnote { lines += ["", text(footnote)] }
+        if identity.showsFooter { lines += ["", markdown ? "^(made with Scroblytics)" : "Made with Scroblytics"] }
+        return lines.joined(separator: "\n")
+    }
+
     /// A numbered Markdown list, one row per line.
     static func markdownList(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
+        if card.native != nil { return nativeText(card, options: options, identity: identity, markdown: true) }
         if card.profile != nil { return profileList(card, options: options, identity: identity, markdown: true) }
         var lines = header(card, options: options, identity: identity) + [""]
         lines += card.visibleRows(for: options).map { line($0, options: options, card: card) }
@@ -144,6 +165,7 @@ enum ShareText {
 
     /// A Markdown table, which Reddit renders as a table.
     static func markdownTable(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
+        if card.native != nil { return nativeText(card, options: options, identity: identity, markdown: true) }
         if card.profile != nil { return profileTable(card, options: options, identity: identity) }
         let hasSubtitle = card.rows.contains { $0.subtitle?.isEmpty == false }
         let showsMovement = options.showMovement && card.hasMovement
@@ -170,6 +192,7 @@ enum ShareText {
 
     /// Plain text with no formatting characters.
     static func plain(_ card: ShareCard, options: ShareOptions, identity: ShareIdentity = .anonymous) -> String {
+        if card.native != nil { return nativeText(card, options: options, identity: identity, markdown: false) }
         if card.profile != nil { return profileList(card, options: options, identity: identity, markdown: false) }
         var title = card.displayTitle(for: options)
         if !card.period.isEmpty { title += " — \(card.period)" }

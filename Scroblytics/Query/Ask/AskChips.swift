@@ -16,7 +16,15 @@ struct AskChip: Identifiable, Hashable, Sendable {
 /// title (which already carries its parameters and date scope), the operator's label, and each operand in
 /// the unit a person would say it in.
 enum AskChips {
-    static func describe(_ spec: QuerySpec, registry: QueryFieldRegistry) -> [AskChip] {
+    /// Whether weather has been turned on, a place chosen and something downloaded: a weather filter can match nothing before that.
+    static var weatherReady: Bool {
+        WeatherSettings.isEnabled() && WeatherSettings.place() != nil && UserDefaults.standard.object(forKey: WeatherSettings.lastUpdateKey) != nil
+    }
+
+    /// Whether a home place is set with weather on: a city filter can match nothing before that (it needs no download).
+    static var cityReady: Bool { WeatherSettings.isEnabled() && WeatherSettings.place() != nil }
+
+    static func describe(_ spec: QuerySpec, registry: QueryFieldRegistry, weatherReady: Bool = AskChips.weatherReady, cityReady: Bool = AskChips.cityReady) -> [AskChip] {
         var chips = [AskChip(kind: .target, text: spec.target.rawValue.capitalized + "s")]
         for (index, group) in spec.groups.enumerated() {
             if index > 0 { chips.append(AskChip(kind: .alternative, text: "or")) }
@@ -26,7 +34,12 @@ enum AskChips {
             }
         }
         if let filter = spec.playFilter, !filter.isEmpty {
-            chips.append(AskChip(kind: .condition, text: "Only plays: " + filter.label))
+            chips.append(AskChip(
+                kind: .condition, text: "Only plays: " + filter.label,
+                help: "Only the plays made then are counted, so plays, ranks and dates use just those plays.",
+                caveat: filter.usesWeather && !weatherReady ? "This needs weather, which is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather."
+                    : (filter.usesCity && !cityReady ? "This needs a home place, which isn't set yet (weather is off), so no plays can match. Set one in Settings › Weather." : nil)
+            ))
         }
         for sort in spec.sorts {
             switch sort.key {
@@ -73,6 +86,7 @@ enum AskChips {
             if case .percent = field.column.style { return (stored * 100).formatted(.number.precision(.fractionLength(0...1))) + "%" }
             let shown = AskOperand.shown(stored, for: field)
             if case .year = field.column.style { return String(Int(shown.rounded())) }
+            if case .temperature = field.column.style { return WeatherSettings.temperatureUnit().text(shown: shown, places: 1) }
             let text = shown.formatted(.number.precision(.fractionLength(0...2)))
             return field.inputUnit.map { "\(text) \($0.label)" } ?? text
         case .text(let s): return "“\(s)”"

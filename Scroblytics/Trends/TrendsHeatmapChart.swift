@@ -34,6 +34,7 @@ struct TrendsHeatmapChart: View {
 
     private struct Slot: Equatable { let grid: Int; let day: Int; let hour: Int }
     private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool }
     private func format(_ v: Int) -> String { TrendsWeight.format(v, metric: metric) }
     private var unitWord: String { metric == .plays ? "scrobbles" : "listened" }
 
@@ -88,6 +89,9 @@ struct TrendsHeatmapChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(metric: metric, inputs: inputs), ready: heatmap != nil)) {
+            heatmap.map { TrendsShareCharts2.heatmap(heatmap: $0, metric: metric) }
+        }
     }
 
     private var hoverText: String {

@@ -28,6 +28,8 @@ struct DetailHeaderCard<Tags: View>: View {
     var onFixAlbumMatch: (() -> Void)? = nil
     /// The page's own facts, under the headline numbers.
     var facts: [DetailFact] = []
+    /// A weather fact the page does not show but the Share card can include (a track's).
+    var shareWeather: DetailFact? = nil
     /// The page's chosen period ("Last 12 months", "All time"); when given, the card carries a Share button that makes a card of this page.
     var sharePeriodLabel: String? = nil
     @ViewBuilder var tags: () -> Tags
@@ -36,7 +38,7 @@ struct DetailHeaderCard<Tags: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             headlineFacts
-            if !facts.isEmpty { DetailFactGrid(facts: facts, reservesDetailLine: DetailFactGrid.reservesDetailLine(for: facts)) }
+            if facts.count > 1 { DetailFactGrid(facts: facts, reservesDetailLine: DetailFactGrid.reservesDetailLine(for: facts)) }
             milestones
             tagsArea
         }
@@ -152,7 +154,7 @@ struct DetailHeaderCard<Tags: View>: View {
             entity: entity, name: name,
             artist: entity == .artist ? nil : subtitle, album: entity == .track ? tertiary : nil,
             imageURL: effectiveImageURL ?? imageURL, periodLabel: sharePeriodLabel, stats: stats, metric: metric,
-            timeListenedSeconds: timeListenedSeconds, facts: facts, yearlyTopRanks: yearlyTopRanks
+            timeListenedSeconds: timeListenedSeconds, facts: facts + (shareWeather.map { [$0] } ?? []), yearlyTopRanks: yearlyTopRanks
         )
     }
 
@@ -235,8 +237,9 @@ struct DetailHeaderCard<Tags: View>: View {
                 Text(errorMessage).foregroundStyle(.secondary)
             } else {
                 // The same height as the facts below, so every box on the card matches.
+                // A lone extra fact (an artist's Weather) joins this row instead of sitting by itself on the next one.
                 DetailFactGrid(
-                    facts: Self.headline(stats: stats, metric: metric, timeListenedSeconds: timeListenedSeconds),
+                    facts: Self.headline(stats: stats, metric: metric, timeListenedSeconds: timeListenedSeconds) + (facts.count == 1 ? facts : []),
                     reservesDetailLine: DetailFactGrid.reservesDetailLine(for: facts)
                 )
             }

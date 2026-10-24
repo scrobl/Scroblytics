@@ -32,6 +32,7 @@ struct TrendsLongTailChart: View {
     @Environment(\.shareChartCapture) private var shareCapture
 
     private struct ComputeKey: Equatable { let entity: QueryTarget; let metric: LongTailMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool; let topPercent: Int }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -60,6 +61,10 @@ struct TrendsLongTailChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(entity: entity, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(entity: entity, metric: metric, inputs: inputs), ready: data != nil, topPercent: topPercent)) {
+            guard let data, data.stats != nil else { return nil }
+            return TrendsShareCharts2.longTail(data: data, entity: entity, metric: metric, topPercent: topPercent)
+        }
         .onChange(of: topPercent) { publishSummary(data) }
     }
 

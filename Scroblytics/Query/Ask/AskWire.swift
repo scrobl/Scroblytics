@@ -12,6 +12,14 @@ enum AskWire {
         static let perArtist = "perArtist"
         static let perAlbum = "perAlbum"
         static let perReleaseYear = "perReleaseYear"
+        // the plays to count: only those made at certain times or in certain weather (`QueryPlayFilter`)
+        static let playWeekdays = "playWeekdays"
+        static let playMonths = "playMonths"
+        static let playFromHour = "playFromHour"
+        static let playToHour = "playToHour"
+        static let playWeather = "playWeather"
+        static let playTemperature = "playTemperature"
+        static let playCity = "playCity"
         static let unsupported = "unsupported"
         // a condition / sort key
         static let field = "field"
@@ -110,6 +118,23 @@ enum AskWire {
         var comparedAgo: Shift?
     }
 
+    /// Only the plays made at certain times or in certain weather count (`QueryPlayFilter`). Names are the app's own ("Sunday", "Rain",
+    /// "Cold"); the interpreter checks every one.
+    struct PlayFilter: Codable, Sendable, Equatable {
+        var weekdays: [String]?
+        var months: [Int]?
+        var fromHour: Int?
+        var toHour: Int?
+        var weather: [String]?
+        var temperature: [String]?
+        /// City names as the person or model wrote them; checked against the places they have listened in.
+        var city: [String]? = nil
+
+        var isEmpty: Bool {
+            (weekdays ?? []).isEmpty && (months ?? []).isEmpty && fromHour == nil && toHour == nil && (weather ?? []).isEmpty && (temperature ?? []).isEmpty && (city ?? []).isEmpty
+        }
+    }
+
     struct Query: Codable, Sendable, Equatable {
         var groups: [[Condition]]
         var sorts: [Sort]?
@@ -119,5 +144,7 @@ enum AskWire {
         var perArtist: Int?
         var perAlbum: Int?
         var perReleaseYear: Int?
+        /// Optional, and last, so every existing way of making a query still works.
+        var playFilter: PlayFilter?
     }
 }

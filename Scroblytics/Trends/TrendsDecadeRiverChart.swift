@@ -34,6 +34,7 @@ struct TrendsDecadeRiverChart: View {
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
     private static let colors: [Color] = [.blue, .orange, .green, Color(red: 0.95, green: 0.35, blue: 0.75), .purple, .yellow, Color(red: 0.9, green: 0.25, blue: 0.25)]
     private struct ComputeKey: Equatable { let entity: QueryTarget; let metric: TrendsMetric; let inputs: Inputs }
+    private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool; let view: ViewMode }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -96,6 +97,11 @@ struct TrendsDecadeRiverChart: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
         .task(id: ComputeKey(entity: entity, metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(entity: entity, metric: metric, inputs: inputs), ready: data != nil, view: viewMode)) {
+            // The river is drawn for the card; the release-year grid stays a picture of the window.
+            guard viewMode == .river, let data, data.points.count >= 2, !data.presentDecades.isEmpty else { return nil }
+            return TrendsShareCharts2.eras(data: data, colors: Self.colors)
+        }
     }
 
     private func river(_ points: [TrendsDecadeRiver.Point], data: TrendsDecadeRiver, grid: Int) -> some View {

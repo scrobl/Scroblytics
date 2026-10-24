@@ -218,7 +218,7 @@ struct QueryCellView: View {
             // Fail loud: an unregistered renderer is visible, not silently flattened to text.
             Label("no renderer “\(id)”", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
         case (.listeningTime, _): Text(QueryCellText.string(value, column: column)).monospacedDigit().lineLimit(1)
-        case (.integer, _), (.decimal, _), (.year, _), (.runtime, _), (.tempo, _), (.percent, _):
+        case (.integer, _), (.decimal, _), (.year, _), (.runtime, _), (.tempo, _), (.temperature, _), (.percent, _):
             Text(QueryCellText.string(value, column: column)).monospacedDigit()
         case (.date, .date): Text(QueryCellText.string(value, column: column))
         case (.boolean, .bool(let b)): Image(systemName: b ? "checkmark" : "minus").foregroundStyle(b ? Color.primary : Color.secondary)

@@ -47,7 +47,7 @@ struct GeocodeResult: Equatable, Sendable, Identifiable {
         return parts.joined(separator: ", ")
     }
 
-    var place: WeatherPlace { WeatherPlace(name: label, latitude: latitude, longitude: longitude) }
+    var place: WeatherPlace { WeatherPlace(name: label, latitude: latitude, longitude: longitude, region: region.flatMap { $0.isEmpty ? nil : $0 }, country: country.flatMap { $0.isEmpty ? nil : $0 }) }
 }
 
 /// A request to Open-Meteo. Built in one place so a check can look at exactly what would be sent.

@@ -196,6 +196,14 @@ struct TripDraft: Identifiable {
     var from: Date
     var stillThere: Bool
     var lastDay: Date
+    /// Whether the person has picked the last day themselves; until they have, it follows the first day (a trip is added ahead of time or
+    /// as it begins, so it never ends before it starts and rarely on today's date).
+    var lastDayChosen = false
+
+    /// The first day was changed: the last day follows it until it has been chosen, and never falls before it.
+    mutating func firstDayChanged() {
+        if !lastDayChosen || lastDay < from { lastDay = from }
+    }
 
     static func awayNow(calendar: Calendar) -> TripDraft { TripDraft(place: nil, from: calendar.startOfDay(for: Date()), stillThere: true, lastDay: calendar.startOfDay(for: Date())) }
     static func new(calendar: Calendar) -> TripDraft { TripDraft(place: nil, from: calendar.startOfDay(for: Date()), stillThere: false, lastDay: calendar.startOfDay(for: Date())) }
@@ -213,6 +221,7 @@ struct TripDraft: Identifiable {
             tripID: trip.id, place: trip.place, from: trip.from, stillThere: trip.until == nil,
             lastDay: trip.until.flatMap { calendar.date(byAdding: .day, value: -1, to: $0) } ?? calendar.startOfDay(for: Date())
         )
+        lastDayChosen = true   // an existing trip keeps the end it has
     }
 }
 
@@ -220,6 +229,14 @@ struct TripEditor: View {
     @State var draft: TripDraft
     let onSave: (TripDraft) -> Void
     let onCancel: () -> Void
+    /// Places already used by a trip, most recent first, to pick from instead of searching again.
+    var knownPlaces: [WeatherPlace] = TripEditor.knownPlaces(in: WeatherTripStore.load())
+
+    /// The places of these trips, each once (by its key), the most recently visited first.
+    static func knownPlaces(in trips: [WeatherTrip]) -> [WeatherPlace] {
+        var seen = Set<String>()
+        return trips.sorted { $0.from > $1.from }.compactMap { seen.insert($0.place.key).inserted ? $0.place : nil }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -236,14 +253,27 @@ struct TripEditor: View {
                         Button("Change") { draft.place = nil }
                     }
                 } else {
+                    if !knownPlaces.isEmpty {
+                        Menu {
+                            ForEach(knownPlaces, id: \.key) { place in
+                                Button(place.name) { draft.place = place }
+                            }
+                        } label: {
+                            Label("Choose a place you’ve been before", systemImage: "clock.arrow.circlepath")
+                        }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        Text("Or search for a new one:").font(AppTypography.supporting).foregroundStyle(.secondary)
+                    }
                     WeatherPlacePicker { draft.place = $0 }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
                 DatePicker("First day", selection: $draft.from, displayedComponents: .date)
+                    .onChange(of: draft.from) { draft.firstDayChanged() }
                 Toggle("Still there", isOn: $draft.stillThere)
                 if !draft.stillThere {
-                    DatePicker("Last day", selection: $draft.lastDay, in: draft.from..., displayedComponents: .date)
+                    // Starts on the first day and follows it until you pick one.
+                    DatePicker("Last day", selection: Binding(get: { draft.lastDay }, set: { draft.lastDay = $0; draft.lastDayChosen = true }), in: draft.from..., displayedComponents: .date)
                 }
                 Text(draft.stillThere ? "The trip stays open until you press Back Home or edit it." : "The last day counts in full.")
                     .font(AppTypography.supporting).foregroundStyle(.secondary)

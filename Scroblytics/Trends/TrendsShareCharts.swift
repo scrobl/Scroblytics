@@ -161,7 +161,7 @@ enum TrendsShareCharts {
             ShareNativeControl(id: "artists", label: "Show top artists", kind: .toggle(defaultValue: true)),
         ]
         let lines = result.trips.map { trip in
-            "\(trip.city), \(dateRange(trip)): \(trip.plays.formatted()) plays, \(whole(trip.perDay)) a day" + (result.relativeToHome(trip).map { ", \(Int(($0 * 100).rounded()))% of home" } ?? "")
+            "\(trip.city), \(trip.tripCount > 1 ? trip.summaryLine : dateRange(trip)): \(trip.plays.formatted()) plays, \(whole(trip.perDay)) a day" + (result.relativeToHome(trip).map { ", \(Int(($0 * 100).rounded()))% of home" } ?? "")
         }
         return ShareNativeChart(
             id: "weather.places", caption: caption,
@@ -283,11 +283,14 @@ struct SharePlacesView: View {
         }
         if options.flag("artists", true), !stay.topArtists.isEmpty { second.append(stay.topArtists.map(\.name).joined(separator: ", ")) }
         return HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(stay.isHome ? "\(stay.city) · home" : stay.city).font(AppTypography.metadata.weight(.semibold)).lineLimit(1)
-                Text(stay.isHome ? "everything else" : TrendsShareCharts.dateRange(stay)).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
+            HStack(alignment: .top, spacing: 6) {
+                Circle().fill(stay.isHome ? Color.white.opacity(0.5) : result.tint(for: stay)).frame(width: 9, height: 9).padding(.top, 4)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(stay.isHome ? "\(stay.city) · home" : stay.city).font(AppTypography.metadata.weight(.semibold)).lineLimit(1)
+                    Text(stay.isHome ? "everything else" : (stay.tripCount > 1 ? stay.summaryLine : TrendsShareCharts.dateRange(stay))).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
-            .frame(width: 110, alignment: .leading)
+            .frame(width: 124, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
                 Text(first).font(AppTypography.metadata.monospacedDigit()).lineLimit(1)
                 if !second.isEmpty { Text(second.joined(separator: " · ")).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1) }
@@ -296,6 +299,6 @@ struct SharePlacesView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: rowHeight)
-        .background((stay.isHome ? Color.white : Color.accentColor).opacity(stay.isHome ? 0.06 : 0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background((stay.isHome ? Color.white : result.tint(for: stay)).opacity(stay.isHome ? 0.06 : 0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

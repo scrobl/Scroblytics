@@ -569,6 +569,26 @@ enum WeatherChecks {
               !t1.overlaps(trip(oslo, mar10, mar15)) && t1.overlaps(inner) && trip(lisbon, mar5, nil).overlaps(trip(oslo, mar15, nil)))
         check("a place reads short in lists", lisbon.shortName == "Lisbon" && WeatherPlace(name: "Home", latitude: 0, longitude: 0).shortName == "Home")
 
+        // Adding a trip: places already used are offered again, and the last day follows the first until it is picked.
+        let lisbonAgain = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
+        let known = TripEditor.knownPlaces(in: [trip(lisbon, mar5, mar10), trip(oslo, mar15, nil), trip(lisbonAgain, date(2025, 3, 20), date(2025, 3, 22))])
+        check("a trip's place can be picked again: each place once, the most recently visited first", known.map(\.shortName) == ["Lisbon", "Oslo"] && known.first?.key == lisbon.key, "\(known.map(\.name))")
+        check("with no trips there is nothing to pick from", TripEditor.knownPlaces(in: []).isEmpty)
+        var draft = TripDraft.new(calendar: calendar)
+        draft.from = date(2025, 6, 10); draft.firstDayChanged()
+        check("a new trip's last day follows its first day (a date in the future, not today)", draft.lastDay == date(2025, 6, 10))
+        draft.from = date(2025, 6, 12); draft.firstDayChanged()
+        check("…and keeps following it when the first day moves again", draft.lastDay == date(2025, 6, 12))
+        draft.lastDay = date(2025, 6, 20); draft.lastDayChosen = true
+        draft.from = date(2025, 6, 14); draft.firstDayChanged()
+        check("once the last day is picked it stays, as long as it isn't before the first day", draft.lastDay == date(2025, 6, 20))
+        draft.from = date(2025, 6, 25); draft.firstDayChanged()
+        check("a first day after a picked last day pulls the last day along, so a trip never ends before it starts", draft.lastDay == date(2025, 6, 25))
+        let existing = TripDraft(trip: trip(lisbon, mar5, mar10), calendar: calendar)
+        var edited = existing
+        edited.from = date(2025, 3, 6); edited.firstDayChanged()
+        check("an existing trip keeps its own last day when its first day is changed", edited.lastDay == existing.lastDay && existing.lastDayChosen)
+
         // Saving trips.
         let folder = FileManager.default.temporaryDirectory.appending(path: "scroblytics-trips-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -876,6 +896,42 @@ enum WeatherChecks {
         open.trips = [WeatherSnapshot.TripWeather(trip: WeatherTrip(place: lisbon, from: date(2025, 3, 18), until: nil), series: away)]
         let ongoing = TrendsPlacesEngine.compute(scrobbles: plays, weather: open, range: range, now: now, calendar: utc)
         check("a trip you are still on runs to now: from the 18th, 3 days", ongoing.trips.first?.days == 3 && ongoing.trips.first?.until == now, "\(String(describing: ongoing.trips.first?.days))")
+        // Colours and names on the chart: each trip has its own colour in the order it happened, and names that would collide are staggered.
+        var twoTrips = snapshot
+        twoTrips.trips = [WeatherSnapshot.TripWeather(trip: trip, series: away), WeatherSnapshot.TripWeather(trip: WeatherTrip(place: WeatherPlace(name: "Oslo, Norway", latitude: 59.9, longitude: 10.7), from: date(2025, 3, 14), until: date(2025, 3, 17)), series: away)]
+        let colored = TrendsPlacesEngine.compute(scrobbles: plays, weather: twoTrips, range: range, now: now, calendar: utc)
+        check("each trip has its own colour in the order they happened, and home is grey", colored.trips.count == 2 && colored.tint(for: colored.trips[1]) == TrendsPlacesResult.tripColors[0] && colored.tint(for: colored.trips[0]) == TrendsPlacesResult.tripColors[1] && colored.tint(for: colored.home!) == .secondary && TrendsPlacesResult.tripColors[0] != TrendsPlacesResult.tripColors[1])
+        check("trip names that don't collide share a row", TrendsPlacesChart.labelLanes([(x: 10, width: 40), (x: 100, width: 40), (x: 200, width: 40)]) == [0, 0, 0])
+        check("names that would run into each other go on other rows, and one is left out when every row is taken", TrendsPlacesChart.labelLanes([(x: 10, width: 40), (x: 30, width: 40), (x: 60, width: 40), (x: 200, width: 40)]) == [0, 1, 0, 0] && TrendsPlacesChart.labelLanes([(x: 10, width: 100), (x: 20, width: 100), (x: 30, width: 100), (x: 40, width: 100)]) == [0, 1, 2, nil])
+        // Grouping trips by region or country.
+        let lisbonPT = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14, region: nil, country: "Portugal")
+        let portoPT = WeatherPlace(name: "Porto, Porto, Portugal", latitude: 41.15, longitude: -8.6, region: "Porto", country: "Portugal")
+        let munichDE = WeatherPlace(name: "Munich, Bavaria, Germany", latitude: 48.1, longitude: 11.6)
+        let coordinates = WeatherPlace(name: "My place", latitude: 10, longitude: 10)
+        let oslo = WeatherPlace(name: "Oslo, Norway", latitude: 59.9, longitude: 10.7)
+        check("a place is named at each level: its city, its region (or its country when it has none), its country", [lisbonPT, portoPT].map { [$0.name(at: .city), $0.name(at: .region), $0.name(at: .country)] } == [["Lisbon", "Portugal", "Portugal"], ["Porto", "Porto", "Portugal"]])
+        check("a place saved before regions were kept is read from its name: Munich, Bavaria, Germany and Oslo, Norway", [munichDE.name(at: .city), munichDE.name(at: .region), munichDE.name(at: .country)] == ["Munich", "Bavaria", "Germany"] && [oslo.name(at: .region), oslo.name(at: .country)] == ["Norway", "Norway"])
+        check("the middle level is called State/Region, the others City and Country", PlaceLevel.allCases.map(\.label) == ["City", "State/Region", "Country"])
+        check("coordinates or a name with no region or country is its own entry at every level", PlaceLevel.allCases.allSatisfy { coordinates.name(at: $0) == "My place" })
+        check("places saved before this still load, and region and country survive saving", (try? JSONDecoder().decode(WeatherPlace.self, from: Data(#"{"name":"Oslo, Norway","latitude":59.9,"longitude":10.7}"#.utf8)))?.country == nil && (try? JSONDecoder().decode(WeatherPlace.self, from: JSONEncoder().encode(portoPT)))?.region == "Porto")
+        var grouped = snapshot
+        grouped.trips = [
+            WeatherSnapshot.TripWeather(trip: WeatherTrip(place: lisbonPT, from: date(2025, 3, 5), until: date(2025, 3, 10)), series: away),
+            WeatherSnapshot.TripWeather(trip: WeatherTrip(place: portoPT, from: date(2025, 3, 12), until: date(2025, 3, 15)), series: away),
+            WeatherSnapshot.TripWeather(trip: WeatherTrip(place: munichDE, from: date(2025, 3, 17), until: date(2025, 3, 18)), series: away),
+        ]
+        func at(_ level: PlaceLevel) -> TrendsPlacesResult { TrendsPlacesEngine.compute(scrobbles: plays, weather: grouped, range: range, level: level, now: now, calendar: utc) }
+        let byCity = at(.city), byRegion = at(.region), byCountry = at(.country)
+        check("by city every trip is its own stay; by region the two Portuguese trips with different regions stay apart and Lisbon joins the country; by country they join", byCity.trips.count == 3 && byRegion.trips.count == 3 && byCountry.trips.count == 2, "\(byCity.trips.count) \(byRegion.trips.count) \(byCountry.trips.count)")
+        let portugal = byCountry.trips.first { $0.city == "Portugal" }
+        check("Portugal is both trips together: 8 days (5 + 3), 11 plays (5 + 6), 2 trips, in order of the cities", portugal?.days == 8 && portugal?.plays == 11 && portugal?.tripCount == 2 && portugal?.cities == ["Lisbon", "Porto"], "\(String(describing: portugal?.days)) \(String(describing: portugal?.plays)) \(String(describing: portugal?.cities))")
+        check("its dates run from the first trip to the end of the last", portugal?.from == date(2025, 3, 5) && portugal?.until == date(2025, 3, 15))
+        check("whatever the level every play and every day is counted once: stays plus home are the 35 plays and 20 days", [byCity, byRegion, byCountry].allSatisfy { $0.trips.reduce($0.home?.plays ?? 0) { $0 + $1.plays } == 35 && $0.trips.reduce($0.home?.days ?? 0) { $0 + $1.days } == 20 && $0.trips.reduce(0) { $0 + $1.tripCount } == 3 })
+        check("the chart still has each trip's own stretch (three), in the colour of its stay", byCountry.spans.count == 3 && Set(byCountry.spans.map(\.group)).count == 2 && byCountry.spans.filter { $0.group == portugal?.id }.count == 2)
+        check("the two Portuguese trips share a colour and Germany has another", portugal.map { byCountry.tint(for: $0) } != byCountry.trips.first { $0.city == "Germany" }.map { byCountry.tint(for: $0) } && byCountry.spans.filter { $0.group == portugal?.id }.map { byCountry.tint(forGroup: $0.group) }.count == 2)
+        let portugalDrill = portugal.map { TrendsPlacesEngine.drillSpec(for: $0, target: .track) }
+        check("clicking Portugal opens the plays made in either city, between the first trip's start and the last's end", portugalDrill?.playFilter?.cities == ["Lisbon", "Porto"] && portugalDrill?.period?.from == date(2025, 3, 5) && portugalDrill?.period?.to == date(2025, 3, 15))
+        check("a group says how many trips it is: “2 trips · 8 days”; a single trip just its days", portugal?.summaryLine == "2 trips · 8 days" && byCity.trips.allSatisfy { $0.tripCount == 1 })
         // Long periods are drawn a week at a time.
         let early = [ScrobbleSnapshot(artistName: "A", albumName: "", trackName: "Track A", imageURL: nil, playedAt: date(2024, 6, 2, 10))] + plays
         let long = TrendsPlacesEngine.compute(scrobbles: early, weather: snapshot, range: DateRange(from: date(2024, 6, 1), to: date(2025, 3, 20, 23, 59)), now: now, calendar: utc)

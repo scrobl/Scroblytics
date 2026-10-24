@@ -19,8 +19,26 @@ struct TrendsStay: Identifiable, Equatable, Sendable {
     var topArtists: [Artist] = []
     var averageTemperature: Double?
     var rainShare: Double?
+    /// How many trips this stay is made of: 1 for a trip on its own, more when trips to the same region or country are grouped.
+    var tripCount = 1
+    /// The cities of those trips (just one for a single trip), which are what a click opens in Query.
+    var cities: [String] = []
 
     var perDay: Double { days > 0 ? Double(plays) / Double(days) : 0 }
+
+    /// "6 days", or "3 trips · 18 days" for a group: the line under a stay's name.
+    var summaryLine: String {
+        let daysText = "\(days) day\(days == 1 ? "" : "s")"
+        return tripCount > 1 ? "\(tripCount) trips · \(daysText)" : daysText
+    }
+}
+
+/// One trip's own stretch of the period, for the chart's shading and bars (a group of trips is several of these).
+struct TrendsTripSpan: Equatable, Sendable {
+    /// The id of the `TrendsStay` it belongs to.
+    let group: String
+    let from: Date
+    let until: Date
 }
 
 /// Plays per day through a stretch of days, for the chart.
@@ -38,6 +56,9 @@ struct TrendsPlacesResult: Equatable, Sendable {
     var trips: [TrendsStay] = []
     var buckets: [TrendsPlaceBucket] = []
     var bucketDays = 1
+    /// Every trip's own stretch (a group has one for each of its trips).
+    var spans: [TrendsTripSpan] = []
+    var level = PlaceLevel.city
     static let empty = TrendsPlacesResult()
 
     /// What a trip's listening is against home's: 0.43 is 43% as much a day.
@@ -55,7 +76,7 @@ enum TrendsPlacesEngine {
     /// A period longer than this many days is drawn a week at a time.
     static let dailyBucketLimit = 200
 
-    static func compute(scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, range: DateRange, now: Date = Date(), calendar: Calendar = AppCalendars.listening) -> TrendsPlacesResult {
+    static func compute(scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, range: DateRange, level: PlaceLevel = .city, now: Date = Date(), calendar: Calendar = AppCalendars.listening) -> TrendsPlacesResult {
         let trips = weather.trips.map(\.trip)
         guard !weather.isEmpty, weather.placeName != nil, let homeCity = weather.cities.first else { return .empty }
         let firstPlay = scrobbles.first?.playedAt ?? range.from
@@ -65,17 +86,28 @@ enum TrendsPlacesEngine {
         let end = min(range.to, now)
         guard from <= end else { return .empty }
 
+        // Which stay each trip belongs to: itself by city, or every trip to the same region or country together.
+        var groupOf: [UUID: (id: String, label: String)] = [:]
+        for trip in trips {
+            groupOf[trip.id] = level == .city
+                ? (trip.id.uuidString, trip.shortName)
+                : ("\(level.rawValue):" + PlaceNames.key(trip.place.name(at: level)), trip.place.name(at: level))
+        }
+        func groupID(_ trip: WeatherTrip?) -> String { trip.flatMap { groupOf[$0.id]?.id } ?? "home" }
+
         // Each day goes to the trip that covers its middle, or to home.
         var dayCount: [String: Int] = [:]
-        var dayStays: [Date: String] = [:]
+        var tripDays: [UUID: Int] = [:]
+        var totalDays = 0
         var day = start
         var guardCount = 0
         while day <= end, guardCount < 40_000 {
             let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
             let noon = day.addingTimeInterval(next.timeIntervalSince(day) / 2)
-            let stay = WeatherTrip.effective(at: noon, in: trips)?.id.uuidString ?? "home"
-            dayStays[day] = stay
-            dayCount[stay, default: 0] += 1
+            let trip = WeatherTrip.effective(at: noon, in: trips)
+            dayCount[groupID(trip), default: 0] += 1
+            if let trip { tripDays[trip.id, default: 0] += 1 }
+            totalDays += 1
             day = next
             guardCount += 1
         }
@@ -90,12 +122,15 @@ enum TrendsPlacesEngine {
             var artists: [String: Int] = [:]
         }
         var tallies: [String: Tally] = [:]
+        var tripPlays: [UUID: Int] = [:]
         var seen = Set<String>()
         var perDay: [Date: Int] = [:]
         for play in scrobbles {
             let first = seen.insert(play.artistName).inserted
             guard play.playedAt >= from, play.playedAt <= end else { continue }
-            let stay = WeatherTrip.effective(at: play.playedAt, in: trips)?.id.uuidString ?? "home"
+            let trip = WeatherTrip.effective(at: play.playedAt, in: trips)
+            let stay = groupID(trip)
+            if let trip { tripPlays[trip.id, default: 0] += 1 }
             // Changed in place: copying the tally out and back would copy its whole artist dictionary for every play.
             tallies[stay, default: Tally()].plays += 1
             if first { tallies[stay, default: Tally()].newArtists += 1 }
@@ -123,16 +158,33 @@ enum TrendsPlacesEngine {
         }
 
         var result = TrendsPlacesResult()
+        result.level = level
         result.home = stay(id: "home", city: homeCity, isHome: true, from: from, until: end)
-        for trip in trips.sorted(by: { $0.from > $1.from }) {
-            let id = trip.id.uuidString
-            guard (dayCount[id] ?? 0) > 0 || (tallies[id]?.plays ?? 0) > 0 else { continue }
-            let tripFrom = max(trip.from, from), tripUntil = min(trip.until ?? now, end)
-            result.trips.append(stay(id: id, city: trip.shortName, isHome: false, from: tripFrom, until: max(tripFrom, tripUntil)))
+        result.home?.cities = [homeCity]
+        // The trips that happened in the period, earliest first, gathered into their stays.
+        struct Group { var label: String; var from: Date; var until: Date; var count = 0; var cities: [String] = [] }
+        var groups: [String: Group] = [:]
+        for trip in trips.sorted(by: { $0.from < $1.from }) {
+            guard (tripDays[trip.id] ?? 0) > 0 || (tripPlays[trip.id] ?? 0) > 0, let info = groupOf[trip.id] else { continue }
+            let tripFrom = max(trip.from, from), tripUntil = max(tripFrom, min(trip.until ?? now, end))
+            result.spans.append(TrendsTripSpan(group: info.id, from: tripFrom, until: tripUntil))
+            var group = groups[info.id] ?? Group(label: info.label, from: tripFrom, until: tripUntil)
+            group.from = min(group.from, tripFrom)
+            group.until = max(group.until, tripUntil)
+            group.count += 1
+            if !group.cities.contains(where: { PlaceNames.key($0) == PlaceNames.key(trip.shortName) }) { group.cities.append(trip.shortName) }
+            groups[info.id] = group
         }
+        result.trips = groups.map { id, group in
+            var grouped = stay(id: id, city: group.label, isHome: false, from: group.from, until: group.until)
+            grouped.tripCount = group.count
+            grouped.cities = group.cities
+            return grouped
+        }
+        // The most recent visit first.
+        .sorted { ($0.until, $0.from, $0.id) > ($1.until, $1.from, $1.id) }
 
         // The chart: plays a day (a day, or a week on a long period).
-        let totalDays = dayStays.count
         let span = totalDays > dailyBucketLimit ? 7 : 1
         var bucketStart = start
         while bucketStart <= end {
@@ -150,41 +202,67 @@ enum TrendsPlacesEngine {
         return result
     }
 
-    /// The plays a stay counts, as a Query: its dates and its city.
+    /// The plays a stay counts, as a Query: its dates and its city (or cities, for a group).
     static func drillSpec(for stay: TrendsStay, target: QueryTarget) -> QuerySpec {
-        let filter = QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, cities: [stay.city])
+        let filter = QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, cities: stay.cities.isEmpty ? [stay.city] : stay.cities)
         return TrendsDrill.spec(from: stay.from, to: stay.until, target: target, playFilter: filter)
     }
 }
 
-/// Plays a day through the period, the trips shaded and home's rate as a dashed line. Drawn on screen and, larger, on a shared card.
+extension TrendsPlacesResult {
+    /// One colour for each trip, in the order the trips happened (so neighbours in time get different colours), used for its shading on the
+    /// chart, its bars, and the dot in front of its row. Home is grey.
+    static let tripColors: [Color] = [.blue, .orange, .green, .purple, .teal, .pink, .yellow, .red, .indigo, .mint]
+
+    func tint(for stay: TrendsStay) -> Color { tint(forGroup: stay.id) }
+
+    /// The colour of a stay by its id (a trip's stretch on the chart names its stay's id).
+    func tint(forGroup id: String) -> Color {
+        guard let newestFirst = trips.firstIndex(where: { $0.id == id }) else { return .secondary }
+        return Self.tripColors[(trips.count - 1 - newestFirst) % Self.tripColors.count]
+    }
+}
+
+/// Plays a day through the period, each trip shaded and drawn in its own colour (named above the chart where there is room), and home's
+/// rate as a dashed line. Drawn on screen and, larger, on a shared card.
 struct TrendsPlacesChart: View {
     let result: TrendsPlacesResult
     var height: CGFloat = 200
+
+    /// Which of a few rows each trip's name goes in so names that would run into each other sit on different rows, or nil to leave a name
+    /// out when every row is taken there (the trip's colour and its row below still say which it is). `labels` are in order of position.
+    static func labelLanes(_ labels: [(x: CGFloat, width: CGFloat)], lanes: Int = 3, gap: CGFloat = 4) -> [Int?] {
+        var edges = [CGFloat](repeating: -.infinity, count: lanes)
+        return labels.map { label in
+            for lane in 0..<lanes where label.x >= edges[lane] + gap {
+                edges[lane] = label.x + label.width
+                return lane
+            }
+            return nil
+        }
+    }
 
     var body: some View {
         let peak = max(result.buckets.map(\.perDay).max() ?? 1, 1) * 1.15
         let homeRate = result.home?.perDay ?? 0
         return Chart {
-            ForEach(result.trips) { trip in
-                RectangleMark(xStart: .value("From", trip.from), xEnd: .value("Until", max(trip.until, trip.from.addingTimeInterval(86_400))), yStart: .value("Bottom", 0), yEnd: .value("Top", peak))
-                    .foregroundStyle(Color.accentColor.opacity(0.16))
-                    .annotation(position: .top, alignment: .leading, spacing: 2) {
-                        Text(trip.city).font(AppTypography.denseBadge).foregroundStyle(Color.accentColor).lineLimit(1)
-                    }
+            ForEach(Array(result.spans.enumerated()), id: \.offset) { _, span in
+                RectangleMark(xStart: .value("From", span.from), xEnd: .value("Until", max(span.until, span.from.addingTimeInterval(86_400))), yStart: .value("Bottom", 0), yEnd: .value("Top", peak))
+                    .foregroundStyle(result.tint(forGroup: span.group).opacity(0.2))
             }
             ForEach(result.buckets) { bucket in
                 RectangleMark(
                     xStart: .value("Start", bucket.start), xEnd: .value("End", bucket.start.addingTimeInterval(Double(bucket.days) * 86_400 - 3_600)),
                     yStart: .value("Bottom", 0), yEnd: .value("Plays a day", bucket.perDay)
                 )
-                .foregroundStyle(away(bucket, result) ? Color.accentColor.opacity(0.9) : Color.secondary.opacity(0.55))
+                .foregroundStyle(tripColor(of: bucket).map { $0.opacity(0.95) } ?? Color.secondary.opacity(0.55))
             }
             if homeRate > 0 {
                 RuleMark(y: .value("At home", homeRate))
                     .foregroundStyle(Color.primary.opacity(0.65))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .annotation(position: .top, alignment: .trailing) {
+                    // Below the line, at the right: the trips' names run along the top.
+                    .annotation(position: .bottom, alignment: .trailing, spacing: 3) {
                         Text("at home \(homeRate.formatted(.number.precision(.fractionLength(0)))) a day")
                             .font(AppTypography.denseBadge).foregroundStyle(.white.opacity(0.9))
                             .padding(.horizontal, 6).padding(.vertical, 2).background(.black.opacity(0.45), in: Capsule())
@@ -193,12 +271,36 @@ struct TrendsPlacesChart: View {
         }
         .chartYScale(domain: 0...peak)
         .chartYAxisLabel("plays a day", position: .leading)
+        .chartOverlay { proxy in tripNames(proxy) }
         .frame(height: height)
     }
 
-    private func away(_ bucket: TrendsPlaceBucket, _ result: TrendsPlacesResult) -> Bool {
+    /// The trips' names inside the top of the chart, each at the start of its trip, staggered so they don't run into each other.
+    private func tripNames(_ proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            if let plot = proxy.plotFrame {
+                let frame = geometry[plot]
+                let named = result.trips.sorted { $0.from < $1.from }.compactMap { trip -> (trip: TrendsStay, left: CGFloat, width: CGFloat)? in
+                    guard let x = proxy.position(forX: trip.from) else { return nil }
+                    let width = CGFloat(trip.city.count) * 5.8 + 6
+                    return (trip, min(frame.minX + x, frame.maxX - width), width)
+                }
+                let lanes = Self.labelLanes(named.map { (x: $0.left, width: $0.width) })
+                ForEach(Array(named.enumerated()), id: \.offset) { index, item in
+                    if let lane = lanes[index] {
+                        Text(item.trip.city)
+                            .font(AppTypography.denseBadge.weight(.semibold)).foregroundStyle(result.tint(for: item.trip)).lineLimit(1).fixedSize()
+                            .position(x: item.left + item.width / 2, y: frame.minY + 8 + CGFloat(lane) * 13)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The colour of the trip a bucket falls in, nil at home.
+    private func tripColor(of bucket: TrendsPlaceBucket) -> Color? {
         let middle = bucket.start.addingTimeInterval(Double(bucket.days) * 43_200)
-        return result.trips.contains { middle >= $0.from && middle < max($0.until, $0.from.addingTimeInterval(86_400)) }
+        return result.spans.first { middle >= $0.from && middle < max($0.until, $0.from.addingTimeInterval(86_400)) }.map { result.tint(forGroup: $0.group) }
     }
 }
 
@@ -209,7 +311,12 @@ struct TrendsPlacesCard: View {
     let openQuery: (QuerySpec, String) -> Void
 
     @AppStorage("trends.weather.drillTarget") private var drillTargetRaw = QueryTarget.track.rawValue
+    /// How trips are grouped on the chart and in the list: each on its own, or by the region or country they are in.
+    @AppStorage("trends.places.level") private var levelRaw = PlaceLevel.city.rawValue
     @State private var result: TrendsPlacesResult?
+
+    private var level: PlaceLevel { PlaceLevel(rawValue: levelRaw) ?? .city }
+    private struct ComputeKey: Equatable { let level: PlaceLevel; let inputs: TrendsWeatherGroup.Inputs }
 
     private var drillTarget: QueryTarget { QueryTarget(rawValue: drillTargetRaw) ?? .track }
 
@@ -221,6 +328,11 @@ struct TrendsPlacesCard: View {
                         .font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     SettingsLink { Text("Open Settings") }
                 } else {
+                    Picker("Group trips by", selection: $levelRaw) {
+                        ForEach(PlaceLevel.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help("City: each trip on its own. State/Region or Country: trips to the same state or country together, in one colour. A place with no region or country on record (coordinates) stays on its own.")
                     VStack(alignment: .leading, spacing: 12) {
                         TrendsPlacesChart(result: result)
                         VStack(spacing: 6) {
@@ -241,7 +353,7 @@ struct TrendsPlacesCard: View {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 120)
             }
         }
-        .task(id: inputs, priority: .utility) { await recompute() }
+        .task(id: ComputeKey(level: level, inputs: inputs), priority: .utility) { await recompute() }
     }
 
     // MARK: Rows
@@ -255,7 +367,7 @@ struct TrendsPlacesCard: View {
                 VStack(alignment: .leading, spacing: 4) { rowItems(stay, result: result) }
             }
             .padding(.vertical, 6).padding(.horizontal, 10)
-            .background((stay.isHome ? Color.secondary : Color.accentColor).opacity(stay.isHome ? 0.06 : 0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(result.tint(for: stay).opacity(stay.isHome ? 0.06 : 0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -264,9 +376,12 @@ struct TrendsPlacesCard: View {
 
     @ViewBuilder
     private func rowItems(_ stay: TrendsStay, result: TrendsPlacesResult) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(stay.isHome ? "\(stay.city) · home" : stay.city).font(AppTypography.metadata.weight(.semibold)).lineLimit(1)
-            Text(stay.isHome ? "everything else in this period" : dates(stay)).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
+        HStack(alignment: .top, spacing: 7) {
+            Circle().fill(stay.isHome ? Color.secondary.opacity(0.6) : result.tint(for: stay)).frame(width: 9, height: 9).padding(.top, 4)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(stay.isHome ? "\(stay.city) · home" : stay.city).font(AppTypography.metadata.weight(.semibold)).lineLimit(1)
+                Text(stay.isHome ? "everything else in this period" : (stay.tripCount > 1 ? stay.summaryLine : dates(stay))).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .frame(width: 150, alignment: .leading)
         VStack(alignment: .leading, spacing: 1) {
@@ -317,9 +432,9 @@ struct TrendsPlacesCard: View {
 
     private func recompute() async {
         result = nil
-        let inputs = self.inputs
+        let (inputs, level) = (self.inputs, self.level)
         let computed = await TrendsComputeGate.shared.run {
-            TrendsPlacesEngine.compute(scrobbles: inputs.canonical, weather: inputs.weather, range: inputs.range)
+            TrendsPlacesEngine.compute(scrobbles: inputs.canonical, weather: inputs.weather, range: inputs.range, level: level)
         }
         guard !Task.isCancelled, let computed else { return }
         result = computed

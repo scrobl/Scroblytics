@@ -8,11 +8,16 @@ struct WeatherPlace: Codable, Equatable, Sendable {
     let name: String
     let latitude: Double
     let longitude: Double
+    /// The region (state, province) and country, when the place came from a search for a name. Optional so places saved earlier still load.
+    var region: String?
+    var country: String?
 
-    init(name: String, latitude: Double, longitude: Double) {
+    init(name: String, latitude: Double, longitude: Double, region: String? = nil, country: String? = nil) {
         self.name = name
         self.latitude = Self.rounded(latitude)
         self.longitude = Self.rounded(longitude)
+        self.region = region
+        self.country = country
     }
 
     static func rounded(_ value: Double) -> Double { ((value * 10).rounded() / 10) + 0 }
@@ -108,7 +113,38 @@ enum PlaceNames {
     }
 }
 
+/// How coarsely trips are grouped: each on its own, or by the region or the country they are in.
+enum PlaceLevel: String, CaseIterable, Identifiable, Sendable {
+    case city, region, country
+    var id: String { rawValue }
+    /// What the switch calls it: most people reading this are in the US, where it is a state, and elsewhere a province or region.
+    var label: String { self == .region ? "State/Region" : rawValue.capitalized }
+}
+
 extension WeatherPlace {
+    /// The region and country of this place: the ones it was saved with, or (for a place saved before they were kept) read from a name like
+    /// "Munich, Bavaria, Germany" or "Oslo, Norway". A place with neither (coordinates, or a name you typed) has none.
+    var resolvedRegionAndCountry: (region: String?, country: String?) {
+        if region != nil || country != nil { return (region, country) }
+        let parts = name.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        switch parts.count {
+        case 0, 1: return (nil, nil)
+        case 2: return (nil, parts[1])
+        default: return (parts[1], parts[parts.count - 1])
+        }
+    }
+
+    /// What this place is called at a level. One without a region or country is its own entry at every level; one without a region is
+    /// listed under its country at the region level, so no trip drops out.
+    func name(at level: PlaceLevel) -> String {
+        let (region, country) = resolvedRegionAndCountry
+        switch level {
+        case .city: return shortName
+        case .region: return region ?? country ?? shortName
+        case .country: return country ?? region ?? shortName
+        }
+    }
+
     var shortName: String { name.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? name }
 }
 

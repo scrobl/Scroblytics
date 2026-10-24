@@ -310,7 +310,15 @@ enum DetailSnapshots {
         let lisbonPlace = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
         let tripA = WeatherTrip(place: lisbonPlace, from: calendar.date(byAdding: .day, value: -40, to: end)!, until: calendar.date(byAdding: .day, value: -34, to: end)!)
         let tripB = WeatherTrip(place: WeatherPlace(name: "Tokyo, Japan", latitude: 35.68, longitude: 139.69), from: calendar.date(byAdding: .day, value: -9, to: end)!, until: nil)
-        for trip in [tripA, tripB] {
+        // Trips close together (the case that used to run their names into each other), then the two above.
+        func nearby(_ name: String, _ lat: Double, _ from: Int, _ until: Int) -> WeatherTrip {
+            WeatherTrip(place: WeatherPlace(name: name, latitude: lat, longitude: lat), from: calendar.date(byAdding: .day, value: from, to: end)!, until: calendar.date(byAdding: .day, value: until, to: end)!)
+        }
+        let more = [
+            nearby("Paris, Île-de-France, France", 11, -104, -98), nearby("Madrid, Madrid, Spain", 12, -96, -91), nearby("Berlin, Berlin, Germany", 13, -70, -66),
+            nearby("Munich, Bavaria, Germany", 14, -64, -60), nearby("Porto, Porto, Portugal", 15, -22, -17),
+        ]
+        for trip in [tripA, tripB] + more {
             var away = WeatherSeries(startHour: WeatherSeries.hour(of: trip.from), count: 24 * 12)
             for h in away.startHour..<(away.startHour + 24 * 12) { away.set(hour: h, WeatherSample(temperature: 19 + Double(h % 24) / 5, precipitation: 0, rain: 0, snowfall: 0, code: 0)) }
             snapshot.trips.append(WeatherSnapshot.TripWeather(trip: trip, series: away))
@@ -462,6 +470,11 @@ enum DetailSnapshots {
             for dark in [true, false] {
                 await render(weatherTrends(unit: .celsius), width: 1000, dark: dark, container: container, to: base.appending(path: "trends-weather-\(dark ? "dark" : "light").png"))
             }
+            UserDefaults.standard.set("country", forKey: "trends.places.level")
+            await render(leaningsAndPlaces(), width: 1000, dark: true, container: container, to: base.appending(path: "trends-new-country-1000-dark.png"))
+            UserDefaults.standard.set("region", forKey: "trends.places.level")
+            await render(leaningsAndPlaces(), width: 1000, dark: true, container: container, to: base.appending(path: "trends-new-region-1000-dark.png"))
+            UserDefaults.standard.removeObject(forKey: "trends.places.level")
             for (width, dark) in [(1000, true), (1000, false), (640, true)] as [(CGFloat, Bool)] {
                 await render(leaningsAndPlaces(), width: width, dark: dark, container: container, to: base.appending(path: "trends-new-\(Int(width))-\(dark ? "dark" : "light").png"))
             }

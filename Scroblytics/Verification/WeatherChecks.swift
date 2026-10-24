@@ -22,6 +22,7 @@ enum WeatherChecks {
             await tripChecks(check)
             leanChecks(check)
             leaningChecks(check)
+            mapChecks(check)
             placeChecks(check)
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
@@ -854,6 +855,111 @@ enum WeatherChecks {
             let total = rows.rows.reduce(0) { sum, row in if case .value(.number(let n))? = row.cells[key] { sum + Int(n) } else { sum } }
             check("the plays that drill opens are exactly the 50 the row counted", total == r?.inWeather, "\(total)")
         } else { check("the drill is a valid query", false) }
+    }
+
+    // MARK: - The artist weather map
+
+    @MainActor
+    private static func mapChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-6) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        let engine = TrendsWeatherMapEngine.self
+        // The ranges of temperature.
+        check("a temperature falls in its five-degree range: 4.99 is 0 to 5, 5 is 5 to 10, −0.1 is −5 to 0", engine.bin(of: 4.99) == 4 && engine.bin(of: 5) == 5 && engine.bin(of: -0.1) == 3)
+        check("the coldest and warmest ranges are open: −15.1 and −60 are below −15, 40 and 100 are 40 and up", engine.bin(of: -15) == 1 && engine.bin(of: -15.1) == 0 && engine.bin(of: -60) == 0 && engine.bin(of: 40) == 12 && engine.bin(of: 100) == 12)
+        let open = engine.range(ofBin: 0), mid = engine.range(ofBin: 5), top = engine.range(ofBin: 12)
+        check("a range is as a play filter takes it (from, up to but not including), and the ends are open", open.from == nil && open.to == -15 && mid.from == 5 && mid.to == 10 && top.from == 40 && top.to == nil)
+        check("a range reads in either unit: 5 to 10 °C is 41 to 50 °F", engine.rangeText(bin: 5, unit: .celsius) == "5 to \(TemperatureUnit.celsius.text(shown: 10))" && engine.rangeText(bin: 5, unit: .fahrenheit) == "41 to \(TemperatureUnit.fahrenheit.text(shown: 50))", engine.rangeText(bin: 5, unit: .fahrenheit))
+
+        // R: 50 plays at 07:00 (rain, 5 °C) on 10 days. C: 50 at noon (clear, 10 °C). M: 25 + 25. S: 50 in one rainy sitting. T: 10 (too few).
+        let weather = marchApril()
+        let range = DateRange(from: date(2025, 3, 1), to: date(2025, 4, 30, 23))
+        var plays: [ScrobbleSnapshot] = []
+        for i in 0..<50 { plays.append(playAt("R", day: 1 + i % 10, hour: 7, minute: i)) }
+        for i in 0..<50 { plays.append(playAt("C", day: 1 + i % 10, hour: 12, minute: i)) }
+        for i in 0..<25 { plays.append(playAt("M", day: 1 + i % 5, hour: 7, minute: i)); plays.append(playAt("M", day: 1 + i % 5, hour: 12, minute: 30 + i)) }
+        for i in 0..<50 { plays.append(playAt("S", day: 20, hour: 7, minute: i)) }
+        for i in 0..<10 { plays.append(playAt("T", day: 1 + i, hour: 12)) }
+        plays.sort { $0.playedAt < $1.playedAt }
+        let result = engine.compute(scrobbles: plays, weather: weather, range: range, adjust: false, calendar: utc)
+        let clearBin6 = 0 * engine.bins + 6, rainBin5 = 3 * engine.bins + 5
+        check("every play with a weather and a temperature falls in exactly one cell: 210, 125 in rain at 5 to 10 and 85 in clear at 10 to 15", result.totalPlays == 210 && result.cellTotals.reduce(0, +) == 210 && result.cellTotals[rainBin5] == 125 && result.cellTotals[clearBin6] == 85, "\(result.totalPlays) \(result.cellTotals.filter { $0 > 0 })")
+        check("the usual share of each weather is its plays over all: clear 85/210, rain 125/210", near(result.baseline[0], 85.0 / 210) && near(result.baseline[3], 125.0 / 210))
+        check("only weathers with 30+ plays get a row: clear and rain; none are left out when the others have no plays at all", result.rows == [.clear, .rain] && result.leftOut.isEmpty)
+        check("an artist with fewer than 30 plays is not placed (T has 10), the rest are", result.candidates.map(\.artist).sorted() == ["C", "M", "R", "S"], "\(result.candidates.map(\.artist))")
+        let byName = Dictionary(uniqueKeysWithValues: result.candidates.map { ($0.artist, $0) })
+        // R: rain at 5 to 10 °C: 50 plays, expected 50 × 125/210, so 1.68×; score ln((50 + 5) / (29.76 + 5)).
+        let r = byName["R"]?.affinity
+        check("R leans into rain at 5 to 10: 50 plays on 10 days, expected 50 × 125/210, at 5 °C", r?.condition == .rain && r?.bin == 5 && r?.plays == 50 && r?.days == 10 && near(r?.expected, 50 * 125.0 / 210) && near(r?.temperature, 5) && near(r?.lift, 210.0 / 125), "\(String(describing: r))")
+        check("the score is the lean damped by 5 plays on each side: ln(55 ÷ 34.76) for R, ln(55 ÷ 25.24) for C", near(r?.score, log(55 / (50 * 125.0 / 210 + 5))) && near(byName["C"]?.affinity?.score, log(55 / (50 * 85.0 / 210 + 5))), "\(String(describing: r?.score))")
+        check("M plays half and half, which is not enough more than usual in either cell (rain 0.84×, clear 1.24×): no lean, but it is placed where it plays most", byName["M"]?.affinity == nil && byName["M"]?.modal.condition == .clear)
+        check("S has the same lean as R but on one day (one long sitting is not a pattern): no lean, most played is rain", byName["S"]?.affinity == nil && byName["S"]?.modal.condition == .rain && byName["S"]?.modal.days == 1)
+        check("an artist's plays by weather and by temperature add up to its plays", byName.values.allSatisfy { $0.conditionPlays.reduce(0, +) == $0.plays && $0.binPlays.reduce(0, +) == $0.plays })
+        check("an artist's average temperature is over all its plays: M is 25 at 5 °C and 25 at 10 °C, 7.5", near(byName["M"]?.averageTemperature, 7.5))
+        let affinity = result.bubbles(mode: .affinity, count: 25)
+        check("weather affinity shows the artists that lean, strongest first: C (clear, 10 °C), then R", affinity.map(\.id) == ["C", "R"] && affinity[0].placement.condition == .clear && near(affinity[0].placement.temperature, 10), "\(affinity.map(\.id))")
+        let played = result.bubbles(mode: .mostPlayed, count: 3)
+        check("most played shows the most played artists (all 50, by name), cut at the count", played.map(\.id) == ["C", "M", "R"], "\(played.map(\.id))")
+        check("most played puts an artist where it is played most (R in rain at 5 to 10 °C)", played[2].placement.condition == .rain && played[2].placement.bin == 5)
+        check("the sentence reads the lean: R is 1.7× as often as usual in rain at 5 to 10 °C", engine.sentence(affinity[1].placement, unit: .celsius) == "1.7× as often as usual in rain at 5 to \(TemperatureUnit.celsius.text(shown: 10))", engine.sentence(affinity[1].placement, unit: .celsius))
+        // Luck: 8 plays where 6.4 were expected is 1.25× but not significant; 14 where 8 were expected is.
+        func lean(_ plays: Int, expected: Double) -> Bool { Double(plays) / expected >= engine.minimumLift && (Double(plays) - expected) / expected.squareRoot() >= engine.minimumSignificance }
+        check("a lean has to be more than luck: 8 plays against 6.4 expected is not, 50 against 29.8 and 25 against 12 are", !lean(8, expected: 6.4) && lean(50, expected: 29.76) && lean(25, expected: 12) && engine.minimumSignificance == 2.5)
+        // The ring: grey for usual, orange more, blue less, stronger the further from usual.
+        check("a lean is coloured by how far from usual: none at 1×, a modest lean already shows (1.25×), full at 3× and beyond, blue below 1", WeatherPalette.leanStrength(1) == 0 && WeatherPalette.leanStrength(1.25) > 0.3 && WeatherPalette.leanStrength(3) == 1 && WeatherPalette.leanStrength(8) == 1 && WeatherPalette.leanStrength(2) > WeatherPalette.leanStrength(1.5) && WeatherPalette.leanStrength(0.3) > WeatherPalette.leanStrength(0.8) && WeatherPalette.leanStrength(0) == 1, "\(WeatherPalette.leanStrength(1.25))")
+        check("a picture is drawn only on a bubble big enough to recognise anyone in (radius 13 and up); the artist's saved picture is found, and none when there is none", engine.artworkMinimumRadius == 13 && engine.artworkURL(for: "Nobody", lookup: [:]) == nil && engine.artworkURL(for: "R", lookup: [ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: "R", album: nil, track: nil)): "file:///art/r.png"]) == "file:///art/r.png")
+        // No one cell may take more than a quarter of the map (and never fewer than three).
+        func fake(_ name: String, score: Double, condition: WeatherCondition, bin: Int) -> TrendsWeatherMapCandidate {
+            let place = TrendsWeatherMapPlacement(condition: condition, bin: bin, plays: 20, expected: 5, days: 8, temperature: 7, score: score)
+            return TrendsWeatherMapCandidate(artist: name, plays: 100, averageTemperature: 7, conditionPlays: [Int](repeating: 0, count: 6), binPlays: [Int](repeating: 0, count: 13), affinity: place, modal: place)
+        }
+        let crowd = (0..<10).map { fake("big\($0)", score: 2 - Double($0) * 0.01, condition: .rain, bin: 5) } + (0..<2).map { fake("small\($0)", score: 0.5 - Double($0) * 0.01, condition: .snow, bin: 1) }
+        let spread = TrendsWeatherMapResult(revision: UUID(), candidates: crowd, cellTotals: [], conditionTotals: [], baseline: [], totalPlays: 0, adjusted: false)
+        let eight = spread.bubbles(mode: .affinity, count: 8).map(\.id)
+        check("a crowded cell stops at a quarter of the map (3 of 8) and the others still show: the 3 strongest rainy ones, then the snowy ones", eight == ["big0", "big1", "big2", "small0", "small1"], "\(eight)")
+        // The time of year: Y plays 40 times in a rainy month, Z 40 in a clear one.
+        var seasonal: [ScrobbleSnapshot] = []
+        for i in 0..<40 { seasonal.append(playAt("Y", day: 1 + i % 8, month: 3, hour: 7, minute: i)) }
+        for i in 0..<40 { seasonal.append(playAt("Z", day: 1 + i % 8, month: 4, hour: 12, minute: i)) }
+        seasonal.sort { $0.playedAt < $1.playedAt }
+        let raw = engine.compute(scrobbles: seasonal, weather: weather, range: range, adjust: false, calendar: utc).bubbles(mode: .affinity, count: 25)
+        let allowed = engine.compute(scrobbles: seasonal, weather: weather, range: range, adjust: true, calendar: utc)
+        check("without allowing for the time of year, the artist of the rainy month leans 2× into rain", raw.first(where: { $0.id == "Y" }).map { near($0.placement.lift, 2) && $0.placement.condition == .rain } ?? false, "\(raw.map { ($0.id, $0.placement.lift) })")
+        check("allowing for it, that is just the month: nobody leans, and the map says adjusted", allowed.bubbles(mode: .affinity, count: 25).isEmpty && allowed.adjusted && allowed.candidates.count == 2)
+        check("nothing to place without weather, outside the period, or for an empty history", engine.compute(scrobbles: plays, weather: .empty, range: range, adjust: false, calendar: utc) == .empty && engine.compute(scrobbles: [], weather: weather, range: range, adjust: false, calendar: utc).candidates.isEmpty && engine.compute(scrobbles: plays, weather: weather, range: DateRange(from: date(2024, 1, 1), to: date(2024, 1, 2)), adjust: false, calendar: utc).totalPlays == 0)
+        // Where bubbles go: across by temperature, down by weather, kept in their lane, a crowd spread up and down only.
+        let size = CGSize(width: 700, height: 320)
+        let placed = TrendsWeatherMapLayout.make(bubbles: affinity, result: result, size: size)
+        let c = placed.placed.first { $0.id == "C" }, rr = placed.placed.first { $0.id == "R" }
+        check("each bubble sits in its weather's lane and its temperature's column: C (clear) above R (rain), R colder than C, so left of it", c != nil && rr != nil && c!.y < rr!.y && rr!.x < c!.x && abs(c!.x - placed.x(forCelsius: 10)) <= 0.01 && abs(rr!.x - placed.x(forCelsius: 5)) <= 0.01, "\(String(describing: c)) \(String(describing: rr))")
+        let packed = TrendsWeatherMapResult(revision: UUID(), candidates: (0..<60).map { fake("a\($0)", score: 1, condition: .rain, bin: 5) }, cellTotals: result.cellTotals, conditionTotals: result.conditionTotals, baseline: result.baseline, totalPlays: 210, adjusted: false)
+        let crowdLayout = TrendsWeatherMapLayout.make(bubbles: packed.bubbles(mode: .mostPlayed, count: 60), result: packed, size: size)
+        let lane = crowdLayout.row(of: .rain) ?? 0
+        let laneTop = crowdLayout.laneHeight * CGFloat(lane), laneBottom = laneTop + crowdLayout.laneHeight
+        let columnLeft = crowdLayout.x(forCelsius: 5), columnRight = crowdLayout.x(forCelsius: 10)
+        check("sixty bubbles in one cell stay inside it: their lane and their five degrees", crowdLayout.placed.count == 60 && crowdLayout.placed.allSatisfy { $0.x >= columnLeft - 0.01 && $0.x <= columnRight + 0.01 && $0.y - $0.radius >= laneTop - 0.5 && $0.y + $0.radius <= laneBottom + 0.5 })
+        func overlaps(_ layout: TrendsWeatherMapLayout) -> Int {
+            var count = 0
+            for (index, a) in layout.placed.enumerated() { for b in layout.placed[(index + 1)...] where hypot(a.x - b.x, a.y - b.y) < (a.radius + b.radius) * 0.5 { count += 1 } }
+            return count
+        }
+        check("and they are packed so that none sits mostly on another", overlaps(crowdLayout) == 0, "\(overlaps(crowdLayout))")
+        check("a bubble is found under the pointer, and not away from it", placed.bubble(at: CGPoint(x: c!.x, y: c!.y))?.id == "C" && placed.bubble(at: CGPoint(x: 1, y: 1)) == nil)
+        // What a bubble opens: exactly its plays in that weather and range of temperature.
+        let drill = engine.drillSpec(for: affinity[1], range: range)
+        check("a bubble opens its artist's tracks played in that weather at those temperatures, in the period", drill.target == .track && drill.playFilter?.weatherConditions == ["Rain"] && drill.playFilter?.temperatureFrom == 5 && drill.playFilter?.temperatureTo == 10 && drill.period?.from == range.from && drill.groups[0].contains { $0.field.id == "artist" && $0.operands == [.text("R")] })
+        for bubble in affinity {
+            var spec = engine.drillSpec(for: bubble, range: range)
+            spec.columns = [QueryFieldRef("plays")]
+            var snapshots = QuerySnapshots(); snapshots.weather = weather
+            if let validated = try? spec.validate(against: .standard) {
+                let run = QueryRun(target: .track, asOf: date(2025, 5, 1), scrobbles: spec.countedPlays(plays, weather: weather), allTimeScrobbles: plays, snapshots: snapshots)
+                let rows = QueryEngine.evaluate(validated, run: run)
+                let key = rows.columns.first?.cacheKey ?? ""
+                let total = rows.rows.reduce(0) { sum, row in if case .value(.number(let n))? = row.cells[key] { sum + Int(n) } else { sum } }
+                check("the plays the drill for \(bubble.id) opens are exactly the \(bubble.placement.plays) its bubble counted", total == bubble.placement.plays, "\(total)")
+            } else { check("the drill for \(bubble.id) is a valid query", false) }
+        }
     }
 
     @MainActor

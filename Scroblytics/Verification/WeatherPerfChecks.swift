@@ -102,6 +102,41 @@ enum WeatherPerfChecks {
         return (plays, snapshot)
     }
 
+    /// Writes what an independent recount needs: every play (time, artist), the weather of every hour they fall in, and what the engine
+    /// worked out for each artist, as files in `folder`. `scripts` has no part in this: the recount is a throwaway script run against them.
+    @MainActor
+    private static func dumpMap(_ map: TrendsWeatherMapResult, plays: [ScrobbleSnapshot], weather: WeatherSnapshot, to folder: URL) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var playLines = ["time\tartist"]
+        var first = Int.max, last = Int.min
+        for play in plays {
+            playLines.append("\(Int(play.playedAt.timeIntervalSince1970))\t\(play.artistName)")
+            let hour = WeatherSeries.hour(of: play.playedAt)
+            first = min(first, hour); last = max(last, hour)
+        }
+        try? playLines.joined(separator: "\n").write(to: folder.appending(path: "plays.tsv"), atomically: true, encoding: .utf8)
+        var weatherLines = ["hour\tcondition\ttemperature"]
+        if first <= last {
+            for hour in first...last {
+                guard let sample = weather.sample(hour: hour), let condition = sample.condition, let temperature = sample.temperature else { continue }
+                weatherLines.append("\(hour)\t\(condition.rawValue)\t\(temperature)")
+            }
+        }
+        try? weatherLines.joined(separator: "\n").write(to: folder.appending(path: "weather.tsv"), atomically: true, encoding: .utf8)
+        func cell(_ p: TrendsWeatherMapPlacement?) -> [String: Any]? {
+            p.map { ["condition": $0.condition.rawValue, "bin": $0.bin, "plays": $0.plays, "expected": $0.expected, "days": $0.days, "temperature": $0.temperature, "score": $0.score] }
+        }
+        let artists = map.candidates.sorted { $0.artist < $1.artist }.map { c -> [String: Any] in
+            var row: [String: Any] = ["artist": c.artist, "plays": c.plays, "average": c.averageTemperature, "modal": cell(c.modal)!]
+            if let affinity = cell(c.affinity) { row["affinity"] = affinity }
+            return row
+        }
+        let top = TrendsWeatherMapMode.allCases.map { mode in [mode.rawValue: map.bubbles(mode: mode, count: 50).map(\.id)] }
+        let object: [String: Any] = ["artists": artists, "totalPlays": map.totalPlays, "top50": top, "adjusted": map.adjusted]
+        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) { try? data.write(to: folder.appending(path: "map.json")) }
+        print("PERF map dump: \(artists.count) artists, \(plays.count) plays, \(weatherLines.count - 1) hours of weather written to \(folder.path)")
+    }
+
     /// Times each step and fails it if it takes longer than `limit` seconds.
     @MainActor
     private static func run(_ name: String, plays: [ScrobbleSnapshot], weather: WeatherSnapshot, check report: (String, Bool, String) -> Void) {
@@ -184,6 +219,20 @@ enum WeatherPerfChecks {
         _ = timed("leaning into the weather, tracks", limit: 12) {
             TrendsLeaningsEngine.compute(scrobbles: plays, weather: weather, range: all, target: .track, choice: "Hot", adjust: true)
         }
+        let map = timed("the artist weather map over the whole history", limit: 12) {
+            TrendsWeatherMapEngine.compute(scrobbles: plays, weather: weather, range: all, adjust: true)
+        }
+        check("\(name): the map places some artists", !map.candidates.isEmpty && !map.rows.isEmpty, "\(map.candidates.count) artists")
+        let shown = timed("choosing and laying out the top 100 (both modes)", limit: 2) { () -> Int in
+            var count = 0
+            for mode in TrendsWeatherMapMode.allCases {
+                let bubbles = map.bubbles(mode: mode, count: 100)
+                count += TrendsWeatherMapLayout.make(bubbles: bubbles, result: map, size: CGSize(width: 900, height: 380)).placed.count
+            }
+            return count
+        }
+        check("\(name): the map lays its bubbles out", shown > 0, "\(shown)")
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_MAP_DUMP"], name == "real" { dumpMap(map, plays: plays, weather: weather, to: URL(fileURLWithPath: folder)) }
         let places = timed("where you listened over the whole history", limit: 12) {
             TrendsPlacesEngine.compute(scrobbles: plays, weather: weather, range: all)
         }
@@ -196,6 +245,7 @@ enum WeatherPerfChecks {
             ("timeline", TrendsShareCharts.timeline(result: result, unit: .celsius, metric: .plays)),
             ("leanings", TrendsShareCharts.leanings(result: leanings, choice: "Rain", target: .artist, away: false, imageLookup: [:])),
             ("places", TrendsShareCharts.places(result: places, unit: .celsius)),
+            ("weathermap", TrendsShareCharts.weatherMap(result: map, mode: .affinity, count: 25, unit: .celsius)),
         ]
         for (slug, native) in cards {
             let card = ShareCard(title: slug, period: "All time", measure: "", rows: [], valueLabel: "", hasMovement: false, kindID: "perf.\(slug)", native: native)

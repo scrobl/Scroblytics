@@ -141,6 +141,50 @@ enum TrendsShareCharts {
         }
     }
 
+    // MARK: Artist weather map
+
+    static func weatherMap(result: TrendsWeatherMapResult, mode: TrendsWeatherMapMode, count: Int, unit: TemperatureUnit, imageLookup: [String: String] = [:]) -> ShareNativeChart {
+        let all = result.bubbles(mode: mode, count: count)
+        let caption: String
+        if let top = all.first {
+            caption = mode == .affinity
+                ? "\(top.candidate.artist) leans furthest into the weather: \(TrendsWeatherMapEngine.sentence(top.placement, unit: unit))."
+                : "\(top.candidate.artist) is your most played artist, most often \(TrendsWeatherMapEngine.phrase(top.placement.condition)) at \(TrendsWeatherMapEngine.rangeText(bin: top.placement.bin, unit: unit))."
+        } else {
+            caption = "Your artists on a map of weather against temperature."
+        }
+        let controls = [
+            ShareNativeControl(id: "count", label: "Artists", kind: .count(range: 5...min(max(count, 10), 100), defaultValue: min(count, 25))),
+            ShareNativeControl(id: "artwork", label: "Show the artwork", kind: .toggle(defaultValue: true)),
+            ShareNativeControl(id: "labels", label: "Show the names", kind: .toggle(defaultValue: true)),
+            ShareNativeControl(id: "density", label: "Show the shading", kind: .toggle(defaultValue: true)),
+            ShareNativeControl(id: "legend", label: "Show the key", kind: .toggle(defaultValue: true)),
+        ]
+        var artwork: [String: String] = [:]
+        for bubble in all { if let url = TrendsWeatherMapEngine.artworkURL(for: bubble.candidate.artist, lookup: imageLookup) { artwork[bubble.candidate.artist] = url } }
+        let urls: [String?] = all.map { artwork[$0.candidate.artist] }
+        let lines = all.prefix(10).enumerated().map { index, bubble in
+            "\(index + 1). \(bubble.candidate.artist): \(TrendsWeatherMapEngine.sentence(bubble.placement, unit: unit)) (\(bubble.candidate.plays.formatted()) plays)"
+        }
+        return ShareNativeChart(
+            id: "weather.map", caption: caption,
+            footnote: "Size is plays, the ring is how far above usual the artist leans, across is its average temperature in its cell. " + (mode == .affinity ? "Each artist is placed where it leans furthest against what is usual, with \(TrendsWeatherMapEngine.minimumPlays)+ plays with weather." : "Each artist is placed where it is played most."),
+            preferredSize: .wide, controls: controls, imageURLs: urls, textLines: lines,
+            zoomForShape: { $0 == .wide ? 1.5 : 1.75 }
+        ) { layout, options, images in
+            let shown = result.bubbles(mode: mode, count: options.number("count", min(count, 25)))
+            let legend = options.flag("legend", true)
+            return AnyView(
+                TrendsWeatherMapChart(
+                    bubbles: shown, result: result, unit: unit, height: layout.logical.height, interactive: false,
+                    labelCount: options.flag("labels", true) ? (shown.count <= 25 ? 14 : 8) : 0,
+                    showsDensity: options.flag("density", true), showsLegend: legend, artwork: artwork, images: images, showsArtwork: options.flag("artwork", true)
+                )
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            )
+        }
+    }
+
     // MARK: Where you listened
 
     static func places(result: TrendsPlacesResult, unit: TemperatureUnit) -> ShareNativeChart {

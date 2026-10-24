@@ -223,6 +223,64 @@ enum DetailSnapshots {
         }
     }
 
+    /// Made-up listening for the weather map: forty artists that each favour a kind of weather and warm or cold, over the same made-up weather.
+    @MainActor
+    static func weatherMapInputs() -> TrendsWeatherGroup.Inputs {
+        let base = syntheticTrendsInputs()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        var seed: UInt64 = 7
+        func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double((seed >> 33) % 10_000) / 10_000 }
+        var plays: [ScrobbleSnapshot] = []
+        var day = calendar.startOfDay(for: base.range.from)
+        while day <= base.range.to {
+            for i in 0..<45 {
+                let at = day.addingTimeInterval(Double(7 * 3600 + i * 1100))
+                guard let sample = base.weather.sample(at: at), let condition = sample.condition, let temperature = sample.temperature else { continue }
+                var weights: [Double] = []
+                for artist in 0..<40 {
+                    var w = 1.0 + Double(artist % 5) * 0.6
+                    let likes: WeatherCondition = [.rain, .clear, .cloudy][artist % 3]
+                    if condition == likes { w *= 3.2 }
+                    if artist % 2 == 0 ? temperature > 12 : temperature < 6 { w *= 2.2 }
+                    weights.append(w)
+                }
+                var pick = next() * weights.reduce(0, +)
+                var chosen = 0
+                for (index, weight) in weights.enumerated() { pick -= weight; if pick <= 0 { chosen = index; break } }
+                let name = "Artist \(Character(UnicodeScalar(65 + chosen % 26)!))\(chosen / 26 + 1)"
+                plays.append(ScrobbleSnapshot(artistName: name, albumName: "Album", trackName: "Song \(i % 5)", imageURL: nil, playedAt: at))
+            }
+            day = calendar.date(byAdding: .day, value: 1, to: day)!
+        }
+        plays.sort { $0.playedAt < $1.playedAt }
+        // Made-up pictures for most artists (none for the rest, so both looks show).
+        var lookup: [String: String] = [:]
+        let folder = FileManager.default.temporaryDirectory.appending(path: "scroblytics-map-art-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (index, name) in Set(plays.map(\.artistName)).sorted().enumerated() where index % 4 != 3 {
+            let image = NSImage(size: NSSize(width: 160, height: 160), flipped: false) { rect in
+                NSColor(hue: CGFloat((index * 37) % 100) / 100, saturation: 0.5, brightness: 0.7, alpha: 1).setFill(); rect.fill()
+                NSColor.white.withAlphaComponent(0.4).setFill(); NSBezierPath(ovalIn: rect.insetBy(dx: 45, dy: 45)).fill()
+                NSColor.black.withAlphaComponent(0.25).setFill(); NSBezierPath(rect: CGRect(x: 0, y: 0, width: rect.width, height: 40)).fill()
+                return true
+            }
+            if let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                let file = folder.appending(path: "\(index).png")
+                try? png.write(to: file)
+                lookup[ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: name, album: nil, track: nil))] = file.absoluteString
+            }
+        }
+        return TrendsWeatherGroup.Inputs(scrobbles: plays, canonical: plays, imageLookup: lookup, durations: .empty, weather: base.weather, range: base.range, compareRange: nil, version: 2)
+    }
+
+    @MainActor
+    static func weatherMapScene(unit: TemperatureUnit) -> some View {
+        weatherCard("Artist weather map", "Where your artists sit on a map of weather against temperature") {
+            TrendsWeatherMapCard(inputs: weatherMapInputs(), unit: unit, adjust: false, openQuery: { _, _ in })
+        }
+    }
+
     /// Every Weather & places chart as the card it makes, from the made-up listening above, for each shape (the shared cards' own renders).
     @MainActor
     static func nativeShareCards() async -> [(name: String, card: ShareCard, images: [String: NSImage])] {
@@ -233,12 +291,15 @@ enum DetailSnapshots {
         )
         let leanings = TrendsLeaningsEngine.compute(scrobbles: inputs.canonical, weather: inputs.weather, range: range, target: .artist, choice: "Rain", adjust: true)
         let places = TrendsPlacesEngine.compute(scrobbles: inputs.canonical, weather: inputs.weather, range: range)
+        let mapInputs = weatherMapInputs()
+        let mapResult = TrendsWeatherMapEngine.compute(scrobbles: mapInputs.canonical, weather: mapInputs.weather, range: mapInputs.range, adjust: false)
         let natives: [(String, String, ShareNativeChart)] = [
             ("tiles", "Weather and listening", TrendsShareCharts.tiles(result: result, metric: .plays, caption: "Rain is your music weather: +23% against an average day")),
             ("grid", "Temperature and time of day", TrendsShareCharts.grid(result: result, unit: .celsius)),
             ("timeline", "Listening against the weather", TrendsShareCharts.timeline(result: result, unit: .celsius, metric: .plays)),
             ("leanings", "Leaning into the weather", TrendsShareCharts.leanings(result: leanings, choice: "Rain", target: .artist, away: false, imageLookup: inputs.imageLookup)),
             ("places", "Where you listened", TrendsShareCharts.places(result: places, unit: .celsius)),
+            ("weathermap", "Artist weather map", TrendsShareCharts.weatherMap(result: mapResult, mode: .affinity, count: 25, unit: .celsius, imageLookup: mapInputs.imageLookup)),
         ]
         // The other nine Trends charts: from the same plays where an engine makes them, by hand where it needs data this made-up library lacks.
         let calendar = AppCalendars.listening
@@ -378,7 +439,7 @@ enum DetailSnapshots {
     }
 
     @MainActor
-    static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, to url: URL) async {
+    static func render<Content: View>(_ content: Content, width: CGFloat, dark: Bool, container: ModelContainer, flagged: FlaggedTracksStore? = nil, settle: Int = 0, to url: URL) async {
         let view = content
             .padding(16)
             .frame(width: width)
@@ -397,7 +458,7 @@ enum DetailSnapshots {
         for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
         let fitting = host.fittingSize
         window.setContentSize(NSSize(width: width, height: max(200, fitting.height)))
-        for _ in 0..<3 { try? await Task.sleep(for: .milliseconds(100)); host.layoutSubtreeIfNeeded() }
+        for _ in 0..<(3 + settle) { try? await Task.sleep(for: .milliseconds(100)); host.layoutSubtreeIfNeeded() }
         if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: rep)
             if let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: url) }
@@ -466,6 +527,37 @@ enum DetailSnapshots {
                 for dark in [true, false] {
                     await render(playFilter(chosen), width: width, dark: dark, container: container, to: base.appending(path: "playfilter-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
+            }
+            let mapOnly = ProcessInfo.processInfo.environment["SCROBLYTICS_SNAPSHOT_MAP_ONLY"] != nil
+            for (width, dark, unit) in [(1000, true, TemperatureUnit.celsius), (1000, false, .fahrenheit), (640, true, .celsius), (440, true, .celsius)] as [(CGFloat, Bool, TemperatureUnit)] {
+                await render(weatherMapScene(unit: unit), width: width, dark: dark, container: container, settle: 15, to: base.appending(path: "trends-map-\(Int(width))-\(dark ? "dark" : "light").png"))
+            }
+            for key in ["50", "100"] {
+                UserDefaults.standard.set(Int(key), forKey: "trends.weather.map.count")
+                await render(weatherMapScene(unit: .celsius), width: 1000, dark: true, container: container, settle: 15, to: base.appending(path: "trends-map-\(key)-dark.png"))
+            }
+            UserDefaults.standard.set("mostPlayed", forKey: "trends.weather.map.mode")
+            await render(weatherMapScene(unit: .celsius), width: 1000, dark: true, container: container, settle: 15, to: base.appending(path: "trends-map-most-dark.png"))
+            UserDefaults.standard.removeObject(forKey: "trends.weather.map.mode")
+            UserDefaults.standard.removeObject(forKey: "trends.weather.map.count")
+            let tipInputs = weatherMapInputs()
+            let tipResult = TrendsWeatherMapEngine.compute(scrobbles: tipInputs.canonical, weather: tipInputs.weather, range: tipInputs.range, adjust: false)
+            if let bubble = tipResult.bubbles(mode: .affinity, count: 5).first {
+                for (unit, dark) in [(TemperatureUnit.celsius, true), (.fahrenheit, false)] {
+                    await render(TrendsWeatherMapTooltip(bubble: bubble, result: tipResult, rows: tipResult.rows, unit: unit).frame(width: 240), width: 300, dark: dark, container: container, settle: 15, to: base.appending(path: "trends-map-tooltip-\(dark ? "dark" : "light").png"))
+                }
+            }
+            if mapOnly {
+                for (name, card, images) in await nativeShareCards() where name == "weathermap" {
+                    for size in ShareSize.allCases {
+                        var options = card.defaultOptions
+                        options.size = size
+                        if let png = ShareRenderer.png(card: card, options: options, identity: ShareIdentity(name: nil, showsFooter: true), images: images, scale: 1) {
+                            try? png.write(to: base.appending(path: "share-native-\(name)-\(size.rawValue).png"))
+                        }
+                    }
+                }
+                exit(0)
             }
             for dark in [true, false] {
                 await render(weatherTrends(unit: .celsius), width: 1000, dark: dark, container: container, to: base.appending(path: "trends-weather-\(dark ? "dark" : "light").png"))

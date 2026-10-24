@@ -87,6 +87,19 @@ enum WeatherPalette {
         return lift >= 1 ? Color(red: 0.96, green: 0.58, blue: 0.20).opacity(0.12 + 0.78 * strength) : Color(red: 0.25, green: 0.52, blue: 0.95).opacity(0.12 + 0.78 * strength)
     }
 
+    /// How strongly something leans, as a solid colour: grey for usual, through orange for more than usual, or blue for less. The square
+    /// root lets a modest lean show (1.25× already has colour) while a strong one (3×) is full strength.
+    static func leanStrength(_ lift: Double) -> Double {
+        lift >= 1 ? min(1, ((lift - 1) / 2).squareRoot()) : min(1, ((1 - lift) / 0.7).squareRoot())
+    }
+
+    static func lean(_ lift: Double) -> Color {
+        let t = leanStrength(lift)
+        let from = (0.66, 0.69, 0.74)
+        let to = lift >= 1 ? (0.96, 0.50, 0.12) : (0.22, 0.50, 0.95)
+        return Color(red: from.0 + (to.0 - from.0) * t, green: from.1 + (to.1 - from.1) * t, blue: from.2 + (to.2 - from.2) * t)
+    }
+
     static func percent(_ lift: Double) -> String {
         let change = (lift - 1) * 100
         if abs(change) < 0.5 { return "±0%" }

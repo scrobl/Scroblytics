@@ -750,7 +750,7 @@ enum ShareChecks {
             check("options saved before these controls existed still load", (try? JSONDecoder().decode(ShareOptions.self, from: Data("{\"size\":\"wide\"}".utf8)))?.flags.isEmpty == true)
             // The Weather & places charts as cards, on made-up listening.
             let natives = await DetailSnapshots.nativeShareCards()
-            check("every Trends chart drawn for the card makes one: the five weather and places charts and the nine others", natives.map(\.name) == ["tiles", "grid", "timeline", "leanings", "places", "volume", "heatmap", "discovery", "taste", "eras", "flow", "loyalty", "rankings", "longtail", "volumecompare"], "\(natives.map(\.name))")
+            check("every Trends chart drawn for the card makes one: the six weather and places charts and the nine others", natives.map(\.name) == ["tiles", "grid", "timeline", "leanings", "places", "weathermap", "volume", "heatmap", "discovery", "taste", "eras", "flow", "loyalty", "rankings", "longtail", "volumecompare"], "\(natives.map(\.name))")
             for (name, nativeChartCard, images) in natives {
                 for size in ShareSize.allCases {
                     var o = nativeChartCard.defaultOptions; o.size = size

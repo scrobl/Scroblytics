@@ -145,6 +145,9 @@ struct TrendsWeatherGroup: View {
         TrendsSection(title: "Leaning into the weather", subtitle: "The artists, albums and tracks you play more (or less) than usual in a kind of weather") {
             TrendsLeaningsCard(inputs: inputs, adjust: adjustForSeason, openQuery: openQuery)
         }
+        TrendsSection(title: "Artist weather map", subtitle: "Where your artists sit on a map of weather against temperature") {
+            TrendsWeatherMapCard(inputs: inputs, unit: unit, adjust: adjustForSeason, openQuery: openQuery)
+        }
         TrendsSection(title: "Temperature and time of day", subtitle: "How much more or less than usual you play, by how warm it was for your place and the time of day" + (result.adjusted ? ", allowing for the time of year" : "")) {
             gridCard(result)
         }

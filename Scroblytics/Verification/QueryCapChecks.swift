@@ -389,8 +389,8 @@ enum QueryCapChecks {
             let oldJSON = Data(#"{"schemaVersion":4,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8)
             let decodedOld = try? QuerySpec.decode(oldJSON)
             check("a query saved before the display order existed still decodes, with none", decodedOld != nil && decodedOld?.resultSorts == nil && decodedOld?.showInRankOrder == nil)
-            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 9)
-            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":10,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
+            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 10)
+            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":11,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
         } catch {
             check("the engine runs a per-release-year cap", false, "\(error)")
         }
@@ -448,8 +448,8 @@ enum QueryCapChecks {
         let restated = #"["the top song from each album — grouping by album isn’t something a field can express"]"#
 
         // The plays to count: only those made at certain times or in certain weather.
-        func playKeys(weekdays: String = "[]", months: String = "[]", from: String = "null", to: String = "null", weather: String = "[]", temperature: String = "[]", city: String = "[]") -> String {
-            "\"playWeekdays\":\(weekdays),\"playMonths\":\(months),\"playFromHour\":\(from),\"playToHour\":\(to),\"playWeather\":\(weather),\"playTemperature\":\(temperature),\"playCity\":\(city),"
+        func playKeys(weekdays: String = "[]", months: String = "[]", from: String = "null", to: String = "null", weather: String = "[]", temperature: String = "[]", city: String = "[]", region: String = "[]", country: String = "[]") -> String {
+            "\"playWeekdays\":\(weekdays),\"playMonths\":\(months),\"playFromHour\":\(from),\"playToHour\":\(to),\"playWeather\":\(weather),\"playTemperature\":\(temperature),\"playCity\":\(city),\"playRegion\":\(region),\"playCountry\":\(country),"
         }
         let cityContext = AskContext(knownCities: ["Seattle", "Munich"])
         let inMunich = try? AskModelEngine.read(reply(sorts: playsDescending, limit: "10", caps: playKeys(city: #"["munich"]"#)), request: "my top 10 songs in Munich", registry: .standard, context: cityContext, now: Date(), engine: "test", seconds: 0)
@@ -458,6 +458,14 @@ enum QueryCapChecks {
         check("a city that isn't one of the person's is dropped and said so, never silently kept", inParis?.interpretation.spec.playFilter == nil && inParis?.interpretation.dropped.first?.what.contains("Paris") == true)
         let rainyMunich = try? AskModelEngine.read(reply(sorts: playsDescending, limit: "10", caps: playKeys(weather: #"["Rain"]"#, temperature: #"["Cold"]"#, city: #"["Seattle"]"#)), request: "top songs when it was cold and raining in Seattle", registry: .standard, context: cityContext, now: Date(), engine: "test", seconds: 0)
         check("a city combines with weather and temperature", rainyMunich?.interpretation.spec.playFilter == QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, weatherConditions: ["Rain"], temperatureBands: ["Cold"], cities: ["Seattle"]))
+        // States or regions and countries, from the person's own places.
+        let placeContext = AskContext(knownCities: ["Chicago", "Munich"], knownRegions: ["Illinois", "Bavaria"], knownCountries: ["United States", "Germany"])
+        let inGermany = try? AskModelEngine.read(reply(sorts: playsDescending, limit: "25", caps: playKeys(country: #"["germany"]"#)), request: "my top 25 songs I listened to in Germany", registry: .standard, context: placeContext, now: Date(), engine: "test", seconds: 0)
+        check("“top 25 songs I listened to in Germany” becomes a country filter, sorted by plays, 25 results, nothing dropped", inGermany?.interpretation.spec.playFilter?.countries == ["Germany"] && inGermany?.interpretation.spec.playFilter?.cities == nil && inGermany?.interpretation.spec.limit == 25 && inGermany?.interpretation.spec.sorts.count == 1 && inGermany?.interpretation.dropped.isEmpty == true && inGermany?.interpretation.unsupported.isEmpty == true, "\(String(describing: inGermany?.interpretation.spec.playFilter))")
+        let wilcoIllinois = try? AskModelEngine.read(reply(conditions: artistCondition, sorts: playsDescending, limit: "25", caps: playKeys(region: #"["Illinois"]"#)), request: "top 25 songs by Artist A I played in Illinois", registry: .standard, context: placeContext, now: Date(), engine: "test", seconds: 0)
+        check("“top 25 songs by an artist I played in Illinois” keeps the artist condition and filters the plays to the state", wilcoIllinois?.interpretation.spec.playFilter?.regions == ["Illinois"] && wilcoIllinois?.interpretation.spec.groups.first?.first?.field.id == "artist" && wilcoIllinois?.interpretation.spec.limit == 25 && wilcoIllinois?.interpretation.dropped.isEmpty == true, "\(String(describing: wilcoIllinois?.interpretation.spec))")
+        let inFrance = try? AskModelEngine.read(reply(sorts: playsDescending, limit: "10", caps: playKeys(country: #"["France"]"#)), request: "my top 10 songs in France", registry: .standard, context: placeContext, now: Date(), engine: "test", seconds: 0)
+        check("a country that isn't one the person has been to is dropped and said so, never silently kept", inFrance?.interpretation.spec.playFilter == nil && inFrance?.interpretation.dropped.first?.what.contains("France") == true)
         let coldRainySunday = read(reply(sorts: playsDescending, limit: "10", caps: playKeys(weekdays: #"["Sunday"]"#, from: "5", to: "11", weather: #"["Rain"]"#, temperature: #"["Cold"]"#)), request: "top 10 songs when it is cold and raining on a sunday morning")
         let expectedPlay = QueryPlayFilter(weekdays: [0], fromHour: 5, toHour: 11, months: nil, weatherConditions: ["Rain"], temperatureBands: ["Cold"])
         check("“top 10 songs when it is cold and raining on a Sunday morning” becomes a play filter: Sunday, 5–11, rain, cold",

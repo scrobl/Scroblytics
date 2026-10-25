@@ -59,6 +59,7 @@ extension WeatherSnapshot {
             snapshot.placeName = home?.name
             snapshot.unit = WeatherSettings.temperatureUnit(defaults: defaults)
         }
+        snapshot.homePlace = home
         // Each trip's weather from its own folder. A trip not downloaded yet is still on the snapshot, with no hours: its days show no weather
         // until it arrives, rather than quietly showing the home weather of a place you weren't in. With weather off, or for a trip that is
         // only a typed name, there is no weather (nil) but the trip still says where you were.
@@ -84,10 +85,36 @@ enum WeatherLocations {
         return PlaceNames.unique([home?.shortName ?? "Home"] + trips.map(\.shortName))
     }
 
+    /// The states or regions of the home place and the trips, each once. A place with none (coordinates, a typed name) adds nothing.
+    static func knownRegions(defaults: UserDefaults = .standard, tripsFile: URL = WeatherTripStore.defaultFile()) -> [String] {
+        PlaceNames.unique(allPlaces(defaults: defaults, tripsFile: tripsFile).compactMap { $0.resolvedRegionAndCountry.region })
+    }
+
+    /// The countries of the home place and the trips, each once.
+    static func knownCountries(defaults: UserDefaults = .standard, tripsFile: URL = WeatherTripStore.defaultFile()) -> [String] {
+        PlaceNames.unique(allPlaces(defaults: defaults, tripsFile: tripsFile).compactMap { $0.resolvedRegionAndCountry.country })
+    }
+
+    private static func allPlaces(defaults: UserDefaults, tripsFile: URL) -> [WeatherPlace] {
+        (WeatherSettings.place(defaults: defaults).map { [$0] } ?? []) + WeatherTripStore.load(file: tripsFile).map(\.place)
+    }
+
     /// The city as the app names it (its own spelling), for a name a person or model typed; nil if it isn't one of `known`.
     static func match(_ name: String, in known: [String]) -> String? {
         let key = PlaceNames.key(name)
         return known.first { PlaceNames.key($0) == key }
+    }
+
+    /// The country as the app names it, also for the short forms people write ("US", "UK"); nil if it isn't one of `known`.
+    static func matchCountry(_ name: String, in known: [String]) -> String? {
+        if let exact = match(name, in: known) { return exact }
+        let aliases: [String: [String]] = [
+            "united states": ["us", "u.s.", "usa", "u.s.a.", "united states of america", "america", "the us", "the usa", "the states"],
+            "united kingdom": ["uk", "u.k.", "great britain", "britain", "the uk"],
+        ]
+        let key = PlaceNames.key(name)
+        for (canonical, forms) in aliases where forms.contains(key) { return match(canonical, in: known) }
+        return nil
     }
 }
 

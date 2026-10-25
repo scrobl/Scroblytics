@@ -68,7 +68,7 @@ enum AskPrompt {
         in plain words. Never replace it with a different field, and never invent a name, artist or tag the request didn't say. \
         If nothing in the request can be expressed, return no conditions and say why in "unsupported".
 
-        PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature / playCity keys)
+        PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature / playCity / playRegion / playCountry keys)
         - These keys count ONLY the plays made at that time or in that weather, before anything else is worked out. Use them when the request \
         ranks, counts or lists music by what was played then: "my top songs on Sunday mornings", "what I played most in winter", "artists I played \
         when it rained", "top 10 songs when it is cold and raining on a Sunday morning". For "top", "most played" and similar, also sort by plays \
@@ -85,6 +85,11 @@ enum AskPrompt {
         - playCity: city names as the person wrote them ("in Munich", "when I was in Las Vegas"), only for a city they name; the app checks the name \
         against the places they have set in Settings › Weather (home and trips) and tells them if it isn't one. It combines with the other keys. \
         Use the City field instead when the request describes the item ("music I mostly play in Seattle").
+        - playRegion: a state, province or region ("in Illinois", "when I was in Bavaria"); playCountry: a country ("in Germany", "in the US"). Write the \
+        full name, not an abbreviation ("Illinois", not "IL"), and put a country only in playCountry and a state only in playRegion. The app checks \
+        them against where the person's home place and trips are, and tells them if it isn't one. "Top 25 songs I listened to in Germany" is \
+        playCountry ["Germany"] with plays descending and a limit of 25; "top 25 songs by Band X I played in Illinois" adds the artist condition and \
+        playRegion ["Illinois"].
         - Leave the keys empty (empty lists, null hours) when the request names no such time or weather. These are supported: never put them in \
         "unsupported". Weather needs the person to have turned weather on; the app tells them if it isn't, so don't mention it.
 

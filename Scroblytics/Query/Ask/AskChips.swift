@@ -39,7 +39,7 @@ enum AskChips {
                 kind: .condition, text: "Only plays: " + filter.label,
                 help: "Only the plays made then are counted, so plays, ranks and dates use just those plays.",
                 caveat: filter.usesWeather && !weatherReady ? "This needs weather, which is off or not downloaded yet, so no plays can match. Turn it on in Settings › Weather."
-                    : (filter.usesCity && !cityReady ? "This needs a home place, which isn't set yet (weather is off), so no plays can match. Set one in Settings › Weather." : nil)
+                    : (filter.usesPlace && !cityReady ? "This needs to know where you were, and no trip or home place is recorded yet, so no plays can match. Add a trip in Tools › Trips." : nil)
             ))
         }
         for sort in spec.sorts {

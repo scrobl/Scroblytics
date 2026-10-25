@@ -450,6 +450,8 @@ struct WeatherSnapshot: Sendable {
     var coldAtOrBelow: Double?
     var hotAtOrAbove: Double?
     var placeName: String?
+    /// The home place itself (its state or region and country come from it); `placeName` is its name alone.
+    var homePlace: WeatherPlace?
     /// The unit temperature fields are worked out in (the unit chosen in Settings when the snapshot was read).
     var unit = TemperatureUnit.celsius
 
@@ -526,6 +528,26 @@ struct WeatherSnapshot: Sendable {
         if let trip = WeatherTrip.effective(at: date, in: trips.map(\.trip)) { return trip.shortName }
         return Self.homeCityName(placeName: placeName, hasTrips: !trips.isEmpty)
     }
+
+    /// The place a play at `date` was made in: the trip's if the person was away, else the home place (nil when none was chosen).
+    func place(at date: Date) -> WeatherPlace? {
+        if let trip = WeatherTrip.effective(at: date, in: trips.map(\.trip)) { return trip.place }
+        return homePlace
+    }
+
+    /// The state or region and the country a play at `date` was made in, where the place knows them (one chosen from a city search does;
+    /// coordinates and typed names don't).
+    func regionAndCountry(at date: Date) -> (region: String?, country: String?) {
+        place(at: date)?.resolvedRegionAndCountry ?? (nil, nil)
+    }
+
+    /// Every state or region the home place and the trips are in, each once.
+    var regions: [String] { PlaceNames.unique(allPlaces.compactMap { $0.resolvedRegionAndCountry.region }) }
+
+    /// Every country the home place and the trips are in, each once.
+    var countries: [String] { PlaceNames.unique(allPlaces.compactMap { $0.resolvedRegionAndCountry.country }) }
+
+    private var allPlaces: [WeatherPlace] { (homePlace.map { [$0] } ?? []) + trips.map(\.trip.place) }
 
     /// Every city this snapshot can name: home, then each trip, each once.
     var cities: [String] {

@@ -180,6 +180,9 @@ struct AskContext: Sendable {
     var knownArtists: Set<String>?
     /// The cities the person has set (home and trips), for checking a city a model names; nil reads them from the settings.
     var knownCities: [String]?
+    /// The states or regions and countries of the home place and the trips, for checking what a model names; nil reads them from the settings.
+    var knownRegions: [String]?
+    var knownCountries: [String]?
     var earliest: Date?
     /// For finding the library item a "similar to X" request names.
     var container: ModelContainer?

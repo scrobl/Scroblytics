@@ -20,6 +20,8 @@ enum AskWire {
         static let playWeather = "playWeather"
         static let playTemperature = "playTemperature"
         static let playCity = "playCity"
+        static let playRegion = "playRegion"
+        static let playCountry = "playCountry"
         static let unsupported = "unsupported"
         // a condition / sort key
         static let field = "field"
@@ -129,9 +131,13 @@ enum AskWire {
         var temperature: [String]?
         /// City names as the person or model wrote them; checked against the places they have listened in.
         var city: [String]? = nil
+        /// State or region and country names as the person or model wrote them; checked against where they have listened.
+        var region: [String]? = nil
+        var country: [String]? = nil
 
         var isEmpty: Bool {
-            (weekdays ?? []).isEmpty && (months ?? []).isEmpty && fromHour == nil && toHour == nil && (weather ?? []).isEmpty && (temperature ?? []).isEmpty && (city ?? []).isEmpty
+            (weekdays ?? []).isEmpty && (months ?? []).isEmpty && fromHour == nil && toHour == nil && (weather ?? []).isEmpty && (temperature ?? []).isEmpty
+                && (city ?? []).isEmpty && (region ?? []).isEmpty && (country ?? []).isEmpty
         }
     }
 

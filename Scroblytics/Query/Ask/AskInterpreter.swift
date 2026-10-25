@@ -32,7 +32,7 @@ enum AskInterpreter {
     /// `count` is the number of results the request asked for (found in stage 1), applied as the limit.
     static func interpret(
         _ query: AskWire.Query, target: QueryTarget, registry: QueryFieldRegistry, now: Date, calendar: Calendar = AppCalendars.listening, count: Int? = nil, ordered: Bool = false,
-        knownTags: Set<String>? = nil, knownCities: [String]? = nil
+        knownTags: Set<String>? = nil, knownCities: [String]? = nil, knownRegions: [String]? = nil, knownCountries: [String]? = nil
     ) -> AskInterpretation {
         var dropped: [AskInterpretation.Dropped] = []
         var spec = QuerySpec(target: target)
@@ -85,7 +85,7 @@ enum AskInterpreter {
             if limit >= 1 { spec.limit = limit } else { dropped.append(.init(what: "limit \(limit)", reason: "a limit below 1")) }
         }
 
-        spec.playFilter = playFilter(query.playFilter, dropped: &dropped, knownCities: knownCities)
+        spec.playFilter = playFilter(query.playFilter, dropped: &dropped, knownCities: knownCities, knownRegions: knownRegions, knownCountries: knownCountries)
 
         spec.groupLimit = groupLimit(perArtist: query.perArtist, perAlbum: query.perAlbum, perReleaseYear: query.perReleaseYear, target: target, dropped: &dropped)
 
@@ -97,7 +97,9 @@ enum AskInterpreter {
     /// The plays to count, as the model named them, kept only where the app would accept them: day names become weekday numbers, months
     /// must be 1–12, hours 0–23 and both given, weather and temperature names one of the app's own. Anything that doesn't fit is dropped
     /// and explained, never kept; what is left still applies.
-    static func playFilter(_ wire: AskWire.PlayFilter?, dropped: inout [AskInterpretation.Dropped], knownCities: [String]? = nil) -> QueryPlayFilter? {
+    static func playFilter(
+        _ wire: AskWire.PlayFilter?, dropped: inout [AskInterpretation.Dropped], knownCities: [String]? = nil, knownRegions: [String]? = nil, knownCountries: [String]? = nil
+    ) -> QueryPlayFilter? {
         guard let wire, !wire.isEmpty else { return nil }
         var filter = QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil)
 
@@ -144,20 +146,42 @@ enum AskInterpreter {
         }
         if !bands.isEmpty { filter.temperatureBands = TemperatureBand.allCases.map(\.rawValue).filter(bands.contains) }
 
-        // Cities: only places the person has set (home and trips), matched ignoring case and accents, and written the app's way.
-        var cities: [String] = []
-        let known = knownCities ?? WeatherLocations.knownCities()
-        for name in wire.city ?? [] {
-            if let city = WeatherLocations.match(name, in: known) { if !cities.contains(city) { cities.append(city) } }
-            else {
-                let places = known.isEmpty ? "no home place is set in Settings › Weather" : "your places are " + known.joined(separator: ", ")
-                dropped.append(.init(what: "the city “\(name)”", reason: "not a place you have listened in (\(places))"))
+        // Places: only where the person has been (home and trips), matched ignoring case and accents, and written the app's way. A name
+        // written under the wrong kind (a country in the state list, a city in the country list) is still found, under the kind it is.
+        // Lists the caller gave are used as they are (and the others are empty); with none given they come from the settings.
+        let given = knownCities != nil || knownRegions != nil || knownCountries != nil
+        let known = (
+            cities: knownCities ?? (given ? [] : WeatherLocations.knownCities()), regions: knownRegions ?? (given ? [] : WeatherLocations.knownRegions()),
+            countries: knownCountries ?? (given ? [] : WeatherLocations.knownCountries())
+        )
+        var cities: [String] = [], regions: [String] = [], countries: [String] = []
+        func place(_ name: String, first: PlaceKind) {
+            for kind in [first] + PlaceKind.allCases.filter({ $0 != first }) {
+                switch kind {
+                case .city:
+                    if let city = WeatherLocations.match(name, in: known.cities) { if !cities.contains(city) { cities.append(city) }; return }
+                case .region:
+                    if let region = WeatherLocations.match(name, in: known.regions) { if !regions.contains(region) { regions.append(region) }; return }
+                case .country:
+                    if let country = WeatherLocations.matchCountry(name, in: known.countries) { if !countries.contains(country) { countries.append(country) }; return }
+                }
             }
+            let kindName = first == .city ? "city" : (first == .region ? "state or region" : "country")
+            let list = first == .city ? known.cities : (first == .region ? known.regions : known.countries)
+            let places = known.cities.isEmpty ? "no home place or trip is recorded (Tools › Trips)" : (list.isEmpty ? "none of your places has a \(kindName) recorded" : "yours are " + list.joined(separator: ", "))
+            dropped.append(.init(what: "the \(kindName) “\(name)”", reason: "not somewhere you have listened (\(places))"))
         }
+        for name in wire.city ?? [] { place(name, first: .city) }
+        for name in wire.region ?? [] { place(name, first: .region) }
+        for name in wire.country ?? [] { place(name, first: .country) }
         if !cities.isEmpty { filter.cities = cities }
+        if !regions.isEmpty { filter.regions = regions }
+        if !countries.isEmpty { filter.countries = countries }
 
         return filter.isEmpty ? nil : filter
     }
+
+    private enum PlaceKind: CaseIterable { case city, region, country }
 
     /// A weather word as a person or a model might write it: the app's own names, plus the ones that mean the same.
     private static func weatherCondition(named name: String) -> WeatherCondition? {

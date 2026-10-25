@@ -66,11 +66,20 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// Only plays made in one of these cities (the home place's or a trip's short name, "Seattle", "Munich"), wherever the person was at the
     /// time of the play. nil or empty = anywhere. Optional, and last, so sets saved before it existed decode unchanged.
     var cities: [String]?
+    /// Only plays made in one of these states or regions ("Illinois", "Bavaria"), or countries ("Germany"), as the home place or the trip
+    /// you were on knew them when it was chosen. Each list is "any of", and the lists (with the cities) must all hold. Optional, and last,
+    /// so sets saved before they existed decode unchanged.
+    var regions: [String]?
+    var countries: [String]?
 
-    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather && !usesCity }
+    var isEmpty: Bool { (weekdays ?? []).isEmpty && fromHour == nil && toHour == nil && (months ?? []).isEmpty && !usesWeather && !usesPlace }
 
-    /// Whether the filter looks at where the play was made, so counting plays needs the home place and trips.
+    /// Whether the filter looks at a city.
     var usesCity: Bool { !(cities ?? []).isEmpty }
+
+    /// Whether the filter looks at where the play was made (a city, state or region, or country), so counting plays needs the home place
+    /// and trips.
+    var usesPlace: Bool { usesCity || !(regions ?? []).isEmpty || !(countries ?? []).isEmpty }
 
     /// Whether the filter looks at the weather, so counting plays needs it.
     var usesWeather: Bool { !(weatherConditions ?? []).isEmpty || !(temperatureBands ?? []).isEmpty || temperatureFrom != nil || temperatureTo != nil }
@@ -84,6 +93,16 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
             guard let city = weather.city(at: date) else { return false }
             let key = PlaceNames.key(city)
             guard cities.contains(where: { PlaceNames.key($0) == key }) else { return false }
+        }
+        if let regions, !regions.isEmpty {
+            guard let region = weather.regionAndCountry(at: date).region else { return false }
+            let key = PlaceNames.key(region)
+            guard regions.contains(where: { PlaceNames.key($0) == key }) else { return false }
+        }
+        if let countries, !countries.isEmpty {
+            guard let country = weather.regionAndCountry(at: date).country else { return false }
+            let key = PlaceNames.key(country)
+            guard countries.contains(where: { PlaceNames.key($0) == key }) else { return false }
         }
         if usesWeather {
             guard let sample = weather.sample(at: date) else { return false }
@@ -115,6 +134,8 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         if let temperatureTo, !temperatureTo.isFinite { throw QueryError.unsupported("a temperature that isn’t a number") }
         if let temperatureFrom, let temperatureTo, temperatureFrom >= temperatureTo { throw QueryError.unsupported("a temperature range that ends before it starts") }
         if let cities, cities.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { throw QueryError.unsupported("a city with no name") }
+        if let regions, regions.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { throw QueryError.unsupported("a state or region with no name") }
+        if let countries, countries.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { throw QueryError.unsupported("a country with no name") }
         if (fromHour == nil) != (toHour == nil) { throw QueryError.unsupported("an hour range needs both a start and an end") }
         if let fromHour, let toHour, !(0...23).contains(fromHour) || !(0...23).contains(toHour) { throw QueryError.unsupported("hours run from 0 to 23") }
     }
@@ -144,6 +165,12 @@ struct QueryPlayFilter: Codable, Hashable, Sendable {
         }
         if let cities, !cities.isEmpty {
             parts.append("in " + cities.joined(separator: " or "))
+        }
+        if let regions, !regions.isEmpty {
+            parts.append("in " + regions.joined(separator: " or "))
+        }
+        if let countries, !countries.isEmpty {
+            parts.append("in " + countries.joined(separator: " or "))
         }
         if let conditions = weatherConditions, !conditions.isEmpty {
             let ordered = WeatherCondition.allCases.map(\.rawValue).filter(conditions.contains).map { $0.lowercased() }
@@ -203,8 +230,8 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
     /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. 8: and a range of
-    /// temperatures. 9: and cities. Older sets decode unchanged.
-    static let currentSchemaVersion = 9
+    /// temperatures. 9: and cities. 10: and states or regions and countries. Older sets decode unchanged.
+    static let currentSchemaVersion = 10
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget

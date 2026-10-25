@@ -44,6 +44,7 @@ struct ToolsView: View {
         }
         .onChange(of: askRequest?.id) {
             guard askRequest != nil else { return }
+            navigation.rememberToolPage()
             navigation.path.append(ToolDescriptor.query)
         }
         .onChange(of: overviewToolRequest) { routeOverviewTool() }

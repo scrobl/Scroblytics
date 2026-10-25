@@ -284,6 +284,32 @@ enum DetailChecks {
                 check("an in-memory store opens for the picture lookup check", false)
             }
 
+            // Back from a Query opened by a tool lands on that tool's page, not the Tools landing page.
+            let tripsTool = ToolDescriptor.all.first { $0.id == .trips }!
+            let nav = DetailNavigationCoordinator(origin: .tools)
+            nav.path.append(tripsTool)
+            nav.setOrigin(.tools, label: tripsTool.name)
+            var returned = 0
+            nav.predecessor = DetailPredecessor(source: "Tools", detail: "Scrobbles · in Place", onReturn: { returned += 1 })
+            nav.rememberToolPage()
+            nav.path.append(ToolDescriptor.query)
+            nav.path.append(ArtistIdentity(name: "Artist A"))
+            nav.returnToPredecessor()
+            check("back from a tool's Query keeps that tool open", nav.path.count == 1 && returned == 1 && nav.originTitle == "Trips" && nav.predecessor == nil, "depth \(nav.path.count)")
+            let fromTrends = DetailNavigationCoordinator(origin: .tools)
+            fromTrends.path.append(tripsTool)
+            fromTrends.predecessor = DetailPredecessor(source: "Trends", detail: "x", onReturn: {})
+            fromTrends.rememberToolPage()
+            fromTrends.path.append(ToolDescriptor.query)
+            fromTrends.returnToPredecessor()
+            check("back from a Query opened by another tab still clears the stack", fromTrends.path.isEmpty)
+            let landing = DetailNavigationCoordinator(origin: .tools)
+            landing.predecessor = DetailPredecessor(source: "Tools", detail: "x", onReturn: {})
+            landing.rememberToolPage()
+            landing.path.append(ToolDescriptor.query)
+            landing.returnToPredecessor()
+            check("a Query opened from the Tools page itself returns to the Tools page", landing.path.isEmpty)
+
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

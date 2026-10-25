@@ -58,12 +58,30 @@ final class DetailNavigationCoordinator {
         path.removeLast(path.count - originDepth)
     }
 
-    /// Back to the tab that opened this one. Clear the cross-tab stack so a later handoff starts cleanly.
+    /// Where a tool stood when it opened Query, so Back from Query lands on that tool's page rather than the Tools landing page.
+    private var toolPageBeforeQuery: (depth: Int, origin: DetailNavigationOrigin, label: String?)?
+
+    /// Called just before Query is pushed onto the stack.
+    func rememberToolPage() {
+        toolPageBeforeQuery = (path.count, origin, originLabel)
+    }
+
+    /// Back to the tab that opened this one. A Query opened from a tool returns to that tool's page; otherwise the cross-tab stack is
+    /// cleared so a later handoff starts cleanly.
     func returnToPredecessor() {
         guard let predecessor else { return }
         self.predecessor = nil
-        path = NavigationPath()
-        originDepth = 0
+        if predecessor.source == "Tools", let page = toolPageBeforeQuery, page.depth > 0, path.count >= page.depth {
+            toolPageBeforeQuery = nil
+            path.removeLast(path.count - page.depth)
+            origin = page.origin
+            originLabel = page.label
+            originDepth = page.depth
+        } else {
+            toolPageBeforeQuery = nil
+            path = NavigationPath()
+            originDepth = 0
+        }
         predecessor.onReturn()
     }
 

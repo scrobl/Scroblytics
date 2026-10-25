@@ -130,14 +130,14 @@ enum RecheckChoice: String, Sendable {
 }
 
 extension SyncRecheckPlan {
-    /// How long a walk of the whole history takes, in words: about 200 plays a page and about half a second a page (Last.fm is asked at
-    /// most four times a second, and answers take a little time).
+    /// How long a walk of the whole history takes, in words: 200 plays a page and about 0.65 s a page (Last.fm is asked at most four
+    /// times a second and answers take a little time; measured: a full resync of 108,000 plays took 5 minutes 50 seconds).
     static func estimateText(remoteTotal: Int) -> String {
         let pages = max(1, (remoteTotal + 199) / 200)
-        let seconds = Double(pages) * 0.5
+        let seconds = Double(pages) * 0.65
         if seconds < 60 { return "under a minute" }
-        let minutes = Int((seconds / 60).rounded(.up))
-        return minutes == 1 ? "about a minute" : "about \(minutes) minutes"
+        let minutes = Int((seconds / 60).rounded())
+        return minutes <= 1 ? "about a minute" : "about \(minutes) minutes"
     }
 
     /// Where the baseline goes when the person doesn't settle it: it moves by what was found (added less removed), so what is left

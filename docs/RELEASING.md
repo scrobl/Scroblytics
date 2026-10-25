@@ -142,12 +142,15 @@ import:
 ## Sync: late plays and deletions
 
 When Last.fm's play total moves by more than a quick sync found (plays sent late with older times, or deletions), the sync first
-re-checks only the last 15 days before the previous sync and compares the totals again, and walks the whole history only if they still
-differ. Before a release that touches `SyncEngine`, run `scripts/sync-recheck-test.sh` (Debug app built first; about a minute). It runs
-real syncs in an isolated test profile against the stand-in server's `late-plays` scenario, injecting new plays, late plays, recent and
-old deletions and a late play together with an old deletion, and checks after each launch the app's play count against the server's
-(no duplicates), the activity log's lines, and how many pages were fetched. `SCROBLYTICS_DIAGNOSTICS_CHECK=1` covers the rules and
-wording on their own.
+re-checks only the last 15 days before the previous sync and compares the totals again. If they agree, that is all. If they still
+differ it does not walk the whole history by itself (many minutes on a big library): it finishes, and a strip under the toolbar
+(`RecheckStrip`) says how much it differs, the likely reason and roughly how long a full check takes, with **Check now**, **Ignore**
+(Last.fm's total becomes the baseline until a Full Resync) and **Skip for now** (asks again at the next sync; so does quitting
+without answering). Before a release that touches `SyncEngine`, run `scripts/sync-recheck-test.sh` (Debug app built first; a few
+minutes). It runs real syncs in an isolated test profile against the stand-in server's `late-plays` scenario, injecting new plays,
+late plays, recent and old deletions and a late play together with an old deletion, answers the prompt through
+`SCROBLYTICS_RECHECK_CHOICE` (Debug only), and checks after each launch the app's play count against the server's (no duplicates),
+the activity log's lines, and how many pages were fetched. `SCROBLYTICS_DIAGNOSTICS_CHECK=1` covers the rules and wording on their own.
 
 ## The detail pages (Artist, Album, Track)
 

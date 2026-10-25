@@ -528,6 +528,15 @@ enum DetailSnapshots {
                     await render(playFilter(chosen), width: width, dark: dark, container: container, to: base.appending(path: "playfilter-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
+            // The strip that asks about a difference the recent-days re-check could not settle, for each reason, at three widths.
+            let strips = VStack(spacing: 14) {
+                RecheckStrip(container: container, isSyncing: false, onCheckNow: {}, pending: PendingRecheck(reason: .totalGrewMoreThanFound(grew: 14, found: 3), remoteTotal: 368_000, unexplained: 14, windowDays: 16))
+                RecheckStrip(container: container, isSyncing: false, onCheckNow: {}, pending: PendingRecheck(reason: .totalFell(by: 2), remoteTotal: 24_000, unexplained: -2, windowDays: 16))
+                RecheckStrip(container: container, isSyncing: false, onCheckNow: {}, pending: PendingRecheck(reason: .fewerHereThanLastfm(onThisMac: 90_412, onLastfm: 90_431), remoteTotal: 90_431, unexplained: 19, windowDays: nil))
+            }
+            for (width, dark) in [(1000, true), (1000, false), (640, true), (460, true)] as [(CGFloat, Bool)] {
+                await render(strips, width: width, dark: dark, container: container, to: base.appending(path: "recheck-strip-\(Int(width))-\(dark ? "dark" : "light").png"))
+            }
             let mapOnly = ProcessInfo.processInfo.environment["SCROBLYTICS_SNAPSHOT_MAP_ONLY"] != nil
             for (width, dark, unit) in [(1000, true, TemperatureUnit.celsius), (1000, false, .fahrenheit), (640, true, .celsius), (440, true, .celsius)] as [(CGFloat, Bool, TemperatureUnit)] {
                 await render(weatherMapScene(unit: unit), width: width, dark: dark, container: container, settle: 15, to: base.appending(path: "trends-map-\(Int(width))-\(dark ? "dark" : "light").png"))

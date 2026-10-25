@@ -43,6 +43,9 @@ struct SyncSummary: Sendable {
     /// rather than actually finishing — sync again to continue it.
     let isComplete: Bool
     let lovedTracksChanged: Bool
+    /// Set when a difference between Last.fm's total and what was found could not be settled by checking the recent days: the app asks
+    /// whether to check the whole history, ignore the difference, or skip it for now.
+    var pendingRecheck: PendingRecheck? = nil
 
     var dataChanged: Bool {
         added > 0 || updated > 0 || removed > 0 || lovedTracksChanged
@@ -54,7 +57,8 @@ struct SyncSummary: Sendable {
         removed: Int,
         escalatedToFullBackfill: Bool,
         isComplete: Bool,
-        lovedTracksChanged: Bool = false
+        lovedTracksChanged: Bool = false,
+        pendingRecheck: PendingRecheck? = nil
     ) {
         self.added = added
         self.updated = updated
@@ -62,6 +66,7 @@ struct SyncSummary: Sendable {
         self.escalatedToFullBackfill = escalatedToFullBackfill
         self.isComplete = isComplete
         self.lovedTracksChanged = lovedTracksChanged
+        self.pendingRecheck = pendingRecheck
     }
 
     func includingLovedTracksChange(_ changed: Bool) -> SyncSummary {
@@ -71,7 +76,8 @@ struct SyncSummary: Sendable {
             removed: removed,
             escalatedToFullBackfill: escalatedToFullBackfill,
             isComplete: isComplete,
-            lovedTracksChanged: changed
+            lovedTracksChanged: changed,
+            pendingRecheck: pendingRecheck
         )
     }
 }
@@ -132,6 +138,7 @@ actor SyncEngine {
     func sync(
         credentials: LastfmCredentials,
         full: Bool,
+        fullRecheck: Bool = false,
         progress: @escaping @Sendable (SyncProgress) -> Void = { _ in }
     ) async throws -> SyncSummary {
         let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
@@ -229,14 +236,18 @@ actor SyncEngine {
 
         let previousTotal = state.remoteTotal
         let currentCount = try modelContext.checkedCount(FetchDescriptor<Scrobble>())
-        let escalation = SyncLogWording.escalation(previousTotal: previousTotal, remoteTotal: remotePlaycount, found: added, onThisMac: currentCount)
+        var escalation = SyncLogWording.escalation(previousTotal: previousTotal, remoteTotal: remotePlaycount, found: added, onThisMac: currentCount)
+        // "Check now" walks the whole history even if the totals happen to agree this time.
+        if fullRecheck && escalation == nil { escalation = .askedFor }
 
         if let escalation {
             ActivityLog.record(.sync, SyncLogWording.escalationLine(escalation))
             // Late plays (or a recent deletion) sit within two weeks of the last sync, so look there first and compare the totals again.
             var windowAdded = 0, windowUpdated = 0, windowRemoved = 0
-            if let previousTotal, let windowStart = SyncRecheckPlan.windowStart(escalation: escalation, lastSyncedAt: state.lastSyncedAt, now: runStartedAt) {
+            var windowDaysTried: Int?
+            if !fullRecheck, let previousTotal, let windowStart = SyncRecheckPlan.windowStart(escalation: escalation, lastSyncedAt: state.lastSyncedAt, now: runStartedAt) {
                 let days = SyncRecheckPlan.days(from: windowStart, to: nowUts)
+                windowDaysTried = days
                 ActivityLog.record(.sync, SyncLogWording.windowStartLine(days: days))
                 if let window = try await recheckWindow(
                     client: client, from: windowStart, to: nowUts, runIdentity: runStartedAt,
@@ -256,8 +267,27 @@ actor SyncEngine {
                         return SyncSummary(added: added + windowAdded, updated: updated + windowUpdated, removed: windowRemoved, escalatedToFullBackfill: false, isComplete: true)
                     }
                 } else {
-                    ActivityLog.record(.sync, "The last \(days) days are too long to re-check on their own, so the whole history is being re-checked")
+                    ActivityLog.record(.sync, "The last \(days) days are too long to re-check on their own")
+                    windowDaysTried = nil
                 }
+            }
+            if !fullRecheck {
+                // The recent days could not settle it, and the walk of the whole history can take many minutes, so finish this sync and let
+                // the person choose (see `RecheckStrip`). The baseline moves only by what was found, so what is left unexplained is what is
+                // asked about next time if it is skipped, and plays already found are not counted twice.
+                let accounted = added + windowAdded - windowRemoved
+                if let previousTotal {
+                    state.remoteTotal = SyncRecheckPlan.baselineAfterUnsettled(previousTotal: previousTotal, added: added + windowAdded, removed: windowRemoved)
+                }
+                state.lastSyncedAt = runStartedAt
+                try modelContext.save()
+                let unexplained = previousTotal.map { (remotePlaycount - $0) - accounted } ?? (remotePlaycount - currentCount)
+                let pending = PendingRecheck(reason: escalation, remoteTotal: remotePlaycount, unexplained: unexplained, windowDays: windowDaysTried)
+                ActivityLog.record(.sync, SyncLogWording.waitingLine(pending))
+                return SyncSummary(
+                    added: added + windowAdded, updated: updated + windowUpdated, removed: windowRemoved,
+                    escalatedToFullBackfill: false, isComplete: true, pendingRecheck: pending
+                )
             }
             // Backdated plays (or server-side deletions) an incremental `from`
             // filter can never reach — re-walk the entire history and let the

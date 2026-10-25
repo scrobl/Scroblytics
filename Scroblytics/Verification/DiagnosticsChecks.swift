@@ -204,6 +204,21 @@ enum DiagnosticsChecks {
             check("the window lines say what was done and whether the totals then agreed, in numbers", windowLines[0].contains("last 17 days") && windowLines[1].contains("found 7 older plays") && windowLines[1].contains("agree") && windowLines[2].contains("still differ") && windowLines[2].contains("Last.fm +10") && windowLines[2].contains("here +7"), windowLines.joined(separator: " | "))
             check("none of the window lines carry music or account words", windowLines.allSatisfy { sensitiveWords.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) == nil })
 
+            // MARK: Asking before the long walk
+            check("no window is tried when the person asked for the whole walk", P.windowStart(escalation: .askedFor, lastSyncedAt: twoDaysAgo, now: now0) == nil)
+            check("a walk of the whole history is estimated at half a second a page of 200: 20,000 plays is under a minute, 24,000 about a minute, 120,000 about 5 minutes, 370,000 about 16", P.estimateText(remoteTotal: 20_000) == "under a minute" && P.estimateText(remoteTotal: 24_000) == "about a minute" && P.estimateText(remoteTotal: 120_000) == "about 5 minutes" && P.estimateText(remoteTotal: 370_000) == "about 16 minutes", "\(P.estimateText(remoteTotal: 370_000))")
+            check("when unsettled, the baseline moves only by what was found: 100 with 9 found is 109, with 3 removed it is 97", P.baselineAfterUnsettled(previousTotal: 100, added: 9, removed: 0) == 109 && P.baselineAfterUnsettled(previousTotal: 100, added: 0, removed: 3) == 97)
+            let lateOne = PendingRecheck(reason: .totalGrewMoreThanFound(grew: 10, found: 3), remoteTotal: 5_000, unexplained: 1, windowDays: 17)
+            let lateMany = PendingRecheck(reason: .totalGrewMoreThanFound(grew: 10, found: 3), remoteTotal: 5_000, unexplained: 14, windowDays: 17)
+            let fewer = PendingRecheck(reason: .totalFell(by: 5), remoteTotal: 4_000, unexplained: -5, windowDays: 17)
+            let firstLook = PendingRecheck(reason: .fewerHereThanLastfm(onThisMac: 90, onLastfm: 100), remoteTotal: 100, unexplained: 10, windowDays: nil)
+            let texts = [P.explanation(lateOne), P.explanation(lateMany), P.explanation(fewer), P.explanation(firstLook), P.choices(remoteTotal: 120_000)]
+            check("the strip says how Last.fm differs, after checking how many days, and the likely reason", texts[0].contains("1 play more") && texts[0].contains("last 17 days") && texts[0].contains("late") && texts[1].contains("14 plays more") && texts[2].contains("5 plays fewer") && texts[2].contains("deleted") && texts[3].contains("90") && texts[3].contains("100") && texts[3].contains("never imported"), texts.prefix(4).joined(separator: " | "))
+            check("…and what a full check costs and what each choice means", texts[4].contains("about 5 minutes") && texts[4].contains("Ignore keeps things as they are until you run a Full Resync") && texts[4].contains("Skip for now asks again next time"), texts[4])
+            let choiceLines = [SyncLogWording.waitingLine(lateMany), SyncLogWording.choiceLine(.checkNow, remoteTotal: 5_000), SyncLogWording.choiceLine(.ignore, remoteTotal: 5_000), SyncLogWording.choiceLine(.skip, remoteTotal: 5_000)]
+            check("the log records the wait and each choice, with the baseline an ignore sets", choiceLines[0].contains("differ by 14") && choiceLines[1].contains("now") && choiceLines[2].contains("5,000") && choiceLines[2].contains("until a full resync") && choiceLines[3].contains("ask again"), choiceLines.joined(separator: " | "))
+            check("none of the strip or log wording carries music or account words", (texts + choiceLines + [SyncLogWording.escalationLine(.askedFor)]).allSatisfy { sensitiveWords.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) == nil }, (texts + choiceLines).joined(separator: " | "))
+
             // MARK: An unreadable database
             func sqliteError(_ code: Int, cocoa: Int = 256) -> NSError {
                 NSError(domain: NSCocoaErrorDomain, code: cocoa, userInfo: [NSUnderlyingErrorKey: NSError(domain: "NSSQLiteErrorDomain", code: code)])

@@ -13,6 +13,8 @@ enum SyncLogWording {
         case totalFell(by: Int)
         /// This is the first time the total has been compared, and Last.fm has more plays than this Mac.
         case fewerHereThanLastfm(onThisMac: Int, onLastfm: Int)
+        /// The person chose "Check now" after being asked about a difference that could not be settled.
+        case askedFor
     }
 
     /// What decides it, as `SyncEngine` does: the total Last.fm reported last time against this time, and how many plays the quick pass found.
@@ -33,6 +35,8 @@ enum SyncLogWording {
             return "Last.fm's total went down by \(by), so it is re-checking (plays deleted on Last.fm)"
         case .fewerHereThanLastfm(let onThisMac, let onLastfm):
             return "This Mac has \(onThisMac.formatted()) plays and Last.fm has \(onLastfm.formatted()), so it is re-checking the whole history"
+        case .askedFor:
+            return "A full re-check of the whole history was asked for"
         }
     }
 
@@ -76,7 +80,7 @@ enum SyncRecheckPlan {
     static func windowStart(escalation: SyncLogWording.Escalation, lastSyncedAt: Date?, now: Date) -> Int? {
         switch escalation {
         case .totalGrewMoreThanFound, .totalFell: break
-        case .fewerHereThanLastfm: return nil
+        case .fewerHereThanLastfm, .askedFor: return nil
         }
         guard let lastSyncedAt else { return nil }
         let start = Int(lastSyncedAt.timeIntervalSince1970) - lateDays * 86_400
@@ -105,5 +109,72 @@ extension SyncLogWording {
         return matched
             ? "Last \(days) days re-checked: \(found); the totals now agree, so the whole history did not need re-checking"
             : "Last \(days) days re-checked: \(found); the totals still differ (Last.fm \(signed(expectedChange)), here \(signed(actualChange))), so the whole history is being re-checked"
+    }
+}
+
+/// A difference between Last.fm's total and what the sync accounts for that a re-check of the recent days could not settle. The sync
+/// finishes without the long walk and hands this to the app, which asks the person what to do (see `RecheckStrip`).
+struct PendingRecheck: Sendable, Equatable {
+    let reason: SyncLogWording.Escalation
+    /// Last.fm's total play count when it was seen: what "Ignore" takes as the new baseline.
+    let remoteTotal: Int
+    /// By how many plays Last.fm's total differs from what was accounted for: positive when Last.fm has more, negative when it has fewer.
+    let unexplained: Int
+    /// How many days the re-check of the recent stretch covered, nil when none was tried.
+    let windowDays: Int?
+}
+
+/// What the person chooses when asked, as it is written to the activity log.
+enum RecheckChoice: String, Sendable {
+    case checkNow, ignore, skip
+}
+
+extension SyncRecheckPlan {
+    /// How long a walk of the whole history takes, in words: about 200 plays a page and about half a second a page (Last.fm is asked at
+    /// most four times a second, and answers take a little time).
+    static func estimateText(remoteTotal: Int) -> String {
+        let pages = max(1, (remoteTotal + 199) / 200)
+        let seconds = Double(pages) * 0.5
+        if seconds < 60 { return "under a minute" }
+        let minutes = Int((seconds / 60).rounded(.up))
+        return minutes == 1 ? "about a minute" : "about \(minutes) minutes"
+    }
+
+    /// Where the baseline goes when the person doesn't settle it: it moves by what was found (added less removed), so what is left
+    /// unexplained is what is asked about again, and plays already found are not counted twice.
+    static func baselineAfterUnsettled(previousTotal: Int, added: Int, removed: Int) -> Int { previousTotal + added - removed }
+
+    /// The first part of what the strip says: how Last.fm's total differs, and the likely reason.
+    static func explanation(_ pending: PendingRecheck) -> String {
+        let n = abs(pending.unexplained)
+        let plays = "\(n.formatted()) play\(n == 1 ? "" : "s")"
+        switch pending.reason {
+        case .totalFell:
+            return "Last.fm reports \(plays) fewer than this Mac accounts for. That usually means plays were deleted on Last.fm a while ago."
+        case .totalGrewMoreThanFound, .askedFor:
+            let checked = pending.windowDays.map { ", even after checking the last \($0) days" } ?? ""
+            return "Last.fm reports \(plays) \(pending.unexplained < 0 ? "fewer" : "more") than this Mac accounts for\(checked). That usually means a scrobbler sent plays late with older dates."
+        case .fewerHereThanLastfm(let onThisMac, let onLastfm):
+            return "This Mac has \(onThisMac.formatted()) plays and Last.fm reports \(onLastfm.formatted()). The difference can be plays that were never imported, or plays Last.fm counts but does not list."
+        }
+    }
+
+    /// The rest: what a full check costs and what each button does.
+    static func choices(remoteTotal: Int) -> String {
+        "A full check re-reads your whole history (\(estimateText(remoteTotal: remoteTotal))). Ignore keeps things as they are until you run a Full Resync; Skip for now asks again next time."
+    }
+}
+
+extension SyncLogWording {
+    static func waitingLine(_ pending: PendingRecheck) -> String {
+        "Totals still differ by \(abs(pending.unexplained).formatted()); waiting for the person to choose: check now, ignore, or skip for now"
+    }
+
+    static func choiceLine(_ choice: RecheckChoice, remoteTotal: Int) -> String {
+        switch choice {
+        case .checkNow: return "Chose to check the whole history now"
+        case .ignore: return "Chose to ignore the difference: Last.fm's total of \(remoteTotal.formatted()) is the baseline until a full resync"
+        case .skip: return "Chose to skip for now; it will ask again at the next sync"
+        }
     }
 }

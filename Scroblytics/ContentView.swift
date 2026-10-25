@@ -205,6 +205,7 @@ struct ContentView: View {
                 }
                 CredentialsProblemStrip()
                 ImportStatusStrips(container: modelContainer, isSyncing: isSyncing, onResume: { startSync(full: false) })
+                RecheckStrip(container: modelContainer, isSyncing: isSyncing, onCheckNow: { startRecheck() })
                 OfflineStrip()
                 UpdateStrip()
                 CrashNoticeStrip()
@@ -404,6 +405,12 @@ struct ContentView: View {
         Task { await runSync(full: full) }
     }
 
+    /// "Check now" on the strip about an unsettled difference: a sync that walks the whole history.
+    private func startRecheck() {
+        guard !isSyncing else { return }
+        Task { await runSync(full: false, recheck: true) }
+    }
+
     private func askContext() -> AskContext {
         let context = modelContainer.mainContext
         let vocabulary = EntityTagsEngine.loadSnapshot(context: context).vocabulary.map(\.tag)
@@ -427,7 +434,7 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func runSync(full: Bool, reportMissingCredentials: Bool = true) async {
+    private func runSync(full: Bool, recheck: Bool = false, reportMissingCredentials: Bool = true) async {
         if ConnectivityGate.isOffline {
             if reportMissingCredentials { syncError = "Offline mode is on. Go online to sync." }
             return
@@ -470,7 +477,7 @@ struct ContentView: View {
 
             let engine = SyncEngine(modelContainer: modelContainer)
             let task = Task.detached(priority: .utility) {
-                try await engine.sync(credentials: credentials, full: full) { progress in
+                try await engine.sync(credentials: credentials, full: full, fullRecheck: recheck) { progress in
                     Task { @MainActor in
                         syncProgressState.publish(progress)
                     }
@@ -489,6 +496,9 @@ struct ContentView: View {
                 NotificationCenter.default.post(name: .firstImportDidFinish, object: nil)
             }
             NotificationCenter.default.post(name: .scrobbleSyncDidFinish, object: nil)
+            if let pending = summary.pendingRecheck {
+                NotificationCenter.default.post(name: .syncRecheckPending, object: pending)
+            }
             startLovedTracksSync(credentials: credentials)
             if let beforeCounts, let previousSyncAt, summary.added > 0 {
                 await recordSyncEvents(before: beforeCounts, since: previousSyncAt, credentials: credentials)

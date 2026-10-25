@@ -166,6 +166,7 @@
 		7DB0D413976A87ACD75218C0 /* QueryScrobbleFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296FB6FDDDCDEA4FC2BD10A1 /* QueryScrobbleFields.swift */; };
 		7E2F0A3CE7F471ABCC6693A8 /* FirstRunChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A53E1B7BF00639062AFAF96 /* FirstRunChecks.swift */; };
 		7E435A9D1BEDD2700D42E612 /* TrendsLoyaltyChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD46CE377CD609C55D40350F /* TrendsLoyaltyChart.swift */; };
+		7F2B1431791A1B7EF06BF1B6 /* WeatherGapDump.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57AA52F90011A2D3474BF48B /* WeatherGapDump.swift */; };
 		7FB6AF9D79B1536D235DDCC3 /* RecentScrobblesEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED8DCFE7B5B3D101F122FA3 /* RecentScrobblesEngine.swift */; };
 		82687616C7092B8FEC0A1E0A /* TopChartsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E63646323FDE15305A9CAD83 /* TopChartsView.swift */; };
 		82E1C99537679B64AB27C0F9 /* GlobalSearchEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F42BFDA67CDF54DAC09A6FD /* GlobalSearchEngine.swift */; };
@@ -460,6 +461,7 @@
 		54A37E075A183C11EB1233AB /* MissingImagesEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingImagesEngine.swift; sourceTree = "<group>"; };
 		552B5104E7685870575C07D4 /* HelpChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpChecks.swift; sourceTree = "<group>"; };
 		557F355EE8958BF9FB476230 /* SimilarSoundsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimilarSoundsView.swift; sourceTree = "<group>"; };
+		57AA52F90011A2D3474BF48B /* WeatherGapDump.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WeatherGapDump.swift; sourceTree = "<group>"; };
 		57F65372523BDDFB6F99CDC8 /* DetailFactGrid.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DetailFactGrid.swift; sourceTree = "<group>"; };
 		5908C15F64859658D8D60FD6 /* HelpNavigator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpNavigator.swift; sourceTree = "<group>"; };
 		5A0667EFF1B01ECF7B3EF63F /* AskDebugEval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskDebugEval.swift; sourceTree = "<group>"; };
@@ -714,6 +716,7 @@
 				3B1511AE9DA6F2D5A2789D9D /* WeatherChecks.swift */,
 				40833715F54D9BD3050B8751 /* WeatherPerfChecks.swift */,
 				5D3CC6414CEAF3BE073B728D /* ScrobbleQueryChecks.swift */,
+				57AA52F90011A2D3474BF48B /* WeatherGapDump.swift */,
 			);
 			path = Verification;
 			sourceTree = "<group>";
@@ -1695,6 +1698,7 @@
 				6CAF68942DB070874DCE295F /* QueryScrobbleInheritedFields.swift in Sources */,
 				015A72FB87BDDD038B4BFE63 /* QueryScrobbleSessionFields.swift in Sources */,
 				08EBC078D4F4700CE2ECF808 /* QuerySessionFields.swift in Sources */,
+				7F2B1431791A1B7EF06BF1B6 /* WeatherGapDump.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1733,6 +1737,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -1788,7 +1793,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOL_EXTENSIONS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -1828,6 +1832,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -1876,7 +1881,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOL_EXTENSIONS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";

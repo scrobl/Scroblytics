@@ -41,7 +41,7 @@ extension QueryFieldRegistry {
         switch entity.target {
         case .artist: ImageTarget(kind: .artist, artist: entity.artist, album: nil, track: nil)
         case .album: ImageTarget(kind: .album, artist: entity.artist, album: entity.name, track: nil)
-        case .track, .scrobble: ImageTarget(kind: .track, artist: entity.artist, album: albumOfTrack, track: entity.name)
+        case .track, .scrobble, .session: ImageTarget(kind: .track, artist: entity.artist, album: albumOfTrack, track: entity.name)
         }
     }
 

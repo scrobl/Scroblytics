@@ -17,6 +17,10 @@ struct QueryDisplayRow: Identifiable, Sendable {
     /// Context line under the name: the artist for albums/tracks, plus the
     /// album for tracks.
     let subtitle: String?
+    /// What the row is called when its name is not the entity's own (a session is named by when it began).
+    var title: String? = nil
+    /// The artwork to show and its menu to offer, when the row is not itself an artist, album or track (a session shows its most played artist).
+    var artworkTarget: ImageTarget? = nil
     var id: QueryRowKey { QueryRowKey(entity: row.id, period: row.period) }
     /// The entity's own id (what the result's per-entity info is keyed by).
     var entityID: QueryEntityID { row.id }
@@ -28,16 +32,27 @@ struct QueryDisplayRow: Identifiable, Sendable {
         // The universe's per-entity artwork/album, from the same single pass the fields read.
         result.rows.map { row in
             let info = result.entityInfo[row.id]
+            if row.entity.target == .session {
+                let artist = info?.artist ?? ""
+                let artwork = ImageTarget(kind: .artist, artist: artist, album: nil, track: nil)
+                let began = Date(timeIntervalSince1970: row.entity.id.at)
+                return QueryDisplayRow(
+                    row: row, imageURL: ImageResolutionEngine.effectiveImageURL(for: artwork, lookup: lookup, fallbackURL: info?.imageURL),
+                    subtitle: info?.summary,
+                    title: began.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute()),
+                    artworkTarget: artist.isEmpty ? nil : artwork
+                )
+            }
             let target: ImageTarget
             switch row.entity.target {
             case .artist: target = ImageTarget(kind: .artist, artist: row.entity.artist, album: nil, track: nil)
             case .album: target = ImageTarget(kind: .album, artist: row.entity.artist, album: row.entity.name, track: nil)
-            case .track, .scrobble: target = ImageTarget(kind: .track, artist: row.entity.artist, album: info?.album, track: row.entity.name)
+            case .track, .scrobble, .session: target = ImageTarget(kind: .track, artist: row.entity.artist, album: info?.album, track: row.entity.name)
             }
             let subtitle: String? = switch row.entity.target {
             case .artist: nil
             case .album: row.entity.artist
-            case .track, .scrobble: [row.entity.artist, info?.album].compactMap { $0 }.joined(separator: " · ")
+            case .track, .scrobble, .session: [row.entity.artist, info?.album].compactMap { $0 }.joined(separator: " · ")
             }
             return QueryDisplayRow(
                 row: row,
@@ -308,7 +323,7 @@ final class QueryBuilderModel {
             let asOf = validated.spec.asOf ?? Date()
             let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
                 let inScope = validated.spec.countedPlays(scrobbles, weather: snapshots.weather)
-                let run = QueryRun(target: validated.spec.target, asOf: asOf, scrobbles: inScope, allTimeScrobbles: scrobbles, snapshots: snapshots)
+                let run = QueryRun(target: validated.spec.target, asOf: asOf, scrobbles: inScope, allTimeScrobbles: scrobbles, snapshots: snapshots, sessionGapMinutes: Double(validated.spec.effectiveSessionGapMinutes))
                 return QueryEngine.evaluate(validated, run: run)
             }.value
             guard !Task.isCancelled, let self else { return }
@@ -350,6 +365,7 @@ final class QueryBuilderModel {
     /// and says so — rather than leaving conditions that could never run.
     func setTarget(_ target: QueryTarget) {
         guard target != spec.target else { return }
+        sessionsToReturnTo = nil
         let (next, removed) = Self.switching(spec, to: target, registry: registry)
         notice = removed > 0
             ? "Removed \(removed) item\(removed == 1 ? "" : "s") that don’t apply to \(target.rawValue)s."
@@ -384,17 +400,55 @@ final class QueryBuilderModel {
             if groupLimit.perReleaseYear != nil, target != .album, target != .track { groupLimit.perReleaseYear = nil; removed += 1 }
             next.groupLimit = groupLimit.isEmpty ? nil : groupLimit
         }
-        // Plays are listed newest first, a thousand at a time; the other targets start from their most played and a hundred.
-        if target == .scrobble {
+        // Plays and sessions are listed newest first (a thousand plays or five hundred sessions at a time); the other targets start from
+        // their most played and a hundred.
+        let wasListing = spec.target == .scrobble || spec.target == .session
+        switch target {
+        case .scrobble:
             if next.columns.isEmpty { next.columns = [QueryFieldRef("playedAt")] }
             if next.sorts.isEmpty { next.sorts = [QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .descending)] }
-            if next.limit == nil || next.limit == 100 { next.limit = QuerySpec.scrobbleLimit }
-        } else {
+            if next.limit == nil || next.limit == 100 || next.limit == QuerySpec.sessionLimit { next.limit = QuerySpec.scrobbleLimit }
+        case .session:
+            if next.columns.isEmpty { next.columns = ["sessionPlays", "sessionDuration", "sessionDistinctArtists", "sessionTopArtist"].map { QueryFieldRef($0) } }
+            if next.sorts.isEmpty { next.sorts = [QuerySort(key: .field(QueryFieldRef("sessionBegan")), direction: .descending)] }
+            if next.limit == nil || next.limit == 100 || next.limit == QuerySpec.scrobbleLimit { next.limit = QuerySpec.sessionLimit }
+            if next.groupLimit != nil { removed += 1; next.groupLimit = nil }
+            if next.breakdown != nil { removed += 1; next.breakdown = nil }
+        default:
             if next.columns.isEmpty { next.columns = [QueryFieldRef("plays"), QueryFieldRef("lastPlayed")] }
-            if next.sorts.isEmpty, spec.target == .scrobble { next.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)] }
-            if next.limit == QuerySpec.scrobbleLimit, spec.target == .scrobble { next.limit = 100 }
+            if next.sorts.isEmpty, wasListing { next.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)] }
+            if wasListing, next.limit == QuerySpec.scrobbleLimit || next.limit == QuerySpec.sessionLimit { next.limit = 100 }
         }
         return (next, removed)
+    }
+
+    /// The sessions query a session's plays were opened from, so a button can go back to it.
+    private(set) var sessionsToReturnTo: QuerySpec?
+
+    /// Opens the plays of one session of the current sessions query, in the order they were played. The session is named by when it
+    /// began (the Session ID field), counted with the same gap.
+    func openSessionPlays(startedAt: Double) {
+        guard spec.target == .session else { return }
+        let plays = Self.sessionPlaysSpec(startedAt: startedAt, gapMinutes: spec.effectiveSessionGapMinutes)
+        sessionsToReturnTo = spec
+        spec = plays
+    }
+
+    /// The query for the plays of the session that began at `startedAt` (found with `gapMinutes`), in the order they were played.
+    nonisolated static func sessionPlaysSpec(startedAt: Double, gapMinutes: Int) -> QuerySpec {
+        let parameters: [String: QueryValue] = gapMinutes == QuerySpec.defaultSessionGapMinutes ? [:] : ["gapMinutes": .number(Double(gapMinutes))]
+        var plays = QuerySpec(target: .scrobble)
+        plays.groups = [[QueryCondition(QueryFieldRef("sessionId", parameters: parameters), .equals, [.number(startedAt)])]]
+        plays.sorts = [QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .ascending)]
+        plays.columns = [QueryFieldRef("playedAt"), QueryFieldRef("playGap")]
+        plays.limit = QuerySpec.scrobbleLimit
+        return plays
+    }
+
+    func returnToSessions() {
+        guard let back = sessionsToReturnTo else { return }
+        sessionsToReturnTo = nil
+        spec = back
     }
 
     func dismissNotice() { notice = nil }

@@ -27,6 +27,11 @@ extension HelpContent {
                         .paragraph("These fields describe one play: when it happened, where you were, how long after the play before it, which time you have played the track, and the listening session it belongs to (a run of plays each started within a set number of minutes of the one before; the gap is a setting on each session field, 30 minutes to begin with). A query that finds **Scrobbles** also offers the fields of the track, album and artist the play is of, in their own groups under the names **Track · …**, **Album · …** and **Artist · …**. Each is that item’s own field (see its definition in the group it belongs to), computed over the same plays and handed to every play of the item."),
                         .fieldGroup(.scrobble),
                     ]),
+        HelpArticle(id: "fields-session", title: "Session", summary: "What a listening session was: its length, plays, artists, when and where it began.",
+                    blocks: [
+                        .paragraph("These fields describe a whole listening session, for a query that finds **Sessions** (each row is one session). A session is a run of plays each started within the query’s gap of the one before (30 minutes to begin with, set under Scope & limit). A period or a play filter picks sessions by where they started: a session counts when its first play is among the plays the query keeps, and is then measured whole."),
+                        .fieldGroup(.session),
+                    ]),
         HelpArticle(id: "fields-flags", title: "Flags", summary: "Yes/no facts: loved, popular, flagged, in your Apple Music library, missing artwork…",
                     blocks: [.fieldGroup(.flags)]),
         HelpArticle(id: "fields-tags", title: "Tags", summary: "Last.fm community tags and your own tags.",

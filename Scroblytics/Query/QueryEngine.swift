@@ -33,6 +33,9 @@ struct QueryResult: Sendable {
     struct EntityInfo: Sendable {
         let imageURL: String?
         let album: String?
+        /// Sessions: what the session was, and the artist it is shown with.
+        var summary: String? = nil
+        var artist: String? = nil
     }
 }
 
@@ -87,7 +90,7 @@ enum QueryEngine {
 
         let aggregates = run.universe.aggregates
         let info = Dictionary(uniqueKeysWithValues: limited.compactMap { entity in
-            aggregates[entity.id].map { (entity.id, QueryResult.EntityInfo(imageURL: $0.imageURL, album: $0.album)) }
+            aggregates[entity.id].map { (entity.id, QueryResult.EntityInfo(imageURL: $0.imageURL, album: $0.album, summary: $0.summary, artist: $0.artist)) }
         })
 
         let report = pendingReport(
@@ -121,7 +124,7 @@ enum QueryEngine {
         for year in years {
             let yearRun = QueryRun(
                 target: run.target, asOf: run.asOf, calendar: calendar, scrobbles: byYear[year] ?? [], allTimeScrobbles: run.allTimeScrobbles,
-                snapshots: run.snapshots, entityScope: run.entityScope
+                snapshots: run.snapshots, entityScope: run.entityScope, sessionGapMinutes: run.sessionGapMinutes
             )
             let result = evaluate(single, run: yearRun)
             matched += result.matchedCount

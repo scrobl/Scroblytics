@@ -235,8 +235,14 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// 5: `resultSorts` / `showInRankOrder` (the order the results are shown in, apart from the order that picks them) and `breakdown` (one
     /// evaluation per calendar year). Older sets decode unchanged.
     /// 6: a `playFilter` may also name calendar months (seasons). 7: it may also name kinds of weather and temperature bands. 8: and a range of
-    /// temperatures. 9: and cities. 10: and states or regions and countries. Older sets decode unchanged.
-    static let currentSchemaVersion = 10
+    /// temperatures. 9: and cities. 10: and states or regions and countries. 11: a session gap. Older sets decode unchanged.
+    static let currentSchemaVersion = 11
+    static let defaultSessionGapMinutes = 30
+    static let sessionGapChoices = [10, 15, 20, 30, 45, 60, 90, 120]
+    /// How many sessions a query that finds them shows to begin with.
+    static let sessionLimit = 500
+
+    var effectiveSessionGapMinutes: Int { sessionGapMinutes ?? Self.defaultSessionGapMinutes }
 
     var schemaVersion: Int = QuerySpec.currentSchemaVersion
     var target: QueryTarget
@@ -262,6 +268,8 @@ struct QuerySpec: Codable, Hashable, Sendable {
     /// Runs the query once for each calendar year of the plays it counts, keeping `limit` results per year ("my top 3 artists of each
     /// year"). Each row is then an artist, album or track in a year, with that year's plays. Optional, so older queries decode unchanged.
     var breakdown: QueryBreakdown?
+    /// For a query that finds listening sessions: how many minutes without a play end one. nil = `QuerySpec.defaultSessionGapMinutes`.
+    var sessionGapMinutes: Int?
 
     init(target: QueryTarget) { self.target = target }
 }
@@ -347,6 +355,11 @@ extension QuerySpec {
             guard perArtist >= 1 else { throw QueryError.unsupported("a per-artist cap below 1") }
             guard target != .artist else { throw QueryError.unsupported("a per-artist cap on an artist query — every row is already one artist") }
         }
+        if target == .session {
+            guard groupLimit == nil else { throw QueryError.unsupported("a cap per artist, album or release year on a sessions query — a session is not one artist, album or song") }
+            guard breakdown == nil else { throw QueryError.unsupported("breaking sessions down by year") }
+        }
+        if let sessionGapMinutes, !(1...720).contains(sessionGapMinutes) { throw QueryError.unsupported("a session gap outside 1 to 720 minutes") }
         if let perAlbum = groupLimit?.perAlbum {
             guard perAlbum >= 1 else { throw QueryError.unsupported("a per-album cap below 1") }
             guard target == .track else { throw QueryError.unsupported("a per-album cap on an \(target.rawValue) query — only a track carries a resolved album") }

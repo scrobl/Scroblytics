@@ -617,6 +617,19 @@ enum DetailSnapshots {
                         .environment(AskSuggestionStore())
                     await render(queryScene, width: width, dark: dark, container: container, settle: 25, to: base.appending(path: "query-scrobbles-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
+                var sessionsSpec = QuerySpec(target: .session)
+                sessionsSpec.columns = ["sessionPlays", "sessionDuration", "sessionDistinctArtists", "sessionTopArtist", "sessionCity"].map { QueryFieldRef($0) }
+                sessionsSpec.sorts = [QuerySort(key: .field(QueryFieldRef("sessionDuration")), direction: .descending)]
+                sessionsSpec.limit = 12
+                let sessionsRequest = AskQueryRequest(spec: sessionsSpec, action: .run)
+                for (width, dark) in [(1200, true), (1200, false)] as [(CGFloat, Bool)] {
+                    let sessionsScene = QueryView(modelContainer: container, settings: ChartDateSettings(), isActive: true, askRequest: .constant(sessionsRequest))
+                        .frame(width: width, height: 640)
+                        .environment(TagStore())
+                        .environment(AskSimilarRouter())
+                        .environment(AskSuggestionStore())
+                    await render(sessionsScene, width: width, dark: dark, container: container, settle: 25, to: base.appending(path: "query-sessions-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
                 WeatherTripStore.save([])
                 for (name, card, images) in await nativeShareCards() where name == "weathermap" {
                     for size in ShareSize.allCases {

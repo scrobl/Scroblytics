@@ -84,7 +84,7 @@ final class TagStore {
             switch entity.target {
             case .artist: TagTarget(kind: .artist, artist: entity.artist, name: nil)
             case .album: TagTarget(kind: .album, artist: entity.artist, name: entity.name)
-            case .track, .scrobble: TagTarget(kind: .track, artist: entity.artist, name: entity.name)
+            case .track, .scrobble, .session: TagTarget(kind: .track, artist: entity.artist, name: entity.name)
             }
         }
         guard let missing = try? await offMain({ try await dataStore.uncached(wanted) }) else { return }

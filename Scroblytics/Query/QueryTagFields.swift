@@ -11,7 +11,7 @@ extension QueryFieldRegistry {
         switch target {
         case .artist: .artist
         case .album: .album
-        case .track, .scrobble: .track
+        case .track, .scrobble, .session: .track
         }
     }
 

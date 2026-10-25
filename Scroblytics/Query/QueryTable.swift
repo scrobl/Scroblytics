@@ -108,7 +108,7 @@ struct QueryResultsTable: View {
         }
         .drillDownHighlight()
         .entityContextMenu(
-            target: imageTarget(for: row.entity),
+            target: row.artworkTarget ?? imageTarget(for: row.entity),
             currentImageURL: row.imageURL,
             onOpen: { onOpen(row) }
         )
@@ -127,7 +127,7 @@ struct QueryResultsTable: View {
                 .frame(width: AppArtworkSizing.thumbnail, height: AppArtworkSizing.thumbnail)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(row.entity.name).font(AppTypography.contentTitle).lineLimit(1)
+                    Text(row.title ?? row.entity.name).font(AppTypography.contentTitle).lineLimit(1)
                     TrackLovedIndicator(
                         artist: row.entity.artist,
                         track: row.entity.name,
@@ -146,7 +146,7 @@ struct QueryResultsTable: View {
 
     private func entityKind(_ target: QueryTarget) -> TopChartsEntity {
         switch target {
-        case .artist: .artist
+        case .artist, .session: .artist
         case .album: .album
         case .track, .scrobble: .track
         }
@@ -158,7 +158,7 @@ struct QueryResultsTable: View {
             ImageTarget(kind: .artist, artist: entity.name, album: nil, track: nil)
         case .album:
             ImageTarget(kind: .album, artist: entity.artist, album: entity.name, track: nil)
-        case .track, .scrobble:
+        case .track, .scrobble, .session:
             ImageTarget(kind: .track, artist: entity.artist, album: nil, track: entity.name)
         }
     }
@@ -231,7 +231,7 @@ struct QueryCellView: View {
         switch entity.target {
         case .artist: .artist(entity.name)
         case .album: .album(artist: entity.artist, name: entity.name)
-        case .track, .scrobble: .track(artist: entity.artist, name: entity.name)
+        case .track, .scrobble, .session: .track(artist: entity.artist, name: entity.name)
         }
     }
 }

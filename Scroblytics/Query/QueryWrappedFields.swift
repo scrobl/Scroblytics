@@ -99,7 +99,7 @@ extension QueryFieldRegistry {
         switch entity.target {
         case .artist: .artist(entity.name)
         case .album: .album(artist: entity.artist, name: entity.name)
-        case .track, .scrobble: .track(artist: entity.artist, name: entity.name)
+        case .track, .scrobble, .session: .track(artist: entity.artist, name: entity.name)
         }
     }
 
@@ -153,5 +153,5 @@ extension QueryFieldRegistry {
     /// Every field of artists, albums and tracks (what a play's inherited fields are made from).
     static let itemFields = coreFields + fadingFields + popularityFields + durationFields + bpmFields + releaseDateFields + climbingFields + milestoneFields + turnoverFields + lovedFields + libraryFields + flaggedFields + tagFields + imageFields + matchFields + editionFields + weatherFields
 
-    static let standard = QueryFieldRegistry(fields: itemFields + scrobbleFields + scrobbleSessionFields + inheritedScrobbleFields)
+    static let standard = QueryFieldRegistry(fields: itemFields + scrobbleFields + scrobbleSessionFields + sessionFields + inheritedScrobbleFields)
 }

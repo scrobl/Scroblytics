@@ -31,6 +31,7 @@ extension QueryFieldRegistry {
         case .album: "Album"
         case .track: "Track"
         case .scrobble: "Scrobble"
+        case .session: "Session"
         }
     }
 

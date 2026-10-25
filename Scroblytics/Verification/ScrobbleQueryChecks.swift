@@ -39,7 +39,7 @@ enum ScrobbleQueryChecks {
                 var snapshots = QuerySnapshots()
                 snapshots.weather = weather
                 let source = library ?? plays
-                let run = QueryRun(target: spec.target, asOf: asOf, scrobbles: spec.countedPlays(source, weather: weather), allTimeScrobbles: source, snapshots: snapshots)
+                let run = QueryRun(target: spec.target, asOf: asOf, scrobbles: spec.countedPlays(source, weather: weather), allTimeScrobbles: source, snapshots: snapshots, sessionGapMinutes: Double(spec.effectiveSessionGapMinutes))
                 return QueryEngine.evaluate(validated, run: run)
             }
             func key(_ id: String) -> String { try! registry.resolve(QueryFieldRef(id), target: .scrobble).cacheKey }
@@ -248,6 +248,65 @@ enum ScrobbleQueryChecks {
             check("a condition on the session's size finds the three plays of the long one", (try? evaluate(bigSessions))?.rows.count == 3)
             check("the session fields have a gap setting, 30 minutes to begin with", registry.fields(for: .scrobble).filter { $0.id.hasPrefix("session") || $0.id == "artistRun" || $0.id.hasSuffix("Session") }.allSatisfy { $0.parameters.first?.id == "gapMinutes" && $0.parameters.first?.defaultValue == .number(30) })
 
+            // A query that finds listening sessions: each row is one session.
+            func sessionSpec(gap: Int? = nil, columns: [String] = ["sessionPlays"], sort: String = "sessionBegan", direction: QuerySortDirection = .descending) -> QuerySpec {
+                var s = QuerySpec(target: .session)
+                s.columns = columns.map { QueryFieldRef($0) }
+                s.sorts = [QuerySort(key: .field(QueryFieldRef(sort)), direction: direction)]
+                s.sessionGapMinutes = gap
+                return s
+            }
+            func sKey(_ id: String) -> String { try! registry.resolve(QueryFieldRef(id), target: .session).cacheKey }
+            func sNum(_ row: QueryRow, _ id: String) -> Double? { if case .value(.number(let n))? = row.cells[sKey(id)] { n } else { nil } }
+            func sText(_ row: QueryRow, _ id: String) -> String? { if case .value(.text(let t))? = row.cells[sKey(id)] { t } else { nil } }
+            func sDate(_ row: QueryRow, _ id: String) -> Date? { if case .value(.date(let d))? = row.cells[sKey(id)] { d } else { nil } }
+            let every = ["sessionBegan", "sessionEnded", "sessionDuration", "sessionPlays", "sessionDistinctArtists", "sessionDistinctSongs", "sessionTopArtist", "sessionTopArtistShare", "sessionOpening", "sessionClosing", "sessionWeekday", "sessionHour", "sessionGapBefore"]
+            let sessionRowsNewestFirst = try? evaluate(sessionSpec(columns: every))
+            let expectedSessions = sessionIndexes(plays, gapMinutes: 30)
+            let groupedSessions = Dictionary(grouping: plays.indices, by: { expectedSessions[$0] }).sorted { $0.key < $1.key }.map(\.value)
+            check("a sessions query has one row for each session, newest first", sessionRowsNewestFirst?.rows.count == groupedSessions.count && sessionRowsNewestFirst?.rows.compactMap { sDate($0, "sessionBegan") } == groupedSessions.reversed().map { plays[$0.first!].playedAt })
+            check("…with each session's plays counted", sessionRowsNewestFirst?.rows.compactMap { sNum($0, "sessionPlays") } == groupedSessions.reversed().map { Double($0.count) })
+            let first = sessionRowsNewestFirst?.rows.last
+            check("the first session lasted 8 minutes, had 3 plays of 3 songs and 2 artists, led by Artist A with two thirds of the plays", first.flatMap { sNum($0, "sessionDuration") } == 480 && first.flatMap { sNum($0, "sessionDistinctSongs") } == 3 && first.flatMap { sNum($0, "sessionDistinctArtists") } == 2 && first.flatMap { sText($0, "sessionTopArtist") } == "Artist A" && abs((first.flatMap { sNum($0, "sessionTopArtistShare") } ?? 0) - 2.0 / 3.0) < 1e-9)
+            check("it opened with Artist A – Song 1 and closed with Artist B – Song 3", first.flatMap { sText($0, "sessionOpening") } == "Artist A – Song 1" && first.flatMap { sText($0, "sessionClosing") } == "Artist B – Song 3")
+            check("each session's day and hour are those of its first play, in local time", sessionRowsNewestFirst?.rows.compactMap { sNum($0, "sessionHour") } == groupedSessions.reversed().map { Double(calendar.component(.hour, from: plays[$0.first!].playedAt)) } && first.flatMap { sText($0, "sessionWeekday") } == QueryPlayFilter.dayNames[calendar.component(.weekday, from: at(3, 9)) - 1])
+            check("the time since the previous session is from its last play to the next session's first, and the very first session has none", sessionRowsNewestFirst?.rows.last.flatMap { sNum($0, "sessionGapBefore") } == nil && sessionRowsNewestFirst?.rows.dropLast().last.flatMap { sNum($0, "sessionGapBefore") } == at(3, 21, 30).timeIntervalSince(at(3, 9, 8)))
+            let longGapSessions = try? evaluate(sessionSpec(gap: 120))
+            check("a 120-minute gap joins the two plays either side of midnight: five sessions, one of two plays", longGapSessions?.rows.count == 5 && longGapSessions?.rows.compactMap { sNum($0, "sessionPlays") }.sorted() == [1, 1, 1, 2, 3])
+            var inPeriodSessions = sessionSpec()
+            inPeriodSessions.period = QueryPeriod(from: at(8, 0), to: at(30, 0))
+            check("a period picks sessions by where they began: the three that began from the 8th on", (try? evaluate(inPeriodSessions))?.rows.count == 3)
+            var cutSession = sessionSpec()
+            cutSession.period = QueryPeriod(from: at(3, 9, 6), to: at(3, 10))
+            check("a session whose first play falls before the period is not counted, though some of its plays are inside it", (try? evaluate(cutSession))?.rows.isEmpty == true)
+            var longest = sessionSpec(columns: ["sessionPlays", "sessionBegan"], sort: "sessionDuration")
+            longest.limit = 1
+            check("“longest first” puts the 8-minute session first", (try? evaluate(longest)).flatMap { $0.rows.first }.flatMap { sDate($0, "sessionBegan") } == at(3, 9))
+            var bigSessionsOnly = sessionSpec()
+            bigSessionsOnly.groups = [[QueryCondition("sessionPlays", .greaterThanOrEqual, [.number(3)])]]
+            check("a condition on the session's plays finds the one with three", (try? evaluate(bigSessionsOnly))?.rows.count == 1)
+            var capped = sessionSpec()
+            capped.groupLimit = QueryGroupLimit(perArtist: 1)
+            var yearly = sessionSpec()
+            yearly.breakdown = QueryBreakdown()
+            var oddGap = sessionSpec(gap: 0)
+            check("caps, a breakdown by year and a gap outside 1 to 720 minutes are refused for sessions", (try? capped.validate(against: registry)) == nil && (try? yearly.validate(against: registry)) == nil && (try? oddGap.validate(against: registry)) == nil)
+            oddGap.sessionGapMinutes = 45
+            check("…and a 45-minute gap is fine, and survives saving", (try? oddGap.validate(against: registry)) != nil && (try? QuerySpec.decode(oddGap.encoded()))?.sessionGapMinutes == 45)
+            // A row, as the table shows it.
+            let displayRows = QueryDisplayRow.make(from: sessionRowsNewestFirst!, imageLookup: [:])
+            check("a session row is named by when it began and says what it was", displayRows.last?.title?.contains("2025") == true && displayRows.last?.subtitle == "3 plays · 8m · 2 artists · mostly Artist A", "\(String(describing: displayRows.last?.subtitle))")
+            // Opening a session's plays.
+            let playsOfFirst = try? evaluate(QueryBuilderModel.sessionPlaysSpec(startedAt: at(3, 9).timeIntervalSince1970, gapMinutes: 30))
+            check("opening a session lists exactly its plays, in the order they were played", playsOfFirst?.rows.compactMap { date($0, "playedAt") } == [at(3, 9), at(3, 9, 4), at(3, 9, 8)])
+            let playsOfMerged = try? evaluate(QueryBuilderModel.sessionPlaysSpec(startedAt: at(8, 23, 15).timeIntervalSince1970, gapMinutes: 120))
+            check("…with the gap the sessions were found with", playsOfMerged?.rows.compactMap { date($0, "playedAt") } == [at(8, 23, 15), at(9, 1, 5)] && (try? evaluate(QueryBuilderModel.sessionPlaysSpec(startedAt: at(8, 23, 15).timeIntervalSince1970, gapMinutes: 30)))?.rows.count == 1)
+            // Switching target.
+            let toSessions = QueryBuilderModel.switching(QueryBuilderModel.defaultSpec(target: .track), to: .session, registry: registry)
+            check("switching to sessions lists newest first, five hundred at a time, with the session columns", sortsBy(toSessions.spec, "sessionBegan") && toSessions.spec.limit == QuerySpec.sessionLimit && toSessions.spec.columns.first == QueryFieldRef("sessionPlays"))
+            let fromSessions = QueryBuilderModel.switching(toSessions.spec, to: .track, registry: registry)
+            check("…and back restores most played first and a hundred", sortsBy(fromSessions.spec, "plays") && fromSessions.spec.limit == 100)
+
             // The pieces around the target.
             check("scrobble fields are offered only for scrobbles, and items' fields are not", registry.fields(for: .scrobble).contains { $0.id == "playedAt" } && !registry.fields(for: .track).contains { $0.id == "playedAt" } && !registry.fields(for: .scrobble).contains { $0.id == "plays" })
             check("every scrobble field has a definition", registry.fields(for: .scrobble).allSatisfy { !$0.help.isEmpty })
@@ -375,6 +434,40 @@ enum ScrobbleQueryChecks {
                 startsOnly.limit = nil
                 startsOnly.groups = [[QueryCondition("startsSession", .isTrue)]]
                 check("real library: “starts a session” finds one play for each session", (try? evaluate(startsOnly, plays: history))?.rows.count == sessionCount)
+                // The sessions query on the whole library against the independent walk.
+                var everySession = sessionSpec(columns: ["sessionPlays", "sessionDuration", "sessionDistinctArtists", "sessionTopArtist"])
+                everySession.limit = nil
+                let sessionsStart = Date()
+                let sessionsResult = try? evaluate(everySession, plays: history)
+                print("      (real library: \(sessionCount.formatted()) sessions listed in \(String(format: "%.2f", Date().timeIntervalSince(sessionsStart))) s)")
+                var sessionMismatches: [String] = []
+                var walkStart = 0
+                var walkIndex = 0
+                var walked: [(first: Int, last: Int)] = []
+                while walkIndex < history.count {
+                    var end = walkIndex
+                    while end + 1 < history.count, history[end + 1].playedAt.timeIntervalSince(history[end].playedAt) <= 1800 { end += 1 }
+                    walked.append((walkIndex, end))
+                    walkIndex = end + 1
+                }
+                _ = walkStart; walkStart = 0
+                let newestFirst = Array(walked.reversed())
+                for position in stride(from: 0, to: newestFirst.count, by: max(1, newestFirst.count / 300)) {
+                    guard let row = sessionsResult?.rows[position] else { sessionMismatches.append("row \(position)"); continue }
+                    let w = newestFirst[position]
+                    let members = history[w.first...w.last]
+                    let wantArtists = Set(members.map(\.artistName)).count
+                    let counts = Dictionary(grouping: members, by: \.artistName).mapValues(\.count)
+                    let wantTop = counts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }?.key
+                    if sNum(row, "sessionPlays") != Double(w.last - w.first + 1) || sNum(row, "sessionDuration") != history[w.last].playedAt.timeIntervalSince(history[w.first].playedAt)
+                        || sNum(row, "sessionDistinctArtists") != Double(wantArtists) || sText(row, "sessionTopArtist") != wantTop { sessionMismatches.append("\(position)") }
+                }
+                check("real library: one row for each session (\(walked.count.formatted())), and plays, length, artists and top artist agree with an independent walk on 300 of them", sessionsResult?.rows.count == walked.count && sessionMismatches.isEmpty && walked.count == sessionCount, "\(sessionsResult?.rows.count ?? -1) vs \(walked.count); \(sessionMismatches.prefix(4))")
+                check("real library: the plays of the longest session, opened, are exactly its plays", {
+                    guard let longestRun = walked.max(by: { ($0.last - $0.first) < ($1.last - $1.first) }) else { return false }
+                    let opened = try? evaluate(QueryBuilderModel.sessionPlaysSpec(startedAt: history[longestRun.first].playedAt.timeIntervalSince1970, gapMinutes: 30), plays: history)
+                    return opened?.matchedCount == longestRun.last - longestRun.first + 1 && opened?.rows.compactMap { date($0, "playedAt") } == (longestRun.first...min(longestRun.last, longestRun.first + QuerySpec.scrobbleLimit - 1)).map { history[$0].playedAt }
+                }())
                 check("real library: the default query shows the newest thousand", recentResult?.rows.count == QuerySpec.scrobbleLimit && recentResult?.matchedCount == history.count)
             } else {
                 print("      (no library copy here: the real-data cross-check was skipped)")

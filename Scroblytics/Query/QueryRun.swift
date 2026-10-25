@@ -87,6 +87,8 @@ final class QueryRun: @unchecked Sendable {
     /// The whole library, ignoring the query's period — for fields that deliberately look past it.
     let allTimeScrobbles: [ScrobbleSnapshot]
     let snapshots: QuerySnapshots
+    /// For a query that finds listening sessions: how many minutes without a play end one.
+    let sessionGapMinutes: Double
     /// When set, only these entities are EVALUATED and returned — a pool a tool generated itself (Similar Sounds'
     /// candidates). Deliberately not applied to `universe`: ranks, popularity percentiles and every other
     /// whole-library field still compute against the full library, and the album/tag/image fields that walk the
@@ -99,8 +101,9 @@ final class QueryRun: @unchecked Sendable {
 
     init(target: QueryTarget, asOf: Date, calendar: Calendar = AppCalendars.listening,
          scrobbles: [ScrobbleSnapshot], allTimeScrobbles: [ScrobbleSnapshot]? = nil, snapshots: QuerySnapshots = .empty,
-         entityScope: Set<QueryEntityID>? = nil) {
+         entityScope: Set<QueryEntityID>? = nil, sessionGapMinutes: Double = 30) {
         self.target = target
+        self.sessionGapMinutes = sessionGapMinutes
         self.entityScope = entityScope
         self.asOf = asOf
         self.calendar = calendar
@@ -126,6 +129,7 @@ final class QueryRun: @unchecked Sendable {
         case .album: s.albumName.isEmpty ? nil : QueryEntityID(target: .album, artist: s.artistName, name: s.albumName)
         case .track: QueryEntityID(target: .track, artist: s.artistName, name: s.trackName)
         case .scrobble: QueryEntityID(target: .scrobble, artist: s.artistName, name: s.trackName, at: s.playedAt.timeIntervalSince1970)
+        case .session: nil   // a session is found from the history as a whole, not from one play (see `universe`)
         }
     }
 
@@ -156,6 +160,9 @@ final class QueryRun: @unchecked Sendable {
             /// Tracks only: the album it was most often scrobbled under
             /// (alphabetically-first on a tie, so it never depends on iteration order).
             var album: String?
+            /// Sessions only: a line saying what the session was (its plays, length, artists), and the artist it is shown with (its most played).
+            var summary: String?
+            var artist: String?
         }
         /// Sorted by (name, artist) so every run enumerates identically.
         let entities: [QueryEntity]
@@ -165,6 +172,7 @@ final class QueryRun: @unchecked Sendable {
     var universe: Universe {
         memoized("universe") {
             let aggregates = buildAggregates(scrobbles)
+            if target == .session { return sessionUniverse() }
             if target == .scrobble {
                 // One entity per play, newest first: the order a list of plays is read in, and no name sort over every play.
                 let ordered = scrobbles.reversed().compactMap { entityID(for: $0) }.map(QueryEntity.init(id:))
@@ -178,6 +186,31 @@ final class QueryRun: @unchecked Sendable {
                 .map(QueryEntity.init(id:))
             return Universe(entities: entities, aggregates: aggregates)
         }
+    }
+
+    /// For a query that finds sessions: the sessions of the whole history (found with the query's gap) that began among the plays the query
+    /// counts, newest first, so a period or a play filter picks sessions by when and where they started.
+    private func sessionUniverse() -> Universe {
+        let counted = Set(scrobbles.map { entityID(forPlay: $0) })
+        let plays = allTimeScrobbles
+        var entities: [QueryEntity] = []
+        var aggregates: [QueryEntityID: Universe.Aggregate] = [:]
+        for session in QueryFieldRegistry.sessionList(self, gapMinutes: sessionGapMinutes).reversed() {
+            guard counted.contains(entityID(forPlay: plays[session.first])) else { continue }
+            let id = QueryEntityID(target: .session, artist: "", name: "", at: session.start)
+            let image = plays[session.first...session.last].first { $0.artistName == session.topArtist && $0.imageURL.map { !TextNormalization.isLastfmPlaceholderImage($0) } == true }?.imageURL
+            aggregates[id] = Universe.Aggregate(
+                plays: session.last - session.first + 1, first: Date(timeIntervalSince1970: session.start), last: Date(timeIntervalSince1970: session.end),
+                imageURL: image, album: nil, summary: QueryFieldRegistry.sessionSummary(session), artist: session.topArtist
+            )
+            entities.append(QueryEntity(id: id))
+        }
+        return Universe(entities: entities, aggregates: aggregates)
+    }
+
+    /// A play as an entity of a run that finds single plays, whatever this run's own target is.
+    func entityID(forPlay s: ScrobbleSnapshot) -> QueryEntityID {
+        QueryEntityID(target: .scrobble, artist: s.artistName, name: s.trackName, at: s.playedAt.timeIntervalSince1970)
     }
 
     /// The entities a query is evaluated over: the whole universe, or just `entityScope`'s members of it.
@@ -196,7 +229,7 @@ final class QueryRun: @unchecked Sendable {
             for s in source {
                 guard let id = entityID(for: s) else { continue }
                 let image = s.imageURL.flatMap { TextNormalization.isLastfmPlaceholderImage($0) ? nil : $0 }
-                aggregates[id] = Universe.Aggregate(plays: 1, first: s.playedAt, last: s.playedAt, imageURL: image, album: s.albumName.isEmpty ? nil : s.albumName)
+                aggregates[id] = Universe.Aggregate(plays: 1, first: s.playedAt, last: s.playedAt, imageURL: image, album: s.albumName.isEmpty ? nil : s.albumName, summary: nil, artist: nil)
             }
             return aggregates
         }
@@ -211,7 +244,7 @@ final class QueryRun: @unchecked Sendable {
                 if a.imageURL == nil { a.imageURL = image }
                 aggregates[id] = a
             } else {
-                aggregates[id] = Universe.Aggregate(plays: 1, first: s.playedAt, last: s.playedAt, imageURL: image, album: nil)
+                aggregates[id] = Universe.Aggregate(plays: 1, first: s.playedAt, last: s.playedAt, imageURL: image, album: nil, summary: nil, artist: nil)
             }
             if target == .track || target == .scrobble, !s.albumName.isEmpty { albumCounts[id, default: [:]][s.albumName, default: 0] += 1 }
         }
@@ -242,6 +275,7 @@ final class QueryRun: @unchecked Sendable {
         case .album: return s.albumName.isEmpty ? nil : QueryEntityID(target: .album, artist: s.artistName, name: s.albumName)
         case .track: return QueryEntityID(target: .track, artist: s.artistName, name: s.trackName)
         case .scrobble: return play
+        case .session: return nil
         }
     }
 

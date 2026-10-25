@@ -9,6 +9,7 @@ extension QueryTarget {
         case .album: "Albums"
         case .track: "Tracks"
         case .scrobble: "Scrobbles"
+        case .session: "Sessions"
         }
     }
 }

@@ -246,11 +246,12 @@ struct QueryView: View {
                         Text("Albums").tag(QueryTarget.album)
                         Text("Tracks").tag(QueryTarget.track)
                         Text("Scrobbles").tag(QueryTarget.scrobble)
+                        Text("Sessions").tag(QueryTarget.session)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(minWidth: 240, maxWidth: 420)
-                    .help("What the query finds: artists, albums, tracks, or single plays (scrobbles). Changing it keeps the conditions that still apply.")
+                    .frame(minWidth: 300, maxWidth: 520)
+                    .help("What the query finds: artists, albums, tracks, single plays (scrobbles) or listening sessions. Changing it keeps the conditions that still apply.")
 
                     Spacer(minLength: 8)
                     askButton
@@ -668,6 +669,17 @@ struct QueryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Limit results", isOn: Binding(get: { model.spec.limit != nil }, set: { model.spec.limit = $0 ? 100 : nil }))
                     .help("Keep only the first N rows after sorting — “top 25”, or one random song with a shuffle.")
+                if model.spec.target == .session {
+                    Picker("A session ends after", selection: Binding(
+                        get: { model.spec.effectiveSessionGapMinutes },
+                        set: { model.spec.sessionGapMinutes = $0 == QuerySpec.defaultSessionGapMinutes ? nil : $0 }
+                    )) {
+                        ForEach(QuerySpec.sessionGapChoices, id: \.self) { Text("\($0) minutes without a play").tag($0) }
+                    }
+                    .font(AppTypography.metadata)
+                    .help("How long after one play starts the next must start for the two to be in different sessions. A longer gap makes fewer, longer sessions.")
+                }
+                if model.spec.target != .session {
                 Toggle("Break down by calendar year", isOn: Binding(
                     get: { model.spec.breakdown != nil },
                     set: { on in
@@ -684,6 +696,7 @@ struct QueryView: View {
                     ))
                     .font(AppTypography.metadata)
                 }
+                }
                 if model.spec.limit != nil {
                     Stepper(onIncrement: incrementResultLimit, onDecrement: decrementResultLimit) {
                         HStack {
@@ -697,7 +710,7 @@ struct QueryView: View {
                     }
                     .help("How many rows to keep.")
                 }
-                if model.spec.target != .artist {
+                if model.spec.target != .artist, model.spec.target != .session {
                     Toggle("At most N per artist", isOn: Binding(
                         get: { model.spec.groupLimit?.perArtist != nil },
                         set: { setCap(\.perArtist, to: $0 ? 1 : nil) }
@@ -952,6 +965,11 @@ struct QueryView: View {
 
     private var resultsHeader: some View {
         HStack(spacing: 10) {
+            if model.sessionsToReturnTo != nil, model.spec.target == .scrobble {
+                Button { model.returnToSessions() } label: { Label("Sessions", systemImage: "chevron.left") }
+                    .controlSize(.small)
+                    .help("Back to the list of sessions")
+            }
             if let result = model.result, model.validationError == nil, model.spec.breakdown != nil {
                 // Each year is its own list, so "N of M match" would add them up across years; say what is shown instead.
                 let years = Set(result.rows.compactMap(\.period)).count
@@ -1093,6 +1111,8 @@ struct QueryView: View {
             navigation.goToArtist(ArtistIdentity(name: entity.name, imageURL: row.imageURL))
         case .album:
             navigation.goToAlbum(AlbumIdentity(artist: entity.artist, name: entity.name, imageURL: row.imageURL))
+        case .session:
+            model.openSessionPlays(startedAt: entity.id.at)
         case .track, .scrobble:
             navigation.goToTrack(TrackIdentity(
                 artist: entity.artist,

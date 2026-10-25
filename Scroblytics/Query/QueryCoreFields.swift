@@ -83,7 +83,7 @@ extension QueryFieldRegistry {
                 if a.target != .artist, a.artist != b.artist { return a.artist < b.artist }
                 switch a.target {
                 case .artist: return a.name < b.name
-                case .track, .scrobble: return a.name < b.name
+                case .track, .scrobble, .session: return a.name < b.name
                 case .album:
                     if pa.first != pb.first { return pa.first < pb.first }
                     return a.name < b.name

@@ -389,8 +389,8 @@ enum QueryCapChecks {
             let oldJSON = Data(#"{"schemaVersion":4,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8)
             let decodedOld = try? QuerySpec.decode(oldJSON)
             check("a query saved before the display order existed still decodes, with none", decodedOld != nil && decodedOld?.resultSorts == nil && decodedOld?.showInRankOrder == nil)
-            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 10)
-            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":11,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
+            check("the display order survives saving", (try? QuerySpec.decode(newest.encoded()))?.resultSorts == newest.resultSorts && QuerySpec.currentSchemaVersion == 11)
+            check("a query from a newer version is still refused", (try? QuerySpec.decode(Data(#"{"schemaVersion":12,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8))) == nil)
         } catch {
             check("the engine runs a per-release-year cap", false, "\(error)")
         }
@@ -483,6 +483,16 @@ enum QueryCapChecks {
         check("the larger models' prompt describes plays and lists the play fields", modelPrompt.contains("SINGLE PLAYS") && modelPrompt.contains("playedAt [date") && modelPrompt.contains("[works with: scrobble") && modelPrompt.contains("startsSession"), "\(modelPrompt.count) characters")
         let scrobbleLines = AskPrompt.fieldCatalog(registry: .standard).filter { $0.contains("scrobble") }
         print("      (the model prompt is \(modelPrompt.count.formatted()) characters; \(scrobbleLines.count) field lines work with scrobble, \(scrobbleLines.map(\.count).reduce(0, +).formatted()) characters of them)")
+        // Listening sessions.
+        let sortDuration = #"[{"field":"sessionDuration","direction":"descending","parameters":[],"scope":null,"comparedAgo":null}]"#
+        let longestSessions = try? AskModelEngine.read(reply(target: "session", sorts: sortDuration, limit: "10"), request: "my 10 longest listening sessions", registry: .standard, context: .none, now: Date(), engine: "test", seconds: 0)
+        check("“my 10 longest listening sessions” is a sessions query, longest first, 10 of them, nothing dropped", longestSessions?.target == .session && longestSessions?.interpretation.spec.limit == 10 && longestSessions?.interpretation.dropped.isEmpty == true && { if case .field(let ref)? = longestSessions?.interpretation.spec.sorts.first?.key { return ref.id == "sessionDuration" } else { return false } }(), "\(String(describing: longestSessions?.interpretation.spec))")
+        let inMarch = #"[{"field":"sessionBegan","op":"dateBetween","value":null,"valueTo":null,"text":null,"date":"2025-03-01","dateTo":"2025-03-31","tags":[],"parameters":[],"scope":null,"comparedAgo":null}]"#
+        let marchSessions = try? AskModelEngine.read(reply(target: "session", conditions: inMarch), request: "my listening sessions in March 2025", registry: .standard, context: .none, now: Date(), engine: "test", seconds: 0)
+        check("sessions in March: a condition on when they began, newest first, five hundred at most, with plays and length as columns", marchSessions?.interpretation.spec.groups.first?.first?.field.id == "sessionBegan" && marchSessions?.interpretation.spec.limit == QuerySpec.sessionLimit && marchSessions?.interpretation.spec.columns.map(\.id) == ["sessionBegan", "sessionPlays", "sessionDuration"] && marchSessions?.interpretation.dropped.isEmpty == true, "\(String(describing: marchSessions?.interpretation.spec.columns.map(\.id)))")
+        var sessionCaps: [AskInterpretation.Dropped] = []
+        check("a cap per artist makes no sense for a session and is dropped with a reason", AskInterpreter.groupLimit(perArtist: 1, perAlbum: nil, perReleaseYear: nil, target: .session, dropped: &sessionCaps) == nil && sessionCaps.count == 1)
+        check("the prompt describes sessions and lists their fields", modelPrompt.contains("LISTENING SESSIONS") && modelPrompt.contains("sessionTopArtistShare [numeric") && modelPrompt.contains("works with: session"))
         check("the on-device model is not offered plays", !QueryTarget.askTargets.contains(.scrobble) && QueryTarget.modelAskTargets.contains(.scrobble) && !AskVocabulary.queryInstructions(target: .track, ordered: false, scoped: false, absence: false, registry: .standard, now: Date()).contains("playedAt"))
         check("every worked example, the plays ones included, still reads cleanly", AskExamples.staleExamples(registry: .standard).isEmpty && AskExamples.modelExtras.contains { $0.target == .scrobble })
         let coldRainySunday = read(reply(sorts: playsDescending, limit: "10", caps: playKeys(weekdays: #"["Sunday"]"#, from: "5", to: "11", weather: #"["Rain"]"#, temperature: #"["Cold"]"#)), request: "top 10 songs when it is cold and raining on a sunday morning")

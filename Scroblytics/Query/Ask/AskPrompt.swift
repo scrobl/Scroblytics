@@ -24,10 +24,11 @@ enum AskPrompt {
 
         KINDS OF THING ("target")
         - artist: musicians and bands. album: records, LPs, releases. track: songs, tunes. scrobble: single plays, the individual listens, one \
-        row for each time something was played.
+        row for each time something was played. session: listening sessions, one row for each sitting (a run of plays close together).
         - Choose the kind the request wants back. "songs by X" is a track query; "albums by X" is an album query; "my top artists" is artist. \
         A request for the plays themselves is a scrobble query: "what did I listen to on …", "my last 20 plays", "everything I played after \
-        midnight", "the first time I played each song", "the start of each listening session". A request that ranks or counts songs, albums or \
+        midnight", "the first time I played each song", "the first song of each listening session". A request about the sittings themselves \
+        ("my longest listening sessions", "sessions where I played more than 50 songs", "sessions in March") is a session query. A request that ranks or counts songs, albums or \
         artists ("top songs", "most played") is NOT a scrobble query, even when it names a time.
 
         HOW A QUERY IS SHAPED
@@ -81,11 +82,21 @@ enum AskPrompt {
         - "last / latest / recent / newest N plays" → sort playedAt descending, limit N. "first / oldest N" → playedAt ascending. A day or period \
         named in the request is a condition on playedAt (or a stretch of days: "in March 2025" is dateBetween 2025-03-01 and 2025-03-31); \
         never a scope. Leave "limit" null when the request names no number: the app shows the newest thousand.
-        - A listening session is a run of plays within 30 minutes of each other. "starts a session" (startsSession yes) gives one play for \
-        each session; "longest sessions" is startsSession yes sorted by sessionSize or sessionLength descending.
+        - A listening session is a run of plays within 30 minutes of each other. "startsSession" (yes) gives the first play of each session; \
+        for the sessions themselves use the session target (below).
         - A place the request names ("in Germany", "when I was in Illinois", "in Chicago") is a condition on the play's country, state or \
         region, or city (scrobbleCountry / scrobbleRegion / scrobbleCity, "is"). The diversity caps perAlbum and perReleaseYear do not apply to \
         scrobbles; perArtist does ("one play per artist").
+
+        LISTENING SESSIONS (target "session")
+        - A session query lists listening sessions, newest first, one row for each: a session is a run of plays each within 30 minutes of the \
+        one before. Use the fields marked as working with session: "sessionBegan" (when it began; a day or a period named in the request is a \
+        condition on it: on / dateBetween), "sessionDuration" (how long it lasted, in a duration the field states), "sessionPlays" (how many \
+        plays), "sessionDistinctArtists", "sessionTopArtist", "sessionTopArtistShare" (a fraction), "sessionHour", "sessionWeekday", \
+        "sessionGapBefore", and where it began (sessionCity / sessionRegion / sessionCountry, weather).
+        - "longest sessions" without more is the most time: sort sessionDuration descending; "sessions with the most songs" is sessionPlays. \
+        "my 10 longest sessions" → limit 10. Leave "limit" null when no number is named: the app shows the newest five hundred. A session gap \
+        other than 30 minutes cannot be asked for here: say so in "unsupported". The diversity caps do not apply to sessions.
 
         PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature / playCity / playRegion / playCountry keys)
         - These keys count ONLY the plays made at that time or in that weather, before anything else is worked out. Use them when the request \

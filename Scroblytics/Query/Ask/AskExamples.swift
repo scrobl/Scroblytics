@@ -88,11 +88,23 @@ enum AskExamples {
         Example(request: "songs I played for the very first time in 2025", target: .scrobble, ordered: false, query: AskWire.Query(
             groups: [[cond("firstListen", "isTrue"), cond("playedAt", "dateBetween", date: "2025-01-01", dateTo: "2025-12-31")]],
             sorts: [.init(field: "playedAt", direction: "descending")], unsupported: [])),
-        Example(request: "the start of every listening session in March 2025", target: .scrobble, ordered: false, query: AskWire.Query(
+        Example(request: "the first song of each listening session in March 2025", target: .scrobble, ordered: false, query: AskWire.Query(
             groups: [[cond("startsSession", "isTrue"), cond("playedAt", "dateBetween", date: "2025-03-01", dateTo: "2025-03-31")]],
             sorts: [.init(field: "playedAt", direction: "descending")], unsupported: [])),
-        Example(request: "my 10 longest listening sessions", target: .scrobble, ordered: true, query: AskWire.Query(
-            groups: [[cond("startsSession", "isTrue")]], sorts: [.init(field: "sessionSize", direction: "descending")], limit: 10, unsupported: [])),
+        // Listening sessions (target session): one row for each sitting.
+        Example(request: "my 10 longest listening sessions", target: .session, ordered: true, query: AskWire.Query(
+            groups: [], sorts: [.init(field: "sessionDuration", direction: "descending")], limit: 10, unsupported: [])),
+        Example(request: "my listening sessions in March 2025", target: .session, ordered: false, query: AskWire.Query(
+            groups: [[cond("sessionBegan", "dateBetween", date: "2025-03-01", dateTo: "2025-03-31")]],
+            sorts: [.init(field: "sessionBegan", direction: "descending")], unsupported: [])),
+        Example(request: "sessions where I played more than 50 songs", target: .session, ordered: false, query: AskWire.Query(
+            groups: [[cond("sessionPlays", "greaterThan", value: 50)]], sorts: [.init(field: "sessionPlays", direction: "descending")], unsupported: [])),
+        Example(request: "sessions that were mostly one artist", target: .session, ordered: false, query: AskWire.Query(
+            groups: [[cond("sessionTopArtistShare", "greaterThanOrEqual", value: 0.8)]], sorts: [.init(field: "sessionBegan", direction: "descending")], unsupported: []),
+            resolvedTerms: [AskResolvedTerm(phrase: "mostly one artist", meaning: "the top artist has at least 80% of its plays")]),
+        Example(request: "sessions that began after midnight", target: .session, ordered: false, query: AskWire.Query(
+            groups: [[cond("sessionHour", "between", value: 0, valueTo: 4)]], sorts: [.init(field: "sessionBegan", direction: "descending")], unsupported: []),
+            resolvedTerms: [AskResolvedTerm(phrase: "after midnight", meaning: "began between midnight and 5 AM")]),
         Example(request: "plays of loved songs by Artist A while I was in Germany", target: .scrobble, ordered: false, query: AskWire.Query(
             groups: [[cond("artist", "textIs", text: "Artist A"), cond("track.loved", "isTrue"), cond("scrobbleCountry", "textIs", text: "Germany")]],
             sorts: [.init(field: "playedAt", direction: "descending")], unsupported: [])),

@@ -4,13 +4,13 @@ import Foundation
 /// (`PopularityKind`, `TopChartsEntity`); kept separate so the query layer has
 /// no dependency on either.
 enum QueryTarget: String, Codable, CaseIterable, Sendable, Hashable {
-    case artist, album, track, scrobble
+    case artist, album, track, scrobble, session
 
     /// What the on-device model can find: items, not single plays (its context is too small for the play fields).
     static var askTargets: [QueryTarget] { [.artist, .album, .track] }
 
     /// What the larger models (Claude, OpenAI, Gemini, a local server) can find: also single plays.
-    static var modelAskTargets: [QueryTarget] { [.artist, .album, .track, .scrobble] }
+    static var modelAskTargets: [QueryTarget] { [.artist, .album, .track, .scrobble, .session] }
 }
 
 enum QueryValueType: String, Codable, Sendable {

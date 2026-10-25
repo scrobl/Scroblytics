@@ -13,6 +13,59 @@ extension QueryFieldRegistry {
         help: "How long after one play starts the next one must start for them to be in different sessions. A longer gap makes longer, fewer sessions."
     )
 
+    /// One listening session of the history: the plays from `first` to `last` of the run's whole history (oldest first).
+    struct ListeningSession: Sendable {
+        var first: Int
+        var last: Int
+        /// When its first and its last play began (seconds since 1970).
+        var start: Double
+        var end: Double
+        var artists: Int
+        var tracks: Int
+        /// The artist with most of its plays (the first alphabetically on a tie), and how many it has.
+        var topArtist: String
+        var topArtistPlays: Int
+        var size: Int { last - first + 1 }
+    }
+
+    /// Every session of the history, oldest first, found with the gap. One walk, built once per run for each gap.
+    static func sessionList(_ run: QueryRun, gapMinutes: Double) -> [ListeningSession] {
+        run.memoized("listeningSessions.\(gapMinutes)") {
+            let plays = run.allTimeScrobbles
+            let gap = gapMinutes * 60
+            var sessions: [ListeningSession] = []
+            var index = 0
+            while index < plays.count {
+                var end = index
+                while end + 1 < plays.count, plays[end + 1].playedAt.timeIntervalSince(plays[end].playedAt) <= gap { end += 1 }
+                var artistCounts: [String: Int] = [:]
+                var tracks = Set<String>()
+                for play in plays[index...end] {
+                    artistCounts[play.artistName, default: 0] += 1
+                    tracks.insert(play.artistName + "\u{0}" + play.trackName)
+                }
+                let top = artistCounts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }
+                sessions.append(ListeningSession(
+                    first: index, last: end, start: plays[index].playedAt.timeIntervalSince1970, end: plays[end].playedAt.timeIntervalSince1970,
+                    artists: artistCounts.count, tracks: tracks.count, topArtist: top?.key ?? "", topArtistPlays: top?.value ?? 0
+                ))
+                index = end + 1
+            }
+            return sessions
+        }
+    }
+
+    /// "182 plays · 9h 2m · 41 artists · mostly Beck": what a session was, in one line under its date.
+    static func sessionSummary(_ session: ListeningSession) -> String {
+        let minutes = Int(((session.end - session.start) / 60).rounded())
+        let length = minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+        var parts = ["\(session.size.formatted()) play\(session.size == 1 ? "" : "s")"]
+        if session.size > 1 { parts.append(length) }
+        parts.append("\(session.artists.formatted()) artist\(session.artists == 1 ? "" : "s")")
+        if session.artists > 1, session.topArtistPlays * 2 > session.size { parts.append("mostly \(session.topArtist)") }
+        return parts.joined(separator: " · ")
+    }
+
     /// One play's place in its session.
     struct SessionInfo: Sendable {
         /// When the session began, and when its last play began (seconds since 1970).
@@ -27,34 +80,25 @@ extension QueryFieldRegistry {
         var artistRun: Int
     }
 
-    /// Every play of the history, oldest first, with its session. One walk, built once per run for each gap.
+    /// Every play of the history with its session, built once per run for each gap.
     static func sessions(_ run: QueryRun, gapMinutes: Double) -> [QueryEntityID: SessionInfo] {
         run.memoized("scrobbleSessions.\(gapMinutes)") {
             let plays = run.allTimeScrobbles
             var info: [QueryEntityID: SessionInfo] = [:]
             info.reserveCapacity(plays.count)
-            let gap = gapMinutes * 60
-            var index = 0
-            while index < plays.count {
-                // The session: from `index` while each play starts within the gap of the one before.
-                var end = index
-                while end + 1 < plays.count, plays[end + 1].playedAt.timeIntervalSince(plays[end].playedAt) <= gap { end += 1 }
-                let members = plays[index...end]
-                let artists = Set(members.map(\.artistName)).count
-                let start = plays[index].playedAt.timeIntervalSince1970, last = plays[end].playedAt.timeIntervalSince1970
-                // Runs of the same artist, in order.
-                var runStart = index
-                while runStart <= end {
+            for session in sessionList(run, gapMinutes: gapMinutes) {
+                var runStart = session.first
+                while runStart <= session.last {
                     var runEnd = runStart
-                    while runEnd + 1 <= end, plays[runEnd + 1].artistName == plays[runStart].artistName { runEnd += 1 }
+                    while runEnd + 1 <= session.last, plays[runEnd + 1].artistName == plays[runStart].artistName { runEnd += 1 }
                     for position in runStart...runEnd {
-                        if let id = run.entityID(for: plays[position]) {
-                            info[id] = SessionInfo(start: start, end: last, position: position - index + 1, size: end - index + 1, artists: artists, artistRun: runEnd - runStart + 1)
-                        }
+                        info[run.entityID(forPlay: plays[position])] = SessionInfo(
+                            start: session.start, end: session.end, position: position - session.first + 1, size: session.size,
+                            artists: session.artists, artistRun: runEnd - runStart + 1
+                        )
                     }
                     runStart = runEnd + 1
                 }
-                index = end + 1
             }
             return info
         }
@@ -95,6 +139,10 @@ extension QueryFieldRegistry {
             id: "sessionArtists", name: "Artists in session", type: .numeric, column: .standard(for: .numeric, style: .integer, width: 100),
             help: "How many different artists the session this play is in has."
         ) { info, _ in .number(Double(info.artists)) },
+        sessionField(
+            id: "sessionId", name: "Session ID", type: .numeric, column: .standard(for: .numeric, style: .integer, width: 110),
+            help: "A number that names the session this play is in: the time it began, in seconds since 1970. Plays of the same session share it, so “Session ID equals …” lists exactly one session’s plays (this is how a row of a sessions query opens its plays)."
+        ) { info, _ in .number(info.start) },
         sessionField(
             id: "startsSession", name: "Starts a session", type: .boolean,
             help: "True when this play began a session: it came after a silence longer than the gap (or is your first play ever)."

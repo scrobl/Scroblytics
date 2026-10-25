@@ -99,7 +99,7 @@ enum TrendsLeaningsEngine {
             case .album:
                 guard !play.albumName.isEmpty else { continue }
                 entity = QueryEntityID(target: .album, artist: play.artistName, name: play.albumName)
-            case .track, .scrobble: entity = QueryEntityID(target: .track, artist: play.artistName, name: play.trackName)
+            case .track, .scrobble, .session: entity = QueryEntityID(target: .track, artist: play.artistName, name: play.trackName)
             }
             guard let sample = weather.sample(at: play.playedAt), let hit = isWeather(sample, weather: weather, choice: choice) else { continue }
             let parts = calendar.dateComponents([.year, .month, .day], from: play.playedAt)
@@ -145,7 +145,7 @@ enum TrendsLeaningsEngine {
         switch item.id.target {
         case .artist: imageTarget = ImageTarget(kind: .artist, artist: item.artist, album: nil, track: nil)
         case .album: imageTarget = ImageTarget(kind: .album, artist: item.artist, album: item.name, track: nil)
-        case .track, .scrobble: imageTarget = ImageTarget(kind: .track, artist: item.artist, album: item.album, track: item.name)
+        case .track, .scrobble, .session: imageTarget = ImageTarget(kind: .track, artist: item.artist, album: item.album, track: item.name)
         }
         return ImageResolutionEngine.effectiveImageURL(for: imageTarget, lookup: lookup, fallbackURL: item.fallbackImageURL)
     }
@@ -160,7 +160,7 @@ enum TrendsLeaningsEngine {
         var spec = TrendsDrill.spec(from: range.from, to: range.to, target: item.id.target == .artist ? .track : item.id.target, playFilter: filter)
         switch item.id.target {
         case .artist: spec.groups[0].append(QueryCondition("artist", .textIs, [.text(item.id.artist)]))
-        case .album, .track, .scrobble:
+        case .album, .track, .scrobble, .session:
             spec.groups[0].append(QueryCondition("name", .textIs, [.text(item.id.name)]))
             spec.groups[0].append(QueryCondition("artist", .textIs, [.text(item.id.artist)]))
         }
@@ -245,7 +245,7 @@ struct TrendsLeaningsCard: View {
         switch target {
         case .artist: .artist
         case .album: .album
-        case .track, .scrobble: .track
+        case .track, .scrobble, .session: .track
         }
     }
 

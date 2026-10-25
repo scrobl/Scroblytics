@@ -6,8 +6,11 @@ import Foundation
 enum QueryTarget: String, Codable, CaseIterable, Sendable, Hashable {
     case artist, album, track, scrobble
 
-    /// What Ask can find: items, not single plays (yet).
+    /// What the on-device model can find: items, not single plays (its context is too small for the play fields).
     static var askTargets: [QueryTarget] { [.artist, .album, .track] }
+
+    /// What the larger models (Claude, OpenAI, Gemini, a local server) can find: also single plays.
+    static var modelAskTargets: [QueryTarget] { [.artist, .album, .track, .scrobble] }
 }
 
 enum QueryValueType: String, Codable, Sendable {

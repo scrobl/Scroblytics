@@ -17,6 +17,12 @@ extension QueryFieldRegistry {
         (.artist, ["plays", "allTimePlays", "playRank", "timeListened", "firstPlayed", "lastPlayed", "tags", "myTags", "popularityScore", "popular"]),
     ]
 
+    /// The inherited fields the larger models are told about.
+    private static let askableInherited: Set<String> = [
+        "track.plays", "track.firstPlayed", "track.loved", "track.tags", "track.duration", "track.releaseYear", "track.popular",
+        "album.releaseYear", "artist.plays", "artist.firstPlayed", "artist.tags",
+    ]
+
     static func inheritedFieldID(_ level: QueryTarget, _ base: String) -> String { "\(level.rawValue).\(base)" }
 
     private static func levelName(_ level: QueryTarget) -> String {
@@ -75,6 +81,8 @@ extension QueryFieldRegistry {
         field.choices = base.choices
         field.caveat = base.caveat
         field.askable = false
+        // Only the fields a request about plays is likely to name: the rest stay in the picker, not in the model's list.
+        field.askableByLargeModels = askableInherited.contains(id)
         field.itemLevel = level
         return field
     }

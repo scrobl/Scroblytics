@@ -76,6 +76,26 @@ enum AskExamples {
     /// describes. Deliberately different sentences from the evaluation set (`AskEval`), so a high score there means the
     /// model generalised, not that it was shown the answer.
     static let modelExtras: [Example] = [
+        // Single plays (target scrobble): one row for each listen. Time, place and sequence are conditions on the play's own fields.
+        Example(request: "what did I listen to on March 8, 2025", target: .scrobble, ordered: false, query: AskWire.Query(
+            groups: [[cond("playedAt", "on", date: "2025-03-08")]], sorts: [.init(field: "playedAt", direction: "ascending")], unsupported: [])),
+        Example(request: "my last 20 plays", target: .scrobble, ordered: true, query: AskWire.Query(
+            groups: [], sorts: [.init(field: "playedAt", direction: "descending")], limit: 20, unsupported: [])),
+        Example(request: "everything I played after midnight in 2024", target: .scrobble, ordered: false, query: AskWire.Query(
+            groups: [[cond("hourOfDay", "between", value: 0, valueTo: 4), cond("playedAt", "dateBetween", date: "2024-01-01", dateTo: "2024-12-31")]],
+            sorts: [.init(field: "playedAt", direction: "descending")], unsupported: []),
+            resolvedTerms: [AskResolvedTerm(phrase: "after midnight", meaning: "between midnight and 5 AM")]),
+        Example(request: "songs I played for the very first time in 2025", target: .scrobble, ordered: false, query: AskWire.Query(
+            groups: [[cond("firstListen", "isTrue"), cond("playedAt", "dateBetween", date: "2025-01-01", dateTo: "2025-12-31")]],
+            sorts: [.init(field: "playedAt", direction: "descending")], unsupported: [])),
+        Example(request: "the start of every listening session in March 2025", target: .scrobble, ordered: false, query: AskWire.Query(
+            groups: [[cond("startsSession", "isTrue"), cond("playedAt", "dateBetween", date: "2025-03-01", dateTo: "2025-03-31")]],
+            sorts: [.init(field: "playedAt", direction: "descending")], unsupported: [])),
+        Example(request: "my 10 longest listening sessions", target: .scrobble, ordered: true, query: AskWire.Query(
+            groups: [[cond("startsSession", "isTrue")]], sorts: [.init(field: "sessionSize", direction: "descending")], limit: 10, unsupported: [])),
+        Example(request: "plays of loved songs by Artist A while I was in Germany", target: .scrobble, ordered: false, query: AskWire.Query(
+            groups: [[cond("artist", "textIs", text: "Artist A"), cond("track.loved", "isTrue"), cond("scrobbleCountry", "textIs", text: "Germany")]],
+            sorts: [.init(field: "playedAt", direction: "descending")], unsupported: [])),
         Example(request: "top 10 songs when it is cold and raining on a Sunday morning", target: .track, ordered: true, query: AskWire.Query(
             groups: [], sorts: [.init(field: "plays", direction: "descending")], limit: 10, unsupported: [],
             playFilter: AskWire.PlayFilter(weekdays: ["Sunday"], fromHour: 5, toHour: 11, weather: ["Rain"], temperature: ["Cold"]))),

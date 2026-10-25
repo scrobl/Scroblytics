@@ -51,7 +51,9 @@ enum AskChips {
             }
         }
         if spec.breakdown != nil { chips.append(AskChip(kind: .limit, text: "For each calendar year" + (spec.breakdown?.showsNewestFirst == true ? " (newest first)" : ""))) }
-        if let limit = spec.limit { chips.append(AskChip(kind: .limit, text: "Top \(limit.formatted())" + (spec.breakdown != nil ? " per year" : ""))) }
+        if let limit = spec.limit {
+            chips.append(AskChip(kind: .limit, text: (spec.target == .scrobble ? "Up to \(limit.formatted()) plays" : "Top \(limit.formatted())") + (spec.breakdown != nil ? " per year" : "")))
+        }
         // How the picked results are shown, when it differs from the sort order above.
         if let order = spec.resultSorts?.first {
             switch order.key {

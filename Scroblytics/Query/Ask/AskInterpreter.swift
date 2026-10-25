@@ -24,6 +24,8 @@ struct AskInterpretation: Sendable {
 enum AskInterpreter {
     /// The columns shown beside the name when the model doesn't pick any: the two the query tool starts with.
     static let baseColumns = ["plays", "lastPlayed"]
+    /// The column a list of single plays starts with: when each was played (the track, artist and album are in the row).
+    static let scrobbleBaseColumns = ["playedAt"]
     static let maxColumns = 6
     /// The field an asked-for order falls back to — most played first.
     static let defaultSortFieldID = "plays"
@@ -81,9 +83,15 @@ enum AskInterpreter {
             spec.sorts.append(QuerySort(key: .field(ref), direction: .descending))
         }
 
+        // A list of single plays is always in an order — newest first unless the request says otherwise — and never the whole history.
+        if target == .scrobble, spec.sorts.isEmpty {
+            spec.sorts.append(QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .descending))
+        }
+
         if let limit = count ?? query.limit {
             if limit >= 1 { spec.limit = limit } else { dropped.append(.init(what: "limit \(limit)", reason: "a limit below 1")) }
         }
+        if target == .scrobble, spec.limit == nil { spec.limit = QuerySpec.scrobbleLimit }
 
         spec.playFilter = playFilter(query.playFilter, dropped: &dropped, knownCities: knownCities, knownRegions: knownRegions, knownCountries: knownCountries)
 
@@ -214,7 +222,7 @@ enum AskInterpreter {
         }
         take(perArtist, "per artist", fits: target != .artist, why: "every result here is already one artist", into: \.perArtist)
         take(perAlbum, "per album", fits: target == .track, why: "only a track has a resolved album", into: \.perAlbum)
-        take(perReleaseYear, "per release year", fits: target != .artist, why: "only an album or a track has a release year", into: \.perReleaseYear)
+        take(perReleaseYear, "per release year", fits: target == .album || target == .track, why: "only an album or a track has a release year", into: \.perReleaseYear)
         return caps.isEmpty ? nil : caps
     }
 
@@ -379,7 +387,7 @@ enum AskInterpreter {
         for group in spec.groups { for condition in group { add(condition.field) } }
         // A cap filters and sorts on nothing, but the result can't be read without the thing it groups by.
         if spec.groupLimit?.perReleaseYear != nil { add(QueryFieldRef("releaseYear")) }
-        for id in baseColumns where refs.count < 3 { add(QueryFieldRef(id)) }
+        for id in (target == .scrobble ? scrobbleBaseColumns : baseColumns) where refs.count < 3 { add(QueryFieldRef(id)) }
         return refs
     }
 }

@@ -16,6 +16,7 @@ extension QueryFieldRegistry {
         )
         field.choices = source.choices
         field.askable = false
+        field.askableByLargeModels = true
         return field
     }
 
@@ -29,6 +30,7 @@ extension QueryFieldRegistry {
             Dictionary(uniqueKeysWithValues: entities.map { ($0.id, compute(run, parameters, $0)) })
         }
         field.askable = false
+        field.askableByLargeModels = true
         return field
     }
 
@@ -102,19 +104,19 @@ extension QueryFieldRegistry {
             playSequence(run).listenNumber[entity.id].map { .value(.bool($0 == 1)) } ?? .missing
         },
         playField(
-            id: "playPlace", name: "City", type: .text, column: .standard(for: .text, width: 130),
+            id: "scrobbleCity", name: "City", type: .text, column: .standard(for: .text, width: 130),
             help: "The city you were in: the trip you were on, or your home place (“Home” when none is chosen). No value when no home place or trip is recorded. See Tools › Trips."
         ) { run, entity in
             run.snapshots.weather.city(at: time(entity)).map { .value(.text($0)) } ?? .missing
         },
         playField(
-            id: "playRegion", name: "State / region", type: .text, column: .standard(for: .text, width: 130),
+            id: "scrobbleRegion", name: "State / region", type: .text, column: .standard(for: .text, width: 130),
             help: "The state or region you were in, where the place is known to be in one (a place chosen from the city search records it; a typed name or coordinates have none)."
         ) { run, entity in
             run.snapshots.weather.regionAndCountry(at: time(entity)).region.map { .value(.text($0)) } ?? .missing
         },
         playField(
-            id: "playCountry", name: "Country", type: .text, column: .standard(for: .text, width: 130),
+            id: "scrobbleCountry", name: "Country", type: .text, column: .standard(for: .text, width: 130),
             help: "The country you were in, where the place is known to be in one (a place chosen from the city search records it; a typed name or coordinates have none)."
         ) { run, entity in
             run.snapshots.weather.regionAndCountry(at: time(entity)).country.map { .value(.text($0)) } ?? .missing

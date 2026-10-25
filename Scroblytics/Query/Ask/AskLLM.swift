@@ -371,7 +371,7 @@ struct OllamaClient: AskLLMClient {
 /// worst, never safety.
 enum AskPortableSchema {
     static func build(registry: QueryFieldRegistry) -> AskJSONSchema {
-        let fieldIDs = Array(Set(QueryTarget.askTargets.flatMap { registry.modelAskFields(for: $0).map(\.id) })).sorted()
+        let fieldIDs = Array(Set(QueryTarget.modelAskTargets.flatMap { registry.modelAskFields(for: $0).map(\.id) })).sorted()
         let operators = QueryOperator.allCases.map(\.rawValue)
         let units = QueryScope.Unit.allCases.map(\.rawValue)
 
@@ -420,7 +420,7 @@ enum AskPortableSchema {
         ])
         let term = object(["phrase": string, "meaning": string])
         let root = object([
-            "target": ["type": "string", "enum": QueryTarget.askTargets.map(\.rawValue)],
+            "target": ["type": "string", "enum": QueryTarget.modelAskTargets.map(\.rawValue)],
             "groups": ["type": "array", "items": ["type": "array", "items": condition],
                        "description": "Alternatives (OR); each is a list of conditions that must all hold (AND)."],
             "sorts": ["type": "array", "items": sort],

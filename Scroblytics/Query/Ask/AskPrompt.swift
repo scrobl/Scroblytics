@@ -23,8 +23,12 @@ enum AskPrompt {
         fields, operators and values. An app validates and runs what you write.
 
         KINDS OF THING ("target")
-        - artist: musicians and bands. album: records, LPs, releases. track: songs, tunes.
-        - Choose the kind the request wants back. "songs by X" is a track query; "albums by X" is an album query; "my top artists" is artist.
+        - artist: musicians and bands. album: records, LPs, releases. track: songs, tunes. scrobble: single plays, the individual listens, one \
+        row for each time something was played.
+        - Choose the kind the request wants back. "songs by X" is a track query; "albums by X" is an album query; "my top artists" is artist. \
+        A request for the plays themselves is a scrobble query: "what did I listen to on …", "my last 20 plays", "everything I played after \
+        midnight", "the first time I played each song", "the start of each listening session". A request that ranks or counts songs, albums or \
+        artists ("top songs", "most played") is NOT a scrobble query, even when it names a time.
 
         HOW A QUERY IS SHAPED
         - "groups" is a list of alternatives (OR). Each group is a list of conditions that must ALL hold (AND). Put every condition of \
@@ -67,6 +71,21 @@ enum AskPrompt {
         - Anything no field measures — mood, feeling, lyrics, how something sounds, "for a road trip" — goes in "unsupported" \
         in plain words. Never replace it with a different field, and never invent a name, artist or tag the request didn't say. \
         If nothing in the request can be expressed, return no conditions and say why in "unsupported".
+
+        SINGLE PLAYS (target "scrobble")
+        - A scrobble query lists plays, newest first, and the plays are never ranked by "plays": no field counts them. Use the fields marked \
+        as working with scrobble: "playedAt" (the date and time of the play; use on / before / after / dateBetween for a day or a stretch of days, \
+        written as calendar days), "hourOfDay" (0–23), the day-of-week / time-of-day / season of the play, the place and weather at the time, the \
+        gap since the previous play, "listenNumber" and "firstListen" (first time the track was ever played), and the listening-session fields. \
+        The fields written "track.…", "album.…" and "artist.…" describe the track, album or artist the play is of ("track.loved", "artist.tags").
+        - "last / latest / recent / newest N plays" → sort playedAt descending, limit N. "first / oldest N" → playedAt ascending. A day or period \
+        named in the request is a condition on playedAt (or a stretch of days: "in March 2025" is dateBetween 2025-03-01 and 2025-03-31); \
+        never a scope. Leave "limit" null when the request names no number: the app shows the newest thousand.
+        - A listening session is a run of plays within 30 minutes of each other. "starts a session" (startsSession yes) gives one play for \
+        each session; "longest sessions" is startsSession yes sorted by sessionSize or sessionLength descending.
+        - A place the request names ("in Germany", "when I was in Illinois", "in Chicago") is a condition on the play's country, state or \
+        region, or city (scrobbleCountry / scrobbleRegion / scrobbleCity, "is"). The diversity caps perAlbum and perReleaseYear do not apply to \
+        scrobbles; perArtist does ("one play per artist").
 
         PLAYS MADE AT CERTAIN TIMES OR IN CERTAIN WEATHER (the playWeekdays / playMonths / playFromHour / playToHour / playWeather / playTemperature / playCity / playRegion / playCountry keys)
         - These keys count ONLY the plays made at that time or in that weather, before anything else is worked out. Use them when the request \
@@ -124,7 +143,7 @@ enum AskPrompt {
     /// One line per field, once, with the kinds of thing it works with.
     static func fieldCatalog(registry: QueryFieldRegistry) -> [String] {
         var byID: [String: (field: QueryField, targets: [String])] = [:]
-        for target in QueryTarget.askTargets {
+        for target in QueryTarget.modelAskTargets {
             for field in registry.modelAskFields(for: target) {
                 byID[field.id, default: (field, [])].targets.append(target.rawValue)
             }

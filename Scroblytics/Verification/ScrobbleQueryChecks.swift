@@ -123,18 +123,18 @@ enum ScrobbleQueryChecks {
             places.placeName = "Oslo, Norway"
             places.homePlace = WeatherPlace(name: "Oslo, Norway", latitude: 59.9, longitude: 10.7)
             places.trips = [WeatherSnapshot.TripWeather(trip: WeatherTrip(place: chicago, from: at(8, 0), until: at(10, 0)), series: nil)]
-            let whereRows = try? evaluate(spec(columns: ["playedAt", "playPlace", "playRegion", "playCountry"]), weather: places)
+            let whereRows = try? evaluate(spec(columns: ["playedAt", "scrobbleCity", "scrobbleRegion", "scrobbleCountry"]), weather: places)
             let onTrip = whereRows?.rows.filter { (date($0, "playedAt") ?? .distantPast) >= at(8, 0) && (date($0, "playedAt") ?? .distantPast) < at(10, 0) }
             let athome = whereRows?.rows.filter { (date($0, "playedAt") ?? .distantPast) < at(8, 0) || (date($0, "playedAt") ?? .distantPast) >= at(10, 0) }
-            check("plays on the trip say Chicago, Illinois, United States", onTrip?.count == 2 && onTrip?.allSatisfy { text($0, "playPlace") == "Chicago" && text($0, "playRegion") == "Illinois" && text($0, "playCountry") == "United States" } == true)
-            check("plays at home say Oslo and Norway, and have no state", athome?.count == 6 && athome?.allSatisfy { text($0, "playPlace") == "Oslo" && text($0, "playCountry") == "Norway" && text($0, "playRegion") == nil } == true)
+            check("plays on the trip say Chicago, Illinois, United States", onTrip?.count == 2 && onTrip?.allSatisfy { text($0, "scrobbleCity") == "Chicago" && text($0, "scrobbleRegion") == "Illinois" && text($0, "scrobbleCountry") == "United States" } == true)
+            check("plays at home say Oslo and Norway, and have no state", athome?.count == 6 && athome?.allSatisfy { text($0, "scrobbleCity") == "Oslo" && text($0, "scrobbleCountry") == "Norway" && text($0, "scrobbleRegion") == nil } == true)
             var inIllinois = spec()
             inIllinois.playFilter = QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, regions: ["Illinois"])
             check("a state filter lists the plays made there", (try? evaluate(inIllinois, weather: places))?.rows.count == 2)
             var inNorway = spec()
-            inNorway.groups = [[QueryCondition("playCountry", .textIs, [.text("Norway")])]]
+            inNorway.groups = [[QueryCondition("scrobbleCountry", .textIs, [.text("Norway")])]]
             check("a condition on the country agrees with the filter", (try? evaluate(inNorway, weather: places))?.rows.count == 6)
-            check("with no places recorded there is no place or weather value", (try? evaluate(spec(columns: ["playedAt", "playPlace", "playWeather", "playTemperature"])))?.rows.allSatisfy { text($0, "playPlace") == nil && text($0, "playWeather") == nil && number($0, "playTemperature") == nil } == true)
+            check("with no places recorded there is no place or weather value", (try? evaluate(spec(columns: ["playedAt", "scrobbleCity", "playWeather", "playTemperature"])))?.rows.allSatisfy { text($0, "scrobbleCity") == nil && text($0, "playWeather") == nil && number($0, "playTemperature") == nil } == true)
 
             // What a play inherits from the track, album and artist it is of (phase 2): each inherited field must equal the same field on a
             // query of that kind, and the counts must equal a recount of the plays.
@@ -251,7 +251,7 @@ enum ScrobbleQueryChecks {
             // The pieces around the target.
             check("scrobble fields are offered only for scrobbles, and items' fields are not", registry.fields(for: .scrobble).contains { $0.id == "playedAt" } && !registry.fields(for: .track).contains { $0.id == "playedAt" } && !registry.fields(for: .scrobble).contains { $0.id == "plays" })
             check("every scrobble field has a definition", registry.fields(for: .scrobble).allSatisfy { !$0.help.isEmpty })
-            check("Ask does not offer the target yet", !QueryTarget.askTargets.contains(.scrobble) && QueryTarget.allCases.contains(.scrobble))
+            check("the on-device model is not offered the target, the larger models are", !QueryTarget.askTargets.contains(.scrobble) && QueryTarget.modelAskTargets.contains(.scrobble) && QueryTarget.allCases.contains(.scrobble))
             var saved = spec()
             saved.groups = [[QueryCondition("artist", .textIs, [.text("Artist A")])]]
             let again = try? QuerySpec.decode(saved.encoded())

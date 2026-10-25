@@ -68,7 +68,7 @@ enum LayoutSnapshots {
             }
             // Rows with the new controls: an uncertain pair (same / different), a favorite that isn't in the library (remove), and
             // one that is both uncertain and a leftover, at narrower widths too.
-            func rowsView() -> some View {
+            @MainActor func rowsView() -> some View {
                 let ghost = AppleFavoriteNotInLibrary(origin: .leftover, databaseID: 1, name: "Sunhouse", artist: "Artist A")
                 let catalogue = AppleFavoriteNotInLibrary(origin: .catalogue, databaseID: 2, name: "Streamed Song With A Rather Long Title", artist: "Artist B & Artist C")
                 return VStack(alignment: .leading, spacing: 1) {

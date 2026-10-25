@@ -190,7 +190,6 @@ struct CollageGeneratorView: View {
                 GeometryReader { proxy in
                     let baseWidth = min(proxy.size.width, 960)
                     let collageWidth = baseWidth * zoom
-                    let dimensions = options.grid.dimensions
                     let collageHeight = collageWidth * CollageCanvas.heightRatio(grid: options.grid, footer: footer)
                     CollageCanvas(
                         items: items,

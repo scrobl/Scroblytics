@@ -325,8 +325,7 @@ enum PerfChecks {
                 check("the Rabbit Hole index builds in a few seconds even on a huge history", seconds < 10, "\(seconds)s")
             }
 
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(failures == 0 ? 0 : 1)
+            HeadlessTask.finish(failures)
         }
     }
 }

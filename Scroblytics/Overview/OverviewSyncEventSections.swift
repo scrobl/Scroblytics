@@ -7,21 +7,21 @@ struct AlmostMilestonesSection: View {
     let columnCount: Int
 
     /// The most cards ever shown: three columns by two rows.
-    static let maxCards = 6
-    static let maxRows = 2
-    private static let threeColumnsFrom: CGFloat = 900
-    private static let twoColumnsFrom: CGFloat = 640
+    nonisolated static let maxCards = 6
+    nonisolated static let maxRows = 2
+    private nonisolated static let threeColumnsFrom: CGFloat = 900
+    private nonisolated static let twoColumnsFrom: CGFloat = 640
 
     /// Columns for the width Overview has: three when it is wide, two, then one. The rows never go past two, so a narrower window
     /// shows fewer cards (the closest ones) instead of a taller strip.
-    static func columnCount(forWidth width: CGFloat) -> Int {
+    nonisolated static func columnCount(forWidth width: CGFloat) -> Int {
         if width >= threeColumnsFrom { return 3 }
         if width >= twoColumnsFrom { return 2 }
         return 1
     }
 
     /// How many of the given cards fit in `columns` columns of at most two rows.
-    static func visibleCount(of total: Int, columns: Int) -> Int {
+    nonisolated static func visibleCount(of total: Int, columns: Int) -> Int {
         min(total, max(1, columns) * maxRows, maxCards)
     }
 

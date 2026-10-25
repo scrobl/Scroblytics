@@ -271,7 +271,7 @@ struct AskEngineIndicator: View {
     @AppStorage(AskSettingsStore.key) private var stored: Data?
 
     /// What to say for a given choice; separate from the view so the wording can be checked.
-    static func describe(_ settings: AskSettings) -> (title: String, warning: String?, note: String?) {
+    nonisolated static func describe(_ settings: AskSettings) -> (title: String, warning: String?, note: String?) {
         let engine = settings.selected
         guard engine != .onDevice else {
             return ("Apple on-device", "Limited: the on-device model understands fewer kinds of request and often misreads them. Check the filters before running, or choose a larger model.", nil)

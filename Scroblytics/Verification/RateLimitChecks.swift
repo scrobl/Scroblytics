@@ -118,8 +118,7 @@ enum RateLimitChecks {
             _ = try? await other.fetchRecentTracksPage(page: 1)
             check("a rejected key (10) is not retried", FirstRunChecks.StubTransport.requests == 1, "\(FirstRunChecks.StubTransport.requests)")
 
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(failures == 0 ? 0 : 1)
+            HeadlessTask.finish(failures)
         }
     }
 }

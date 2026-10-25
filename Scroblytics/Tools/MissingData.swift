@@ -305,7 +305,7 @@ enum MissingDataDebugEval {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard let path = ProcessInfo.processInfo.environment["SCROBLYTICS_MISSINGDATA_DUMP"] else { return }
-        Task { @MainActor in
+        HeadlessTask.run("MissingDataDebugEval") {
             let context = container.mainContext
             let raw = try context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
             let scrobbles = QueryIdentity.canonicalizingArtists(raw)

@@ -1590,9 +1590,9 @@ struct PlayFilterEditor: View {
             ))
             if let from = filter.fromHour, let to = filter.toHour {
                 HStack {
-                    hourMenu("From", value: from) { filter.fromHour = $0 }
+                    hourMenu("From", selection: Binding(get: { from }, set: { filter.fromHour = $0 }))
                     Text("through")
-                    hourMenu("To", value: to) { filter.toHour = $0 }
+                    hourMenu("To", selection: Binding(get: { to }, set: { filter.toHour = $0 }))
                 }
                 .help("The hours are inclusive: 5 AM through 11 AM covers 5:00 to 11:59. A start after the end wraps past midnight.")
             }
@@ -1600,8 +1600,8 @@ struct PlayFilterEditor: View {
         .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in knownCities = WeatherLocations.knownCities() }
     }
 
-    private func hourMenu(_ title: String, value: Int, set: @escaping (Int) -> Void) -> some View {
-        Picker(title, selection: Binding(get: { value }, set: set)) {
+    private func hourMenu(_ title: String, selection: Binding<Int>) -> some View {
+        Picker(title, selection: selection) {
             ForEach(0..<24, id: \.self) { Text(QueryPlayFilter.hourLabel($0)).tag($0) }
         }
         .labelsHidden()

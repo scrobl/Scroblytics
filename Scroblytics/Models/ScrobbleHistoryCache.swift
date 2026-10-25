@@ -53,8 +53,8 @@ actor ScrobbleHistoryCache {
     private var canonicalizing: Task<[ScrobbleSnapshot], Never>?
 
     init(
-        loader: @escaping Loader = { try await ScrobbleHistoryLoader(modelContainer: $0).load() },
-        stampReader: @escaping StampReader = { try await ScrobbleHistoryLoader(modelContainer: $0).stamp() }
+        loader: @escaping Loader = { try ScrobbleHistoryLoader(modelContainer: $0).load() },
+        stampReader: @escaping StampReader = { try ScrobbleHistoryLoader(modelContainer: $0).stamp() }
     ) {
         self.loader = loader
         self.stampReader = stampReader

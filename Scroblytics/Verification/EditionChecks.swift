@@ -332,14 +332,13 @@ enum EditionChecks {
                 } else {
                     check("a backup can be made and read back", false)
                 }
-                try? AlbumMatchFixEngine.keepMerged(context: context, artist: artist, album: special)
-                try? AlbumMatchFixEngine.separateEdition(context: context, artist: artist, album: special)
+                _ = try? AlbumMatchFixEngine.keepMerged(context: context, artist: artist, album: special)
+                _ = try? AlbumMatchFixEngine.separateEdition(context: context, artist: artist, album: special)
                 check("choosing to count a reviewed edition on its own turns it back on", AlbumTurnoverEngine.separateEditionKeys(context: context) == [specialKey] && AlbumTurnoverEngine.loadSnapshot(context: context).reviewedEditions.isEmpty)
             }
 
             cleanUp()
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(failures == 0 ? 0 : 1)
+            HeadlessTask.finish(failures)
         }
     }
 }

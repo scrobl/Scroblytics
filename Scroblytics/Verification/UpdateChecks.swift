@@ -28,8 +28,7 @@ enum UpdateChecks {
                 } else {
                     check("the real list is understood: a newer release is found for 0.0.1", false, "\(old)")
                 }
-                print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-                exit(failures == 0 ? 0 : 1)
+                HeadlessTask.finish(failures)
             }
 
             // Versions.
@@ -133,8 +132,7 @@ enum UpdateChecks {
             check("a failed check is not counted as checked (it is tried again next launch)", failing.lastCheckedAt == nil && failing.announced == nil)
             UserDefaults.standard.removePersistentDomain(forName: suite + ".b")
 
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(failures == 0 ? 0 : 1)
+            HeadlessTask.finish(failures)
         }
     }
 }

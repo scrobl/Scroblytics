@@ -9,7 +9,7 @@ enum ConsistencyChecks {
     static func runHeadlessIfRequested(container: ModelContainer) {
         let environment = ProcessInfo.processInfo.environment
         guard environment["SCROBLYTICS_CONSISTENCY_CHECK"] != nil else { return }
-        Task { @MainActor in
+        HeadlessTask.run("ConsistencyChecks") {
             var failures = 0
             func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
                 print("\(ok ? "PASS" : "FAIL")  \(name)\(ok || detail().isEmpty ? "" : " — " + detail())")

@@ -48,7 +48,7 @@ enum HelpClaimChecks {
     /// from the same copy with SQLite.
     static func runStoreCheckIfRequested(container: ModelContainer) {
         guard let path = ProcessInfo.processInfo.environment["SCROBLYTICS_HELP_STORE_CHECK"] else { return }
-        Task { @MainActor in
+        HeadlessTask.run("HelpClaimChecks") {
             let raw = try container.mainContext.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
             let plays = QueryIdentity.canonicalizingArtists(raw)
             let asOf = date(2026, 10, 4, 12)

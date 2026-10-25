@@ -301,8 +301,7 @@ enum DiagnosticsChecks {
             check("the real reports folder lists in date order", zip(onDisk, onDisk.dropFirst()).allSatisfy { $0.date >= $1.date })
             print("      (\(onDisk.count) Scroblytics crash report(s) found on this Mac)")
 
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(failures == 0 ? 0 : 1)
+            HeadlessTask.finish(failures)
         }
     }
 }

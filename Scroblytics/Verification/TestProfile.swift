@@ -202,6 +202,25 @@ enum TestProfile {
 }
 
 /// A coloured strip across the top of a test-profile window, so it can't be mistaken for the real app.
+/// Runs a headless hook's work on the main actor and reports an error it throws (and exits with failure), instead of leaving the
+/// unused task to swallow it and the hook sitting there.
+enum HeadlessTask {
+    /// The last lines of a headless check run: what release.sh looks for, then the exit status.
+    nonisolated static func finish(_ failures: Int) -> Never {
+        print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
+        exit(failures == 0 ? 0 : 1)
+    }
+
+    nonisolated static func run(_ name: String, _ body: @escaping @MainActor () async throws -> Void) {
+        Task { @MainActor in
+            do { try await body() } catch {
+                print("[\(name)] failed: \(error)")
+                exit(1)
+            }
+        }
+    }
+}
+
 struct TestProfileStrip: View {
     var body: some View {
         if let name = TestProfile.name {

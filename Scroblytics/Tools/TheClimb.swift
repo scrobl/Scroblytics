@@ -189,7 +189,7 @@ enum TheClimbDebugEval {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard let path = ProcessInfo.processInfo.environment["SCROBLYTICS_CLIMB_DUMP"] else { return }
-        Task { @MainActor in
+        HeadlessTask.run("TheClimbDebugEval") {
             let context = container.mainContext
             let raw = try context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
             let scrobbles = QueryIdentity.canonicalizingArtists(raw)

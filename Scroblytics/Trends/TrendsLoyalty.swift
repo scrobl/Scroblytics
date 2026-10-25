@@ -176,7 +176,7 @@ extension TrendsDrill {
         spec.period = QueryPeriod(from: range.from, to: range.to)
         let plays = QueryFieldRef("plays"), spreadRef = QueryFieldRef(spread.fieldID)
         let xRef = QueryFieldRef(metric == .plays ? "plays" : "timeListened")
-        var conditions = [
+        let conditions = [
             QueryCondition(plays, .greaterThanOrEqual, [.number(Double(minPlays))]),
             QueryCondition(xRef, .greaterThanOrEqual, [.number(max(metric == .plays ? Double(minPlays) : 0, x.lowerBound))]),
             QueryCondition(xRef, isLastColumn ? .lessThanOrEqual : .lessThan, [.number(x.upperBound)]),

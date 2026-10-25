@@ -560,7 +560,7 @@ enum TimelineDebugDump {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard ProcessInfo.processInfo.environment["SCROBLYTICS_TIMELINE_DUMP"] != nil else { return }
-        Task { @MainActor in
+        HeadlessTask.run("TimelineDebugDump") {
             let context = container.mainContext
             let scrobbles = try context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
             let lovedSet = LovedTracksEngine.lovedSet(context: context)

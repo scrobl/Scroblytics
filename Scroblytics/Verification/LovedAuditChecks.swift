@@ -199,8 +199,7 @@ enum LovedAuditChecks {
             check("backup round trip", false, "\(error)")
         }
 
-        print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-        exit(failures == 0 ? 0 : 1)
+        HeadlessTask.finish(failures)
     }
 }
 #endif

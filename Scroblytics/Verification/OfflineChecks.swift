@@ -22,7 +22,7 @@ final class FailingNetworkProtocol: URLProtocol {
 enum OfflineChecks {
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard ProcessInfo.processInfo.environment["SCROBLYTICS_OFFLINE_CHECK"] != nil else { return }
-        Task { @MainActor in
+        HeadlessTask.run("OfflineChecks") {
             var failures = 0
             func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
                 print("\(ok ? "PASS" : "FAIL")  \(name)\(ok || detail().isEmpty ? "" : " — " + detail())")

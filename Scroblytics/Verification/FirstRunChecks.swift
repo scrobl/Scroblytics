@@ -6,7 +6,7 @@ import Foundation
 /// wording for every failure, and which first-run state each combination of facts gives.
 enum FirstRunChecks {
     /// A transport that answers from a closure, so each Last.fm outcome can be produced on demand.
-    final class StubTransport: URLProtocol, @unchecked Sendable {
+    final class StubTransport: URLProtocol {
         nonisolated(unsafe) static var responder: (URLRequest) -> (status: Int, body: String)? = { _ in nil }
         nonisolated(unsafe) static var requests = 0
 
@@ -190,8 +190,7 @@ enum FirstRunChecks {
             check("anything else is still explained", StoreStartupFailure.cause(of: NSError(domain: "Other", code: 1)) == .other
                   && !StoreStartupFailure.describe(NSError(domain: "Other", code: 1), storePath: "/x").advice.isEmpty)
 
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(failures == 0 ? 0 : 1)
+            HeadlessTask.finish(failures)
         }
     }
 }

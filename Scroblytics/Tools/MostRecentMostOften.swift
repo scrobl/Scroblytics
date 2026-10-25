@@ -116,7 +116,7 @@ enum MostRecentMostOftenDebugEval {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard let path = ProcessInfo.processInfo.environment["SCROBLYTICS_MRMO_DUMP"] else { return }
-        Task { @MainActor in
+        HeadlessTask.run("MostRecentMostOftenDebugEval") {
             let context = container.mainContext
             let raw = try context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
             let scrobbles = QueryIdentity.canonicalizingArtists(raw)

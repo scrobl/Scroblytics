@@ -49,7 +49,7 @@ struct AskTranslator: Sendable, AskEngine {
     /// not a random sample). The token cap stops a runaway answer at a few seconds instead of letting it fill the
     /// whole context window — the schema's bounds already make a real query far shorter than this.
     private static func options(maximumTokens: Int) -> GenerationOptions {
-        GenerationOptions(sampling: .greedy, maximumResponseTokens: maximumTokens)
+        GenerationOptions(samplingMode: .greedy, maximumResponseTokens: maximumTokens)
     }
 
     static var availability: AskAvailability {

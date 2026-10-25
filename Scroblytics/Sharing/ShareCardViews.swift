@@ -62,7 +62,7 @@ struct ShareCardBackground: View {
 struct ShareCardFooter: View {
     let identity: ShareIdentity
 
-    static func isShown(_ identity: ShareIdentity) -> Bool { identity.showsFooter || !(identity.name ?? "").isEmpty }
+    nonisolated static func isShown(_ identity: ShareIdentity) -> Bool { identity.showsFooter || !(identity.name ?? "").isEmpty }
 
     var body: some View {
         HStack {

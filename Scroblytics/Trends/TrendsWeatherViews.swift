@@ -215,7 +215,7 @@ struct TrendsWeatherGridView: View {
     @State private var hovered: HoverCell?
 
     struct HoverCell: Equatable { let row: Int; let column: Int }
-    static let minimumPlays = 20
+    nonisolated static let minimumPlays = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

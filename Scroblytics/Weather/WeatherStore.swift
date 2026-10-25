@@ -217,7 +217,7 @@ enum WeatherClientCalendar {
 }
 
 /// What Settings shows about the weather download, and the thing that starts it: when weather is turned on, a place is chosen, the
-/// app opens, or a sync finishes (at most twice a day, and never in Offline mode).
+/// app opens, or a sync finishes (at most every 15 minutes, and never in Offline mode).
 @MainActor
 @Observable
 final class WeatherStatus {
@@ -240,8 +240,10 @@ final class WeatherStatus {
     @ObservationIgnored private var container: ModelContainer?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
-    /// Twice a day is plenty: the archive moves a day at a time.
-    static let minimumInterval: TimeInterval = 12 * 3600
+    /// The settled archive moves a day at a time, but the last days come from a source that is up to date to the hour, and plays from the
+    /// last few hours have no weather until the next download. A download with nothing new to fetch is a single small request, so a short
+    /// wait is enough to keep from asking more often than the data changes.
+    static let minimumInterval: TimeInterval = 15 * 60
 
     init() {
         lastUpdatedAt = UserDefaults.standard.object(forKey: WeatherSettings.lastUpdateKey) as? Date
@@ -267,7 +269,7 @@ final class WeatherStatus {
 
     var isEnabled: Bool { WeatherSettings.isEnabled() && WeatherSettings.place() != nil }
 
-    /// Starts a download if weather is on and a place is chosen. `force` skips the twice-a-day limit (turning weather on, choosing a place).
+    /// Starts a download if weather is on and a place is chosen. `force` skips the 15-minute limit (turning weather on, choosing a place).
     func update(force: Bool) {
         guard isEnabled, let place = WeatherSettings.place(), let container else { return }
         // A download is already running: a change made meanwhile (a trip added, a place chosen) must not be dropped, so it runs again after.

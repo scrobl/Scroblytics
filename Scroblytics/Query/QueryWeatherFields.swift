@@ -57,7 +57,7 @@ extension QueryFieldRegistry {
     static func cityTallies(_ run: QueryRun, scope: QueryScope?) -> [QueryEntityID: [String: Int]] {
         run.memoized("cityTallies.\(scope?.cacheKey ?? "-")") {
             let weather = run.snapshots.weather
-            guard !weather.isEmpty else { return [:] }
+            guard weather.hasPlaces else { return [:] }
             var perEntity: [QueryEntityID: [String: Int]] = [:]
             for (id, scrobbles) in run.scopedScrobblesByEntity(scope) {
                 var counts: [String: Int] = [:]
@@ -154,7 +154,7 @@ extension QueryFieldRegistry {
 
         let city = QueryField(
             id: "playCity", name: "City", group: .context, type: .text, targets: all,
-            help: "The city most of its plays were made in: your home place, or the trip you were on at the time of each play (Settings › Weather › Trips). A tie goes to the city that comes first alphabetically. Needs a home place chosen in Settings › Weather; without it there is no value. It describes the most common city, not every play: to count only the plays made in a city, use the play filter’s Cities. Uses the query’s period or this column’s date scope.",
+            help: "The city most of its plays were made in: your home place, or the trip you were on at the time of each play (Tools › Trips). A tie goes to the city that comes first alphabetically. Needs a home place chosen in Settings › Weather; without it there is no value. It describes the most common city, not every play: to count only the plays made in a city, use the play filter’s Cities. Uses the query’s period or this column’s date scope.",
             scopedCompute: { run, _, scope, entities in
                 let tallies = cityTallies(run, scope: scope)
                 return Dictionary(uniqueKeysWithValues: entities.map { entity in
@@ -167,7 +167,7 @@ extension QueryFieldRegistry {
         let cityCount = QueryField(
             id: "playCityCount", name: "Cities played in", group: .context, type: .numeric, targets: all,
             column: .standard(for: .numeric, style: .integer, width: 100),
-            help: "How many different cities its plays were made in (your home place and each trip place counts once, by name). 1 means it was only ever played in one place. Needs a home place chosen in Settings › Weather. Uses the query’s period or this column’s date scope.",
+            help: "How many different cities its plays were made in (your home place and each trip place counts once, by name). 1 means it was only ever played in one place. Works without weather: your home plays are listed under your home place’s name, or “Home” if you have not chosen one, and trips are recorded in Tools › Trips. Uses the query’s period or this column’s date scope.",
             scopedCompute: { run, _, scope, entities in
                 let tallies = cityTallies(run, scope: scope)
                 return Dictionary(uniqueKeysWithValues: entities.map { entity in

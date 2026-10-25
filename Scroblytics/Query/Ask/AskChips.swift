@@ -22,7 +22,8 @@ enum AskChips {
     }
 
     /// Whether a home place is set with weather on: a city filter can match nothing before that (it needs no download).
-    static var cityReady: Bool { WeatherSettings.isEnabled() && WeatherSettings.place() != nil }
+    /// Places are known: a home place or at least one trip (recorded with or without weather).
+    static var cityReady: Bool { !WeatherLocations.knownCities().isEmpty }
 
     static func describe(_ spec: QuerySpec, registry: QueryFieldRegistry, weatherReady: Bool = AskChips.weatherReady, cityReady: Bool = AskChips.cityReady) -> [AskChip] {
         var chips = [AskChip(kind: .target, text: spec.target.rawValue.capitalized + "s")]

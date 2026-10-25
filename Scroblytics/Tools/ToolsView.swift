@@ -12,6 +12,8 @@ struct ToolsView: View {
     let settings: ChartDateSettings
     @Binding var askRequest: AskQueryRequest?
     @Binding var overviewToolRequest: ToolDescriptor.Kind?
+    /// A tool another screen (Settings, a Trends card) asks to open; unlike an Overview route it keeps the Back button to the Tools page.
+    @Binding var openToolRequest: ToolDescriptor.Kind?
     @Binding var overviewSimilarSeeds: [SimilarSeed]
     /// Opens Query on `spec`; `detail` becomes the breadcrumb's tooltip, `suggestedName` (if any) defaults
     /// the Save As sheet if the user saves it from there.
@@ -45,8 +47,16 @@ struct ToolsView: View {
             navigation.path.append(ToolDescriptor.query)
         }
         .onChange(of: overviewToolRequest) { routeOverviewTool() }
+        .onChange(of: openToolRequest) { routeOpenTool() }
         .onChange(of: similarRouter.pending?.id) { routeSimilarRequest() }
-        .onAppear { routeOverviewTool(); routeSimilarRequest() }
+        .onAppear { routeOverviewTool(); routeSimilarRequest(); routeOpenTool() }
+    }
+
+    private func routeOpenTool() {
+        guard let requested = openToolRequest, let descriptor = ToolDescriptor.all.first(where: { $0.id == requested }) else { return }
+        openToolRequest = nil
+        navigation.path = NavigationPath()
+        navigation.path.append(descriptor)
     }
 
     private func routeOverviewTool() {
@@ -207,6 +217,8 @@ struct ToolsView: View {
             MultiAlbumTracksView(modelContainer: modelContainer, navigation: navigation)
         case .timeMachine:
             TimeMachineView(modelContainer: modelContainer, navigation: navigation)
+        case .trips:
+            TripsView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
         case .query:
             QueryView(modelContainer: modelContainer, settings: settings, isActive: true, askRequest: $askRequest, navigation: navigation)
         }
@@ -215,7 +227,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, query }
     let id: Kind
     let name: String
     let summary: String
@@ -264,6 +276,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .tagManagement, name: "Tag Management",
             summary: "Bulk add or remove Last.fm tags — turn an Apple Music playlist or a saved query into a tag.",
             systemImage: "tag", category: "Organize"
+        ),
+        ToolDescriptor(
+            id: .trips, name: "Trips",
+            summary: "Record where you were and when, and see what you listened to on each trip, with or without weather.",
+            systemImage: "airplane", category: "Organize"
         ),
         ToolDescriptor(
             id: .flaggedTracks, name: "Flagged Tracks",

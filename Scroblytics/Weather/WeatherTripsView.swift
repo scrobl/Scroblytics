@@ -81,110 +81,31 @@ struct WeatherPlacePicker: View {
 
 /// Settings › Weather › Trips: where you were when you weren't at home. A trip replaces the home weather for the days it covers; no
 /// scrobble is touched, so a trip can be added for the past and corrected at any time.
+/// Settings › Weather › Trips: the trips live in Tools › Trips, which works with weather on or off. Here, only where to find them.
 struct WeatherTripsSection: View {
     @AppStorage(WeatherSettings.enabledKey) private var enabled = false
-    @State private var trips = WeatherTripStore.load()
-    @State private var status = WeatherStatus.shared
-    @State private var editing: TripDraft?
-
-    private var calendar: Calendar { AppCalendars.listening }
-    private var sorted: [WeatherTrip] { trips.sorted { $0.from > $1.from } }
-    private var openTrips: [WeatherTrip] { trips.filter { $0.until == nil } }
-    private var currentTrip: WeatherTrip? { WeatherTrip.effective(at: Date(), in: trips) }
+    @State private var model = TripsModel()
 
     var body: some View {
         Section("Trips") {
-            Text("Away from home? A trip uses the weather where you were for the days it covers, in place of your home weather. Your scrobbles are never changed: each play just looks up where you were when it was made, so you can add a trip for dates in the past, and change it later.")
+            Text("Away from home? Record where you were and for which days in Tools › Trips, to see what you listened to on each trip. With weather on, each trip also uses the weather where you were, in place of your home weather. Your scrobbles are never changed.")
                 .font(AppTypography.supporting)
                 .foregroundStyle(.secondary)
-            if let currentTrip {
-                Label("Away now: \(currentTrip.shortName)\(currentTrip.until == nil ? "" : " until \(lastDay(of: currentTrip).formatted(date: .abbreviated, time: .omitted))")", systemImage: "airplane")
-                    .foregroundStyle(.tint)
+            if let current = model.currentTrip {
+                Label("Away now: \(current.shortName)", systemImage: "airplane").foregroundStyle(.tint)
             }
             HStack {
-                Button("I’m Away Now…") { editing = TripDraft.awayNow(calendar: calendar) }
-                Button("Add a Trip…") { editing = TripDraft.new(calendar: calendar) }
-                if !openTrips.isEmpty { Button("Back Home") { backHome() } }
+                Text(model.trips.isEmpty ? "No trips recorded yet." : "\(model.trips.count) trip\(model.trips.count == 1 ? "" : "s") recorded.")
+                    .font(AppTypography.supporting).foregroundStyle(.secondary)
+                Spacer()
+                Button("Open Trips") { NotificationCenter.default.post(name: .openToolRequested, object: ToolDescriptor.Kind.trips) }
             }
-            ForEach(sorted) { trip in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(trip.place.name)
-                        Text(dates(trip)).font(AppTypography.supporting).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Edit…") { editing = TripDraft(trip: trip, calendar: calendar) }
-                    Button("Remove", role: .destructive) { remove(trip) }
-                }
-            }
-            if sorted.enumerated().contains(where: { index, trip in sorted.dropFirst(index + 1).contains { trip.overlaps($0) } }) {
-                Text("Some trips overlap. For the days they share, the trip that began later is used.")
-                    .font(AppTypography.supporting).foregroundStyle(.orange)
-            }
-            if !trips.isEmpty, !enabled {
-                Text("Weather is off, so trips are saved but nothing is downloaded for them yet.")
+            if !model.trips.isEmpty, !enabled {
+                Text("Weather is off, so nothing is downloaded for the trips. They still show what you listened to.")
                     .font(AppTypography.supporting).foregroundStyle(.secondary)
             }
         }
-        .sheet(item: $editing) { draft in
-            TripEditor(draft: draft, onSave: { save($0) }, onCancel: { editing = nil })
-        }
-    }
-
-    // MARK: Wording
-
-    /// The last day of a trip (it ends at the start of the day after).
-    private func lastDay(of trip: WeatherTrip) -> Date {
-        guard let until = trip.until else { return Date() }
-        return calendar.date(byAdding: .day, value: -1, to: until) ?? until
-    }
-
-    private func dates(_ trip: WeatherTrip) -> String {
-        let from = trip.from.formatted(date: .abbreviated, time: .omitted)
-        guard trip.until != nil else { return "Since \(from), still there" }
-        return "\(from) – \(lastDay(of: trip).formatted(date: .abbreviated, time: .omitted))"
-    }
-
-    // MARK: Changing trips
-
-    private func persist(_ new: [WeatherTrip]) {
-        trips = new
-        WeatherTripStore.save(new)
-        NotificationCenter.default.post(name: .weatherDidUpdate, object: nil)
-        if enabled { status.update(force: true) }
-    }
-
-    private func save(_ draft: TripDraft) {
-        guard let place = draft.place else { return }
-        let from = calendar.startOfDay(for: draft.from)
-        let until: Date? = draft.stillThere ? nil : calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: max(draft.lastDay, draft.from)))
-        var updated = trips
-        if let id = draft.tripID, let index = updated.firstIndex(where: { $0.id == id }) {
-            // Changed dates or place: its downloaded weather no longer fits, so it is fetched again.
-            try? FileManager.default.removeItem(at: WeatherTripStore.cacheDirectory(for: updated[index]))
-            updated[index].place = place
-            updated[index].from = from
-            updated[index].until = until
-        } else {
-            updated.append(WeatherTrip(place: place, from: from, until: until))
-        }
-        editing = nil
-        persist(updated)
-    }
-
-    private func remove(_ trip: WeatherTrip) {
-        try? FileManager.default.removeItem(at: WeatherTripStore.cacheDirectory(for: trip))
-        persist(trips.filter { $0.id != trip.id })
-    }
-
-    /// Ends every trip that has no end, with today as its last day.
-    private func backHome() {
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))
-        persist(trips.map { trip in
-            var trip = trip
-            if trip.until == nil { trip.until = tomorrow }
-            return trip
-        })
+        .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in model.reload() }
     }
 }
 
@@ -229,13 +150,32 @@ struct TripEditor: View {
     @State var draft: TripDraft
     let onSave: (TripDraft) -> Void
     let onCancel: () -> Void
-    /// Places already used by a trip, most recent first, to pick from instead of searching again.
+    /// Places already used by a trip, A to Z, to pick from instead of searching again.
     var knownPlaces: [WeatherPlace] = TripEditor.knownPlaces(in: WeatherTripStore.load())
+    /// Searching for a place sends the name typed to the weather service, so it is offered only while weather is on; otherwise a place is a
+    /// name typed here, kept on this Mac, and the trip has no weather.
+    var weatherEnabled = WeatherSettings.isEnabled()
+    @State private var typing = false
+    @State private var typedName = ""
 
-    /// The places of these trips, each once (by its key), the most recently visited first.
+    private var typedPlace: WeatherPlace? {
+        let name = typedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : WeatherPlace(typedName: name)
+    }
+
+    private var canSave: Bool { draft.place != nil || ((typing || !weatherEnabled) && typedPlace != nil) }
+
+    private var nameOnly: Bool { !weatherEnabled || typing }
+
+    /// The places of these trips, each once (by its key), in alphabetical order (the way names sort for a person: accents and capitals
+    /// don't count, so "Åre" comes with the A's).
     static func knownPlaces(in trips: [WeatherTrip]) -> [WeatherPlace] {
         var seen = Set<String>()
-        return trips.sorted { $0.from > $1.from }.compactMap { seen.insert($0.place.key).inserted ? $0.place : nil }
+        let unique = trips.sorted { $0.from > $1.from }.compactMap { seen.insert($0.place.key).inserted ? $0.place : nil }
+        return unique.sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame ? $0.key < $1.key : order == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -250,7 +190,10 @@ struct TripEditor: View {
                             Text(place.coordinateLabel).font(AppTypography.supporting).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Change") { draft.place = nil }
+                        Button("Change") {
+                            if !place.hasCoordinates { typedName = place.name }
+                            draft.place = nil
+                        }
                     }
                 } else {
                     if !knownPlaces.isEmpty {
@@ -264,7 +207,17 @@ struct TripEditor: View {
                         .menuStyle(.borderlessButton).fixedSize()
                         Text("Or search for a new one:").font(AppTypography.supporting).foregroundStyle(.secondary)
                     }
-                    WeatherPlacePicker { draft.place = $0 }
+                    if nameOnly {
+                        TextField("Place name", text: $typedName).textFieldStyle(.roundedBorder)
+                        Text(weatherEnabled
+                             ? "A name only: nothing is looked up, so this trip has no weather."
+                             : "A name only. Nothing is looked up or sent anywhere, and the trip has no weather. Turn on weather in Settings to search for places and get each trip’s weather.")
+                            .font(AppTypography.supporting).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if weatherEnabled { Button("Search for a place instead") { typing = false }.buttonStyle(.link) }
+                    } else {
+                        WeatherPlacePicker { draft.place = $0 }
+                        Button("Type a name instead (no weather for this trip)") { typing = true }.buttonStyle(.link)
+                    }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -281,9 +234,13 @@ struct TripEditor: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-                Button("Save") { onSave(draft) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(draft.place == nil)
+                Button("Save") {
+                    var done = draft
+                    if done.place == nil { done.place = typedPlace }
+                    onSave(done)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
             }
         }
         .padding(20)

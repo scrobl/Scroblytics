@@ -20,6 +20,7 @@ enum WeatherChecks {
             fields(check)
             trends(check)
             await tripChecks(check)
+            await tripsWithoutWeatherChecks(check)
             leanChecks(check)
             leaningChecks(check)
             mapChecks(check)
@@ -547,6 +548,96 @@ enum WeatherChecks {
 
     // MARK: - Trips
 
+    // MARK: - Trips without weather
+
+    @MainActor
+    private static func tripsWithoutWeatherChecks(_ report: (String, Bool, String) -> Void) async {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func near(_ a: Double?, _ b: Double, _ tolerance: Double = 1e-9) -> Bool { a.map { abs($0 - b) < tolerance } ?? false }
+        let lisbon = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
+        let oslo = WeatherPlace(name: "Oslo, Norway", latitude: 59.91, longitude: 10.75)
+        let named = WeatherPlace(typedName: "  Grandma’s house ")
+        func trip(_ place: WeatherPlace, _ from: Date, _ until: Date?) -> WeatherTrip { WeatherTrip(place: place, from: from, until: until) }
+        let mar5 = date(2025, 3, 5), mar10 = date(2025, 3, 10), mar15 = date(2025, 3, 15)
+
+        // A place that is only a name.
+        check("a typed place keeps its name trimmed, has no coordinates and says it is a name only", !named.hasCoordinates && named.name == "Grandma’s house" && named.latitude == nil && named.longitude == nil && named.coordinateLabel.contains("name only"), named.coordinateLabel)
+        check("its key is its folded name (capitals and accents don't make a second place) and is not any coordinate's", named.key == WeatherPlace(typedName: "GRANDMA’S house").key && named.key != lisbon.key && lisbon.hasCoordinates && lisbon.key == "38.7_-9.1")
+        let encoded = try? JSONEncoder().encode([named, lisbon])
+        let decoded = encoded.flatMap { try? JSONDecoder().decode([WeatherPlace].self, from: $0) }
+        check("places of both kinds survive saving, and a typed one saves no coordinates", decoded == [named, lisbon] && !(String(data: encoded ?? Data(), encoding: .utf8) ?? "").contains("\"latitude\":null"), "\(String(describing: decoded))")
+        let oldPlace = try? JSONDecoder().decode(WeatherPlace.self, from: Data(#"{"name":"Oslo, Norway","latitude":59.9,"longitude":10.7}"#.utf8))
+        check("a place saved before typed names existed still loads, with its coordinates", oldPlace?.hasCoordinates == true && oldPlace?.latitude == 59.9 && oldPlace?.key == "59.9_10.7")
+
+        // The weather and the places are separate: with weather off, trips still say where you were.
+        let folder = FileManager.default.temporaryDirectory.appending(path: "trips-nowx-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "WeatherTrips.json")
+        let tripLisbon = trip(lisbon, mar5, mar10), tripNamed = trip(named, mar10, mar15)
+        WeatherTripStore.save([tripLisbon, tripNamed], file: file)
+        check("a trip that is only a name is saved and loaded again", WeatherTripStore.load(file: file) == [tripLisbon, tripNamed])
+        let suite = UserDefaults(suiteName: "trips-nowx-\(UUID().uuidString)")!
+        let files = WeatherFiles(directory: folder.appending(path: "Weather"))
+        let off = WeatherSnapshot.load(defaults: suite, files: files, tripsFile: file)
+        let onLisbon = date(2025, 3, 7, 12), onNamed = date(2025, 3, 12, 12), atHome = date(2025, 3, 2, 12)
+        check("with weather off there is no weather at all, but the places are known", off.isEmpty && off.hasPlaces && off.trips.count == 2 && off.sample(at: onLisbon) == nil && off.locationName(at: onLisbon) == nil)
+        check("the city of a play is the trip's on a trip, and Home at home when no home place was chosen", off.city(at: onLisbon) == "Lisbon" && off.city(at: onNamed) == "Grandma’s house" && off.city(at: atHome) == "Home", "\(String(describing: off.city(at: atHome)))")
+        check("the cities are Home, then each trip", off.cities == ["Home", "Lisbon", "Grandma’s house"], "\(off.cities)")
+        check("nothing known means no city and no cities", WeatherSnapshot.empty.city(at: atHome) == nil && WeatherSnapshot.empty.cities.isEmpty && !WeatherSnapshot.empty.hasPlaces)
+        WeatherSettings.setPlace(oslo, defaults: suite)
+        let offWithHome = WeatherSnapshot.load(defaults: suite, files: files, tripsFile: file)
+        check("a home place chosen earlier still names home while weather is off", offWithHome.isEmpty && offWithHome.city(at: atHome) == "Oslo" && offWithHome.cities == ["Oslo", "Lisbon", "Grandma’s house"], "\(offWithHome.cities)")
+        check("the cities Query and Ask offer are the home place or Home, then the trips (with or without weather)", WeatherLocations.knownCities(defaults: suite, tripsFile: file) == ["Oslo", "Lisbon", "Grandma’s house"] && WeatherLocations.knownCities(defaults: UserDefaults(suiteName: "trips-nowx-\(UUID().uuidString)")!, tripsFile: file) == ["Home", "Lisbon", "Grandma’s house"] && WeatherLocations.knownCities(defaults: UserDefaults(suiteName: "trips-nowx-\(UUID().uuidString)")!, tripsFile: folder.appending(path: "none.json")).isEmpty)
+        func cityFilter(_ cities: [String]) -> QueryPlayFilter { QueryPlayFilter(weekdays: nil, fromHour: nil, toHour: nil, months: nil, weatherConditions: [], temperatureBands: nil, cities: cities) }
+        check("the city filter works with weather off, for a trip and for Home", cityFilter(["Grandma’s house"]).matches(onNamed, weather: off) && !cityFilter(["Grandma’s house"]).matches(onLisbon, weather: off) && cityFilter(["Home"]).matches(atHome, weather: off) && !cityFilter(["Home"]).matches(onNamed, weather: off))
+
+        // With weather on, a typed trip has none, and home's weather is not used in its place.
+        let homeHours = WeatherSeries.hour(of: date(2025, 3, 1))
+        var homeSeries = WeatherSeries(startHour: homeHours, count: 24 * 20)
+        for h in homeHours..<(homeHours + 24 * 20) { homeSeries.set(hour: h, WeatherSample(temperature: 5, precipitation: nil, rain: nil, snowfall: nil, code: 0)) }
+        var on = WeatherSnapshot(series: homeSeries, placeName: "Oslo, Norway", percentiles: (20, 80))
+        on.trips = [WeatherSnapshot.TripWeather(trip: tripNamed, series: nil)]
+        check("a typed trip has no weather while weather is on (home's would be another place's), and home's weather is used outside it", on.sample(at: onNamed) == nil && on.locationName(at: onNamed) == nil && on.city(at: onNamed) == "Grandma’s house" && near(on.sample(at: atHome)?.temperature, 5) && !on.isEmpty)
+        check("the reach of the weather ignores a trip with none", on.hourBounds == homeHours...(homeHours + 24 * 20 - 1))
+        let startedAt = Date()
+        let summary = try? await WeatherUpdater.update(place: named, firstPlay: mar5, through: mar10, now: date(2025, 3, 20), client: WeatherClient(), files: files)
+        check("nothing is asked of the weather service for a typed place", summary?.requests == 0 && Date().timeIntervalSince(startedAt) < 2, "\(String(describing: summary?.requests))")
+
+        // The numbers behind the Trips tool and Trends › Where you listened, with no weather.
+        var plays: [ScrobbleSnapshot] = []
+        for day in 1...4 { for i in 0..<2 { plays.append(playAt("A", day: day, hour: 12, minute: i)) } }
+        for day in 5...9 { plays.append(playAt("B", day: day, hour: 12)) }
+        for day in 10...14 { for i in 0..<3 { plays.append(playAt("C", day: day, hour: 12, minute: i)) } }
+        for day in 15...20 { for i in 0..<2 { plays.append(playAt("A", day: day, hour: 12, minute: i)) } }
+        plays.sort { $0.playedAt < $1.playedAt }
+        let result = TrendsPlacesEngine.compute(scrobbles: plays, weather: off, range: DateRange(from: date(2025, 3, 1), to: date(2025, 3, 20, 23, 59)), now: date(2025, 3, 20, 23, 59), calendar: utc)
+        let stayLisbon = result.trips.first { $0.city == "Lisbon" }, stayNamed = result.trips.first { $0.city == "Grandma’s house" }
+        check("home is Home with 10 days and 20 plays (2 a day) while the trips are 5 days: Lisbon 5 plays (50% of home), the typed trip 15 plays (150%)", result.home?.city == "Home" && result.home?.days == 10 && result.home?.plays == 20 && stayLisbon?.days == 5 && stayLisbon?.plays == 5 && stayNamed?.days == 5 && stayNamed?.plays == 15 && near(result.relativeToHome(stayLisbon!), 0.5) && near(result.relativeToHome(stayNamed!), 1.5), "\(String(describing: result.home?.city)) \(String(describing: result.home?.days)) \(String(describing: stayNamed?.plays))")
+        check("with no weather a trip has no temperature or rain, and its top artist is still found (artist C on the typed trip)", stayNamed?.averageTemperature == nil && stayNamed?.rainShare == nil && stayNamed?.topArtists.first?.name == "C" && stayLisbon?.newArtists == 1, "\(String(describing: stayNamed?.topArtists))")
+        let drill = stayNamed.map { TrendsPlacesEngine.drillSpec(for: $0, target: .track) }
+        check("clicking a typed trip opens the plays made in that place between its dates", drill?.playFilter?.cities == ["Grandma’s house"] && drill?.period?.from == mar10)
+        check("with no trips and no home place there is nothing to compute", TrendsPlacesEngine.compute(scrobbles: plays, weather: .empty, range: DateRange(from: date(2025, 3, 1), to: date(2025, 3, 20)), now: date(2025, 3, 20), calendar: utc) == .empty)
+
+        // Adding, editing, removing and ending trips.
+        let modelFile = folder.appending(path: "ModelTrips.json")
+        let model = TripsModel(file: modelFile, calendar: utc)
+        model.save(TripDraft(place: named, from: mar5, stillThere: false, lastDay: date(2025, 3, 7)))
+        check("a trip saved with only a typed name is kept, ending at the start of the day after its last day", model.trips.count == 1 && model.trips[0].place == named && model.trips[0].from == mar5 && model.trips[0].until == date(2025, 3, 8), "\(model.trips.count)")
+        check("another model reads the same file", TripsModel(file: modelFile, calendar: utc).trips == model.trips)
+        var edit = TripDraft(trip: model.trips[0], calendar: utc)
+        edit.place = lisbon; edit.lastDay = date(2025, 3, 9)
+        model.save(edit)
+        check("editing changes that trip in place (no second one), its place and its end", model.trips.count == 1 && model.trips[0].place == lisbon && model.trips[0].until == date(2025, 3, 10) && model.trips[0].id == edit.tripID)
+        model.save(TripDraft.awayNow(calendar: utc))
+        check("a draft with no place saves nothing", model.trips.count == 1)
+        model.save(TripDraft(place: named, from: date(2025, 3, 20), stillThere: true, lastDay: date(2025, 3, 20)))
+        check("a trip that is still on has no end, and Back Home ends it (and only it)", model.openTrips.count == 1 && { model.backHome(); return model.openTrips.isEmpty && model.trips.count == 2 && model.trips.allSatisfy { $0.until != nil } }())
+        let toRemove = model.trips[0]
+        model.remove(toRemove)
+        check("a trip can be removed", model.trips.count == 1 && !model.trips.contains { $0.id == toRemove.id } && TripsModel(file: modelFile, calendar: utc).trips.count == 1)
+    }
+
     @MainActor
     private static func tripChecks(_ report: (String, Bool, String) -> Void) async {
         func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
@@ -572,8 +663,16 @@ enum WeatherChecks {
 
         // Adding a trip: places already used are offered again, and the last day follows the first until it is picked.
         let lisbonAgain = WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14)
-        let known = TripEditor.knownPlaces(in: [trip(lisbon, mar5, mar10), trip(oslo, mar15, nil), trip(lisbonAgain, date(2025, 3, 20), date(2025, 3, 22))])
-        check("a trip's place can be picked again: each place once, the most recently visited first", known.map(\.shortName) == ["Lisbon", "Oslo"] && known.first?.key == lisbon.key, "\(known.map(\.name))")
+        let zurich = WeatherPlace(name: "Zürich, Switzerland", latitude: 47.37, longitude: 8.54)
+        let alesund = WeatherPlace(name: "ålesund, Norway", latitude: 62.47, longitude: 6.15)
+        let known = TripEditor.knownPlaces(in: [trip(lisbon, mar5, mar10), trip(oslo, mar15, nil), trip(lisbonAgain, date(2025, 3, 20), date(2025, 3, 22)), trip(zurich, date(2025, 3, 25), date(2025, 3, 26)), trip(alesund, date(2025, 2, 1), date(2025, 2, 3))])
+        check("a trip's place can be picked again: each place once, A to Z (accents and capitals don't count, so ålesund is with the A's), not by how recently", known.map(\.shortName) == ["ålesund", "Lisbon", "Oslo", "Zürich"] && known[1].key == lisbon.key, "\(known.map(\.name))")
+        // Trips that share days are marked in the list; an open-ended trip runs on without end.
+        let first = trip(lisbon, mar5, mar10), second = trip(oslo, date(2025, 3, 8), date(2025, 3, 12)), apart = trip(lisbonAgain, date(2025, 3, 20), date(2025, 3, 22))
+        let openA = trip(zurich, date(2025, 3, 25), nil), openB = trip(alesund, date(2025, 3, 27), nil)
+        check("trips that share days are flagged, the ones that stand alone are not", TripsModel.overlappingTrips(in: [first, second, apart]) == [first.id, second.id], "\(TripsModel.overlappingTrips(in: [first, second, apart]).count)")
+        check("an open-ended trip overlaps a later one, and trips that only touch (one ends the day the next begins) do not", TripsModel.overlappingTrips(in: [apart, openA, openB]) == [openA.id, openB.id] && TripsModel.overlappingTrips(in: [trip(lisbon, mar5, mar10), trip(oslo, mar10, mar15)]).isEmpty)
+        check("no trips, or one trip, flag nothing", TripsModel.overlappingTrips(in: []).isEmpty && TripsModel.overlappingTrips(in: [first]).isEmpty)
         check("with no trips there is nothing to pick from", TripEditor.knownPlaces(in: []).isEmpty)
         var draft = TripDraft.new(calendar: calendar)
         draft.from = date(2025, 6, 10); draft.firstDayChanged()

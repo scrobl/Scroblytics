@@ -84,6 +84,7 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .overview
     @State private var selectedTopChartsEntity: TopChartsEntity = .artist
     @State private var overviewToolRequest: ToolDescriptor.Kind?
+    @State private var openToolRequest: ToolDescriptor.Kind?
     @State private var overviewSimilarSeeds: [SimilarSeed] = []
     @State private var overviewTrendsFocus: TrendsFocus?
     @State private var hasOverviewReturn = false
@@ -179,6 +180,7 @@ struct ContentView: View {
                 settings: chartDateSettings,
                 askRequest: $askQueryRequest,
                 overviewToolRequest: $overviewToolRequest,
+                openToolRequest: $openToolRequest,
                 overviewSimilarSeeds: $overviewSimilarSeeds,
                 openQuery: { spec, detail, suggestedName in
                     selectedTab = .tools
@@ -283,7 +285,8 @@ struct ContentView: View {
             gapBadges: libraryGapBadgeStore, tagWriter: tagWriteRunner, work: backgroundWork, container: modelContainer,
             askRouter: askSimilarRouter, askSuggestions: askSuggestions, nowPlaying: nowPlayingStore, onAskSimilar: { showingAsk = false; selectedTab = .tools },
             onAccountConnected: { startSync(full: false) },
-            onStopRequested: { stopSync() }
+            onStopRequested: { stopSync() },
+            onOpenTool: { kind in openToolRequest = kind; selectedTab = .tools }
         )
         .environment(popularityStore)
         .environment(tagStore)

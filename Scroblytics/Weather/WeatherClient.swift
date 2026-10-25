@@ -87,7 +87,7 @@ struct WeatherClient: Sendable {
     /// The request for the archive (settled historical data) over whole UTC days, `from` through `to` inclusive.
     func archiveRequest(place: WeatherPlace, from: Date, to: Date) -> URLRequest {
         request(endpoints.archive, [
-            "latitude": String(format: "%.1f", place.latitude), "longitude": String(format: "%.1f", place.longitude),
+            "latitude": String(format: "%.1f", place.latitude ?? 0), "longitude": String(format: "%.1f", place.longitude ?? 0),
             "start_date": Self.dayString(from), "end_date": Self.dayString(to),
             "hourly": Self.hourlyVariables, "timezone": "GMT",
         ])
@@ -96,7 +96,7 @@ struct WeatherClient: Sendable {
     /// The request for the last few days, which the archive doesn't have yet.
     func recentRequest(place: WeatherPlace, pastDays: Int) -> URLRequest {
         request(endpoints.recent, [
-            "latitude": String(format: "%.1f", place.latitude), "longitude": String(format: "%.1f", place.longitude),
+            "latitude": String(format: "%.1f", place.latitude ?? 0), "longitude": String(format: "%.1f", place.longitude ?? 0),
             "past_days": String(max(1, min(92, pastDays))), "forecast_days": "1",
             "hourly": Self.hourlyVariables, "timezone": "GMT",
         ])

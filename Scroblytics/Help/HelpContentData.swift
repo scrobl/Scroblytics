@@ -11,8 +11,8 @@ extension HelpContent {
                 .table(headers: ["What", "Where"], rows: [
                     ["Your history and everything the app computes or caches (scrobbles, loved tracks, tags, popularity, durations, tempos, release dates, your edits, saved queries)", "`~/Library/Application Support/default.store` (with its `-shm` and `-wal` companion files)"],
                     ["Your own images and downloaded artwork", "`~/Library/Application Support/Scroblytics/CustomImages` and `…/CachedImages`"],
-                    ["Hourly weather for your home place and your trips, only if you turned on **Settings › Weather** (never in a backup: it can be downloaded again)", "`~/Library/Application Support/Scroblytics/Weather`"],
-                    ["Your weather trips (where you were and when, for the weather), only if you added any; they are in backups", "`~/Library/Application Support/Scroblytics/WeatherTrips.json`"],
+                    ["Hourly weather for your home place and your trips (not for a trip you only typed a name for), only if you turned on **Settings › Weather** (never in a backup: it can be downloaded again)", "`~/Library/Application Support/Scroblytics/Weather`"],
+                    ["Your trips (where you were and when; they work with or without weather), only if you added any; they are in backups", "`~/Library/Application Support/Scroblytics/WeatherTrips.json`"],
                     ["Your Last.fm profile picture, only if you turned on **Include my profile picture** for shared cards", "`~/Library/Application Support/Scroblytics/ProfilePicture`"],
                     ["A small log of what the app did, for [Report a Problem](help://report-a-problem) (no music, account name or keys; the newest few hundred lines)", "`~/Library/Application Support/Scroblytics/activity.log`"],
                     ["Preferences and screen settings (date range, Ask engine choice and model names, and so on)", "The app’s preferences file"],

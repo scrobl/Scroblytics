@@ -13,6 +13,7 @@ extension HelpContent {
                     ["[The Climb](help://tool-climb)", "Tracks that broke into your top N", "Nothing"],
                     ["[Fading Favorites](help://tool-fading)", "Former favorites gone quiet", "Nothing"],
                     ["[Time Machine](help://tool-time-machine)", "What you played on this date in past years", "Nothing"],
+                    ["[Trips](help://tool-trips)", "What you listened to while you were away", "Nothing (weather is optional)"],
                     ["[Similar Sounds](help://tool-similar-sounds)", "Music in your library like chosen seeds", "Last.fm credentials"],
                     ["[Rabbit Hole](help://tool-rabbit-hole)", "A path of recommendations from your library", "Last.fm credentials"],
                     ["[Album Turnovers](help://tool-album-turnovers)", "Albums you cycle through, and how fast", "Last.fm credentials"],
@@ -57,6 +58,22 @@ extension HelpContent {
             summary: "What you played on a given day, week or month across all years.",
             blocks: [
                 .paragraph("Pick a **Day / Week / Month** and a date; the tool matches the same calendar day (or the same 7 days, or the same month) in every year. Filters: a Year (or All years), minimum plays, minimum years (only with All years), track set (All, Loved, Flagged), per-artist and per-album caps, and a limit. Sort by Most Played, Most Years, Recently Played, Artist or Track. Week starts on your chosen week-start day. See [On This Day](help://metrics-streaks-heatmap)."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-trips",
+            title: "Trips",
+            summary: "Record where you were and when, and see what you listened to on each trip.",
+            blocks: [
+                .paragraph("**Trips** keeps every trip in one place and shows what you listened to on each. You don’t need weather for it: a trip is just a place and the days you were there. The headline compares your listening away with your listening at home (plays a day), and each trip row shows its plays, plays a day against your home rate, the artists you first heard there, the weather there (when [weather](help://screen-weather) is on and downloaded) and your top artists. Click a row to open exactly those plays in [Query](help://query-basics)."),
+                .bullets([
+                    "**I’m Away Now…** starts a trip today that stays open until you press **Back Home**. **Add a Trip…** records one for days in the past or ahead. **Edit** and **Remove** are in the menu at the end of each row; removing a trip never touches your scrobbles.",
+                    "**The place.** With weather on, search for a city (the name you type goes to Open-Meteo’s search and nothing else) or pick one of the places you used before, listed A to Z. With weather off there is no search: type a name (“Grandma’s house”) and it stays on this Mac. A typed name has no coordinates, so no weather is looked up for it even when weather is on.",
+                    "**Home** is optional. Without a home place chosen in Settings › Weather, the days you weren’t on a trip are simply called **Home**.",
+                    "**Find a place** filters the list; the menu next to it sorts by newest, oldest, most plays, longest or place. Each place keeps one colour, the same one used in the **Where you listened** card in [Trends](help://screen-trends).",
+                    "Trips that share days are highlighted in orange. For the days they share, the trip that began later is used. A day counts as a trip day when the trip covers its middle.",
+                ]),
+                .paragraph("Trips are stored in a small file in the Scroblytics folder and included in backups. See [Weather](help://screen-weather) for what turning weather on adds, and [What leaves your Mac](help://what-leaves-your-mac)."),
             ]
         ),
         HelpArticle(

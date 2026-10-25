@@ -28,9 +28,11 @@ comfortable with that. The same information is available inside the app under **
   Scroblytics folder on your Mac and refreshes it about once a week.
 - **Weather.** If you turn on weather in Settings, the weather for your home place is downloaded and kept in a `Weather` folder
   in the Scroblytics folder on your Mac. It is not part of backups (it can be downloaded again) and *Remove Downloaded Weather*
-  deletes it. Your home place is stored in the app's preferences as a rounded coordinate. If you add trips (where you were, for
-  the weather), they are stored in a small file in the Scroblytics folder and included in backups (which are not encrypted); the
-  weather for each trip is requested for its place and dates, so Open-Meteo sees where and when, but never who or what you listened to.
+  deletes it. Your home place is stored in the app's preferences as a rounded coordinate. Trips (where you were and when) work with or
+  without weather: you can record one to see what you listened to on it, and nothing is sent anywhere for that. They are stored in a
+  small file in the Scroblytics folder and included in backups (which are not encrypted). A place you only typed a name for stays on
+  your Mac. Only with weather turned on is the weather for a trip requested, for its place (chosen in the city search) and dates, so
+  Open-Meteo sees where and when, but never who or what you listened to.
 - **Backups and exports** you create are files you choose the location of. They contain your listening history and are not
   encrypted, so store them as carefully as you would any personal file. They never contain your keys.
 

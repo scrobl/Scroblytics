@@ -45,10 +45,18 @@ struct TrendsWeatherGroup: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            if !weatherEnabled || WeatherSettings.place() == nil {
-                if !offerHidden { setupCard }
-            } else if inputs.weather.isEmpty {
-                waitingCard
+            if !weatherEnabled || WeatherSettings.place() == nil || inputs.weather.isEmpty {
+                // No weather to show. Trips don't need it, so where you listened still does when there are trips.
+                if !inputs.weather.trips.isEmpty {
+                    TrendsSection(title: "Where you listened", subtitle: "Your trips against home: how much you played, and what was new") {
+                        TrendsPlacesCard(inputs: inputs, unit: unit, openQuery: openQuery)
+                    }
+                }
+                if !weatherEnabled || WeatherSettings.place() == nil {
+                    if !offerHidden { setupCard }
+                } else {
+                    waitingCard
+                }
             } else {
                 controls
                 if let result, result.hasWeather {

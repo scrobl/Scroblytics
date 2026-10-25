@@ -6,8 +6,9 @@ import Foundation
 /// rounded to one decimal place (about 11 km) the moment a place is made, so nothing finer than that is ever stored or sent.
 struct WeatherPlace: Codable, Equatable, Sendable {
     let name: String
-    let latitude: Double
-    let longitude: Double
+    /// nil for a place that is only a name a person typed (a trip recorded without weather): it has no weather to download.
+    let latitude: Double?
+    let longitude: Double?
     /// The region (state, province) and country, when the place came from a search for a name. Optional so places saved earlier still load.
     var region: String?
     var country: String?
@@ -20,6 +21,17 @@ struct WeatherPlace: Codable, Equatable, Sendable {
         self.country = country
     }
 
+    /// A place that is only a name: where you were, for your own record. It has no coordinates, so nothing is ever requested for it.
+    init(typedName: String) {
+        self.name = typedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.latitude = nil
+        self.longitude = nil
+        self.region = nil
+        self.country = nil
+    }
+
+    var hasCoordinates: Bool { latitude != nil && longitude != nil }
+
     static func rounded(_ value: Double) -> Double { ((value * 10).rounded() / 10) + 0 }
 
     static func isValid(latitude: Double, longitude: Double) -> Bool {
@@ -27,10 +39,14 @@ struct WeatherPlace: Codable, Equatable, Sendable {
     }
 
     /// The folder name the downloaded weather for this place lives under.
-    var key: String { String(format: "%.1f_%.1f", latitude, longitude) }
+    var key: String {
+        guard let latitude, let longitude else { return "name_" + PlaceNames.key(name) }
+        return String(format: "%.1f_%.1f", latitude, longitude)
+    }
 
     var coordinateLabel: String {
-        String(format: "%.1f° %@, %.1f° %@", abs(latitude), latitude >= 0 ? "N" : "S", abs(longitude), longitude >= 0 ? "E" : "W")
+        guard let latitude, let longitude else { return "A name only: no weather" }
+        return String(format: "%.1f° %@, %.1f° %@", abs(latitude), latitude >= 0 ? "N" : "S", abs(longitude), longitude >= 0 ? "E" : "W")
     }
 }
 
@@ -420,7 +436,9 @@ struct WeatherSnapshot: Sendable {
     /// The weather at one trip, with the trip it belongs to.
     struct TripWeather: Sendable {
         let trip: WeatherTrip
-        let series: WeatherSeries
+        /// nil when there is no weather for this trip at all (weather is off, or the trip is only a typed name); a trip whose weather is
+        /// still to be downloaded has an empty series instead.
+        let series: WeatherSeries?
     }
 
     /// The home place's weather.
@@ -437,7 +455,19 @@ struct WeatherSnapshot: Sendable {
 
     static let empty = WeatherSnapshot()
 
-    var isEmpty: Bool { series == nil && trips.isEmpty }
+    /// There is no weather at all (the places may still be known: see `hasPlaces`).
+    var isEmpty: Bool { series == nil && trips.allSatisfy { $0.series == nil } }
+
+    /// Some place is known: a home place, or at least one trip. Trips are recorded without weather, so this is not about weather.
+    var hasPlaces: Bool { placeName != nil || !trips.isEmpty }
+
+    /// What home is called: its place's short name, or "Home" when only trips are recorded (no home place chosen).
+    static func homeCityName(placeName: String?, hasTrips: Bool) -> String? {
+        if let placeName, !placeName.isEmpty {
+            return placeName.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? placeName
+        }
+        return hasTrips ? "Home" : nil
+    }
 
     init() {}
 
@@ -473,7 +503,7 @@ struct WeatherSnapshot: Sendable {
     /// The weather where the person was at `date`: the trip's if they were away, else home's. A trip with no weather for that hour has
     /// none (home's weather would be the wrong place's).
     func sample(at date: Date) -> WeatherSample? {
-        if let trip = tripWeather(at: date) { return trip.series.sample(at: date) }
+        if let trip = tripWeather(at: date) { return trip.series?.sample(at: date) }
         return series?.sample(at: date)
     }
 
@@ -489,30 +519,28 @@ struct WeatherSnapshot: Sendable {
     }
 
     /// The city a play at `date` was made in: the trip's if the person was away, else the home place's, short ("Oslo", not "Oslo, Norway").
-    /// Not tied to whether weather has been downloaded for that time: where you were is known from the settings alone. nil when no home
-    /// place is set (weather off or never downloaded), so nothing claims a city it doesn't know.
+    /// Not tied to whether weather has been downloaded, or turned on: where you were is known from the trips and the home place alone. Home
+    /// is "Home" when no home place was chosen. nil when nothing is known (no home place and no trips), so nothing claims a city it doesn't know.
     func city(at date: Date) -> String? {
-        guard !isEmpty else { return nil }
+        guard hasPlaces else { return nil }
         if let trip = WeatherTrip.effective(at: date, in: trips.map(\.trip)) { return trip.shortName }
-        guard let placeName, !placeName.isEmpty else { return nil }
-        return placeName.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? placeName
+        return Self.homeCityName(placeName: placeName, hasTrips: !trips.isEmpty)
     }
 
-    /// Every city this snapshot can name: the home place, then each trip, each once.
+    /// Every city this snapshot can name: home, then each trip, each once.
     var cities: [String] {
-        let home = placeName.flatMap { $0.split(separator: ",", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? $0 }
-        return PlaceNames.unique(([home].compactMap { $0 }) + trips.map(\.trip.shortName))
+        PlaceNames.unique([Self.homeCityName(placeName: placeName, hasTrips: !trips.isEmpty)].compactMap { $0 } + trips.map(\.trip.shortName))
     }
 
     /// The first and last hour any of the weather covers.
     var hourBounds: ClosedRange<Int>? {
-        let all = (series.map { [$0] } ?? []) + trips.map(\.series)
+        let all = (series.map { [$0] } ?? []) + trips.compactMap(\.series)
         guard let first = all.map(\.startHour).min(), let last = all.map(\.endHour).max(), first <= last else { return nil }
         return first...last
     }
 
     /// The temperatures hot and cold are judged against: the home place's, wherever the person was (a hot trip is hot for them).
-    var climateTemperatures: [Double] { series?.temperatures ?? trips.flatMap { $0.series.temperatures } }
+    var climateTemperatures: [Double] { series?.temperatures ?? trips.flatMap { $0.series?.temperatures ?? [] } }
 
     func band(for sample: WeatherSample) -> TemperatureBand? {
         guard let temperature = sample.temperature, let coldAtOrBelow, let hotAtOrAbove else { return nil }

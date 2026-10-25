@@ -82,7 +82,7 @@ enum TrendsPlacesEngine {
 
     static func compute(scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, range: DateRange, level: PlaceLevel = .city, now: Date = Date(), calendar: Calendar = AppCalendars.listening) -> TrendsPlacesResult {
         let trips = weather.trips.map(\.trip)
-        guard !weather.isEmpty, weather.placeName != nil, let homeCity = weather.cities.first else { return .empty }
+        guard weather.hasPlaces, let homeCity = weather.cities.first else { return .empty }
         let firstPlay = scrobbles.first?.playedAt ?? range.from
         // Plays count from the period's first moment; days are whole calendar days, so the first (partly inside the period) is a day too.
         let from = max(range.from, firstPlay)
@@ -338,9 +338,9 @@ struct TrendsPlacesCard: View {
         VStack(alignment: .leading, spacing: 12) {
             if let result {
                 if result.trips.isEmpty {
-                    Text("No trips in this period. Add where you were away, and for which dates, in Settings › Weather › Trips, and each one gets a comparison with home here.")
+                    Text("No trips in this period. Record where you were away, and for which dates, in Tools › Trips, and each one gets a comparison with home here.")
                         .font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    SettingsLink { Text("Open Settings") }
+                    Button("Open Trips") { NotificationCenter.default.post(name: .openToolRequested, object: ToolDescriptor.Kind.trips) }
                 } else {
                     Picker("Group trips by", selection: $levelRaw) {
                         ForEach(PlaceLevel.allCases) { Text($0.label).tag($0.rawValue) }
@@ -352,7 +352,11 @@ struct TrendsPlacesCard: View {
                         VStack(spacing: 6) {
                             ForEach(result.trips.prefix(8)) { trip in stayRow(trip, result: result) }
                             if result.trips.count > 8 {
-                                Text("and \(result.trips.count - 8) earlier trips").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                                HStack(spacing: 8) {
+                                    Text("Showing 8 of \(result.trips.count) trips").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                                    Button("All trips…") { NotificationCenter.default.post(name: .openToolRequested, object: ToolDescriptor.Kind.trips) }
+                                        .buttonStyle(.link).font(AppTypography.compactMetadata)
+                                }
                             }
                             if let home = result.home { stayRow(home, result: result) }
                         }

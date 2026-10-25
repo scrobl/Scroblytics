@@ -43,17 +43,31 @@ struct WeatherFiles: Sendable {
 }
 
 extension WeatherSnapshot {
-    /// The weather a query reads, from what is saved on this Mac. Empty (and cheap) while weather is off or no place is chosen.
+    /// What a query reads about the weather and the places, from what is saved on this Mac. The places (the trips, and the home place if one
+    /// was chosen) are always there, with or without weather: a trip is recorded to see what was listened to, whether or not weather is on.
+    /// The weather is there only while weather is on and the home place's has been downloaded; empty and cheap otherwise.
     static func load(defaults: UserDefaults = .standard, files: WeatherFiles = WeatherFiles(), tripsFile: URL = WeatherTripStore.defaultFile()) -> WeatherSnapshot {
-        guard WeatherSettings.isEnabled(defaults: defaults), let place = WeatherSettings.place(defaults: defaults),
-              let series = files.timeline(place) else { return .empty }
-        var snapshot = WeatherSnapshot(series: series, placeName: place.name, percentiles: WeatherSettings.percentiles(defaults: defaults),
+        let trips = WeatherTripStore.load(file: tripsFile)
+        let home = WeatherSettings.place(defaults: defaults)
+        var snapshot: WeatherSnapshot
+        let weatherOn = WeatherSettings.isEnabled(defaults: defaults)
+        if weatherOn, let home, let series = files.timeline(home) {
+            snapshot = WeatherSnapshot(series: series, placeName: home.name, percentiles: WeatherSettings.percentiles(defaults: defaults),
                                        unit: WeatherSettings.temperatureUnit(defaults: defaults))
+        } else {
+            snapshot = WeatherSnapshot()
+            snapshot.placeName = home?.name
+            snapshot.unit = WeatherSettings.temperatureUnit(defaults: defaults)
+        }
         // Each trip's weather from its own folder. A trip not downloaded yet is still on the snapshot, with no hours: its days show no weather
-        // until it arrives, rather than quietly showing the home weather of a place you weren't in.
-        for trip in WeatherTripStore.load(file: tripsFile) {
-            let tripFiles = WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: trip, base: files.directory))
-            let tripSeries = tripFiles.timeline(trip.place) ?? WeatherSeries(startHour: WeatherSeries.hour(of: trip.from), count: 0)
+        // until it arrives, rather than quietly showing the home weather of a place you weren't in. With weather off, or for a trip that is
+        // only a typed name, there is no weather (nil) but the trip still says where you were.
+        for trip in trips {
+            var tripSeries: WeatherSeries?
+            if weatherOn, home != nil, trip.place.hasCoordinates {
+                let tripFiles = WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: trip, base: files.directory))
+                tripSeries = tripFiles.timeline(trip.place) ?? WeatherSeries(startHour: WeatherSeries.hour(of: trip.from), count: 0)
+            }
             snapshot.trips.append(WeatherSnapshot.TripWeather(trip: trip, series: tripSeries))
         }
         return snapshot
@@ -64,8 +78,10 @@ extension WeatherSnapshot {
 /// check names against.
 enum WeatherLocations {
     static func knownCities(defaults: UserDefaults = .standard, tripsFile: URL = WeatherTripStore.defaultFile()) -> [String] {
-        guard WeatherSettings.isEnabled(defaults: defaults), let place = WeatherSettings.place(defaults: defaults) else { return [] }
-        return PlaceNames.unique([place.shortName] + WeatherTripStore.load(file: tripsFile).map(\.shortName))
+        let trips = WeatherTripStore.load(file: tripsFile)
+        let home = WeatherSettings.place(defaults: defaults)
+        guard home != nil || !trips.isEmpty else { return [] }
+        return PlaceNames.unique([home?.shortName ?? "Home"] + trips.map(\.shortName))
     }
 
     /// The city as the app names it (its own spelling), for a name a person or model typed; nil if it isn't one of `known`.
@@ -101,6 +117,8 @@ enum WeatherUpdater {
         pause: Duration = WeatherUpdater.pause, progress: @Sendable (String) -> Void = { _ in }
     ) async throws -> Summary {
         var summary = Summary()
+        // A place that is only a typed name has no weather to ask for.
+        guard place.hasCoordinates else { return summary }
         // `through` is where a trip ends (the start of the day after its last): the last hour wanted is the one before it.
         let end = min(now, through.map { $0.addingTimeInterval(-1) } ?? now)
         let realNowHour = WeatherSeries.hour(of: now)
@@ -246,7 +264,7 @@ final class WeatherStatus {
                 })
                 // Then each trip, from its own dates: the days away, not the whole history.
                 let trips = WeatherTripStore.load()
-                for trip in trips where trip.from <= Date() {
+                for trip in trips where trip.from <= Date() && trip.place.hasCoordinates {
                     let tripSummary = try await WeatherUpdater.update(
                         place: trip.place, firstPlay: trip.from, through: trip.until, client: WeatherClient(),
                         files: WeatherFiles(directory: WeatherTripStore.cacheDirectory(for: trip)),

@@ -428,8 +428,45 @@ enum DetailSnapshots {
         WeatherTripStore.save([
             WeatherTrip(place: lisbon, from: calendar.date(byAdding: .day, value: -3, to: today)!, until: nil),
             WeatherTrip(place: tokyo, from: calendar.date(byAdding: .day, value: -200, to: today)!, until: calendar.date(byAdding: .day, value: -190, to: today)!),
+            // Shares days with the open trip to Lisbon, so both are highlighted.
+            WeatherTrip(place: WeatherPlace(name: "Madrid, Madrid, Spain", latitude: 40.42, longitude: -3.70), from: calendar.date(byAdding: .day, value: -5, to: today)!, until: calendar.date(byAdding: .day, value: -1, to: today)!),
         ])
-        return Form { WeatherTripsSection() }.formStyle(.grouped).frame(height: 470)
+        return Form { WeatherTripsSection() }.formStyle(.grouped).frame(height: 540)
+    }
+
+    /// Tools › Trips on made-up listening: trips of each kind (a place from a search, one that is only a typed name, two that overlap, one still on).
+    @MainActor
+    static func tripsTool(container: ModelContainer) async -> some View {
+        let calendar = AppCalendars.listening
+        let today = calendar.startOfDay(for: Date())
+        func day(_ n: Int) -> Date { calendar.date(byAdding: .day, value: n, to: today)! }
+        // Writes trips and made-up plays, so it only runs on a scratch store that is empty, with no network (a Debug launch would
+        // otherwise start importing the saved Last.fm account into it).
+        let env = ProcessInfo.processInfo.environment
+        let existing = (try? container.mainContext.fetchCount(FetchDescriptor<Scrobble>())) ?? -1
+        guard env["SCROBLYTICS_STORE_PATH"] != nil, env["SCROBLYTICS_OFFLINE"] != nil, existing == 0 else {
+            print("tripsTool snapshot refused: needs SCROBLYTICS_STORE_PATH (scratch), SCROBLYTICS_OFFLINE and an empty store (found \(existing) plays)")
+            return TripsView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), openQuery: { _, _, _ in })
+        }
+        WeatherTripStore.save([
+            WeatherTrip(place: WeatherPlace(name: "Chicago, Illinois, United States", latitude: 41.9, longitude: -87.6, region: "Illinois", country: "United States"), from: day(-10), until: day(-6)),
+            WeatherTrip(place: WeatherPlace(typedName: "Grandma’s house"), from: day(-25), until: day(-21)),
+            WeatherTrip(place: WeatherPlace(name: "Lisbon, Portugal", latitude: 38.72, longitude: -9.14), from: day(-40), until: day(-33)),
+            WeatherTrip(place: WeatherPlace(name: "Madrid, Madrid, Spain", latitude: 40.42, longitude: -3.70), from: day(-36), until: day(-30)),
+            WeatherTrip(place: WeatherPlace(name: "Tokyo, Japan", latitude: 35.68, longitude: 139.69), from: day(-3), until: nil),
+        ])
+        let context = container.mainContext
+        let artists = ["Artist A", "Artist B", "Artist C", "Artist D", "Artist E", "Artist F"]
+        for offset in -60...0 {
+            let plays = (-25 ... -21).contains(offset) ? 7 : ((-3...0).contains(offset) ? 2 : 4)
+            for i in 0..<plays {
+                let artist = artists[(offset + 60 + i) % artists.count]
+                context.insert(Scrobble(artistName: artist, albumName: "Album \(artist)", trackName: "Song \(i)", imageURL: nil, playedAt: day(offset).addingTimeInterval(Double(12 * 3600 + i * 900)), lastConfirmedAt: Date()))
+            }
+        }
+        try? context.save()
+        await ScrobbleHistoryCache.shared.invalidate()
+        return TripsView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), openQuery: { _, _, _ in })
     }
 
     @MainActor
@@ -557,6 +594,16 @@ enum DetailSnapshots {
                 }
             }
             if mapOnly {
+                // (The quick pass also renders the trips list in Settings, which the full pass does later.)
+                for dark in [true, false] {
+                    await render(tripsSettings(), width: 560, dark: dark, container: container, to: base.appending(path: "trips-settings-\(dark ? "dark" : "light").png"))
+                }
+                WeatherTripStore.save([])
+                let tool = await tripsTool(container: container)
+                for (width, dark) in [(1000, true), (1000, false), (600, true)] as [(CGFloat, Bool)] {
+                    await render(tool, width: width, dark: dark, container: container, settle: 15, to: base.appending(path: "trips-tool-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+                WeatherTripStore.save([])
                 for (name, card, images) in await nativeShareCards() where name == "weathermap" {
                     for size in ShareSize.allCases {
                         var options = card.defaultOptions

@@ -333,7 +333,7 @@ extension View {
     func toolRuntime(
         gapBadges: LibraryGapBadgeStore, tagWriter: TagWriteRunner, work: BackgroundWorkStore, container: ModelContainer,
         askRouter: AskSimilarRouter, askSuggestions: AskSuggestionStore, nowPlaying: NowPlayingStore, onAskSimilar: @escaping () -> Void,
-        onAccountConnected: @escaping () -> Void, onStopRequested: @escaping () -> Void
+        onAccountConnected: @escaping () -> Void, onStopRequested: @escaping () -> Void, onOpenTool: @escaping (ToolDescriptor.Kind) -> Void
     ) -> some View {
         libraryGapBadges(gapBadges, container: container)
             .connectivityPrompt()
@@ -349,6 +349,9 @@ extension View {
             .onReceive(NotificationCenter.default.publisher(for: .lastfmAccountConnected)) { _ in onAccountConnected() }
             .onReceive(NotificationCenter.default.publisher(for: .syncRequested)) { _ in onAccountConnected() }
             .onReceive(NotificationCenter.default.publisher(for: .syncStopRequested)) { _ in onStopRequested() }
+            .onReceive(NotificationCenter.default.publisher(for: .openToolRequested)) { note in
+                if let kind = note.object as? ToolDescriptor.Kind { onOpenTool(kind) }
+            }
             .onAppear { tagWriter.work = work }
     }
 }

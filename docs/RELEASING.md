@@ -139,6 +139,16 @@ import:
    half hour after it finishes: it should settle to a few percent. `sample <pid> 30` then names what is busy (use a Debug build for
    readable names). `SCROBLYTICS_PERF_CHECK=1` on a scratch copy times the artwork lookup against the old per-album query.
 
+## Sync: late plays and deletions
+
+When Last.fm's play total moves by more than a quick sync found (plays sent late with older times, or deletions), the sync first
+re-checks only the last 15 days before the previous sync and compares the totals again, and walks the whole history only if they still
+differ. Before a release that touches `SyncEngine`, run `scripts/sync-recheck-test.sh` (Debug app built first; about a minute). It runs
+real syncs in an isolated test profile against the stand-in server's `late-plays` scenario, injecting new plays, late plays, recent and
+old deletions and a late play together with an old deletion, and checks after each launch the app's play count against the server's
+(no duplicates), the activity log's lines, and how many pages were fetched. `SCROBLYTICS_DIAGNOSTICS_CHECK=1` covers the rules and
+wording on their own.
+
 ## The detail pages (Artist, Album, Track)
 
 `SCROBLYTICS_DETAIL_CHECK=1` (in `scripts/release.sh`) checks the fact tiles, the album table's join, filters, sorts, directions and

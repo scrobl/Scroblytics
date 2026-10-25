@@ -184,6 +184,26 @@ enum DiagnosticsChecks {
             let sensitiveWords = try! NSRegularExpression(pattern: "\\b(artist|artists|album|albums|track|tracks|tag|tags|query|username|user|title|name)\\b", options: .caseInsensitive)
             check("none of those lines can carry music or account words", syncLines.allSatisfy { sensitiveWords.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) == nil }, syncLines.joined(separator: " | "))
 
+            // MARK: Re-checking only the recent stretch
+            typealias P = SyncRecheckPlan
+            let now0 = Date(timeIntervalSince1970: 1_800_000_000)
+            let twoDaysAgo = now0.addingTimeInterval(-2 * 86_400)
+            let grew = SyncLogWording.Escalation.totalGrewMoreThanFound(grew: 10, found: 3)
+            let start = P.windowStart(escalation: grew, lastSyncedAt: twoDaysAgo, now: now0)
+            check("the window starts 15 days before the last sync (late plays are at most two weeks old, plus a day), and is 17 days long here", start == Int(twoDaysAgo.timeIntervalSince1970) - 15 * 86_400 && start.map { P.days(from: $0, to: Int(now0.timeIntervalSince1970)) } == 17, "\(String(describing: start))")
+            check("a deletion is also looked for in the window", P.windowStart(escalation: .totalFell(by: 2), lastSyncedAt: twoDaysAgo, now: now0) != nil)
+            check("no window without an earlier sync, or for a first comparison of totals", P.windowStart(escalation: grew, lastSyncedAt: nil, now: now0) == nil && P.windowStart(escalation: .fewerHereThanLastfm(onThisMac: 1, onLastfm: 2), lastSyncedAt: twoDaysAgo, now: now0) == nil)
+            check("a window is tried when the last sync was 40 days ago (55 days) but not 50 days ago (65 days, over 60)", P.windowStart(escalation: grew, lastSyncedAt: now0.addingTimeInterval(-40 * 86_400), now: now0) != nil && P.windowStart(escalation: grew, lastSyncedAt: now0.addingTimeInterval(-50 * 86_400), now: now0) == nil)
+            check("the totals match when the change in Last.fm's total is what was added less what was removed: +10 = 10 added, +10 = 12 added and 2 removed, −5 = 5 removed", P.totalsMatch(previousTotal: 100, remoteTotal: 110, added: 10, removed: 0) && P.totalsMatch(previousTotal: 100, remoteTotal: 110, added: 12, removed: 2) && P.totalsMatch(previousTotal: 100, remoteTotal: 95, added: 0, removed: 5))
+            check("they don't match when something is still missing: +10 with only 3 found, −5 with nothing removed, +10 with 12 found and none removed", !P.totalsMatch(previousTotal: 100, remoteTotal: 110, added: 3, removed: 0) && !P.totalsMatch(previousTotal: 100, remoteTotal: 95, added: 0, removed: 0) && !P.totalsMatch(previousTotal: 100, remoteTotal: 110, added: 12, removed: 0))
+            let windowLines = [
+                SyncLogWording.windowStartLine(days: 17),
+                SyncLogWording.windowResultLine(days: 17, matched: true, added: 7, removed: 0, expectedChange: 10, actualChange: 10),
+                SyncLogWording.windowResultLine(days: 17, matched: false, added: 7, removed: 0, expectedChange: 10, actualChange: 7),
+            ]
+            check("the window lines say what was done and whether the totals then agreed, in numbers", windowLines[0].contains("last 17 days") && windowLines[1].contains("found 7 older plays") && windowLines[1].contains("agree") && windowLines[2].contains("still differ") && windowLines[2].contains("Last.fm +10") && windowLines[2].contains("here +7"), windowLines.joined(separator: " | "))
+            check("none of the window lines carry music or account words", windowLines.allSatisfy { sensitiveWords.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) == nil })
+
             // MARK: An unreadable database
             func sqliteError(_ code: Int, cocoa: Int = 256) -> NSError {
                 NSError(domain: NSCocoaErrorDomain, code: cocoa, userInfo: [NSUnderlyingErrorKey: NSError(domain: "NSSQLiteErrorDomain", code: code)])

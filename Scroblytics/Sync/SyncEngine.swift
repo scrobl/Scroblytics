@@ -233,6 +233,32 @@ actor SyncEngine {
 
         if let escalation {
             ActivityLog.record(.sync, SyncLogWording.escalationLine(escalation))
+            // Late plays (or a recent deletion) sit within two weeks of the last sync, so look there first and compare the totals again.
+            var windowAdded = 0, windowUpdated = 0, windowRemoved = 0
+            if let previousTotal, let windowStart = SyncRecheckPlan.windowStart(escalation: escalation, lastSyncedAt: state.lastSyncedAt, now: runStartedAt) {
+                let days = SyncRecheckPlan.days(from: windowStart, to: nowUts)
+                ActivityLog.record(.sync, SyncLogWording.windowStartLine(days: days))
+                if let window = try await recheckWindow(
+                    client: client, from: windowStart, to: nowUts, runIdentity: runStartedAt,
+                    totalScrobbles: remotePlaycount, newScrobbles: expectedNew, progress: progress
+                ) {
+                    windowAdded = window.added; windowUpdated = window.updated; windowRemoved = window.removed
+                    let actualChange = added + windowAdded - windowRemoved
+                    let matched = SyncRecheckPlan.totalsMatch(previousTotal: previousTotal, remoteTotal: remotePlaycount, added: added + windowAdded, removed: windowRemoved)
+                    ActivityLog.record(.sync, SyncLogWording.windowResultLine(
+                        days: days, matched: matched, added: windowAdded, removed: windowRemoved,
+                        expectedChange: remotePlaycount - previousTotal, actualChange: actualChange
+                    ))
+                    if matched {
+                        state.remoteTotal = remotePlaycount
+                        state.lastSyncedAt = runStartedAt
+                        try modelContext.save()
+                        return SyncSummary(added: added + windowAdded, updated: updated + windowUpdated, removed: windowRemoved, escalatedToFullBackfill: false, isComplete: true)
+                    }
+                } else {
+                    ActivityLog.record(.sync, "The last \(days) days are too long to re-check on their own, so the whole history is being re-checked")
+                }
+            }
             // Backdated plays (or server-side deletions) an incremental `from`
             // filter can never reach — re-walk the entire history and let the
             // per-window reconcile pick up both additions and removals.
@@ -244,9 +270,9 @@ actor SyncEngine {
                 mode: .reconciliationBackfill, progress: progress
             )
             let combined = BackfillResult(
-                added: backfillResult.added + added,
-                updated: backfillResult.updated + updated,
-                removed: backfillResult.removed,
+                added: backfillResult.added + added + windowAdded,
+                updated: backfillResult.updated + updated + windowUpdated,
+                removed: backfillResult.removed + windowRemoved,
                 isComplete: backfillResult.isComplete
             )
             let summary = try finishBackfill(combined, state: state, runStartedAt: runStartedAt, escalated: true, remoteTotalOverride: remotePlaycount)
@@ -504,6 +530,44 @@ actor SyncEngine {
 
         // Hit the window cap — leave state resumable rather than declaring done.
         return BackfillResult(added: added, updated: updated, removed: removed, isComplete: false)
+    }
+
+    /// Re-walks just `from`…`to` (newest first) and drops any local play in that stretch Last.fm no longer returns. It keeps no resume
+    /// point: if it is interrupted the next sync simply redoes this small stretch. Returns nil, having changed nothing further, when the
+    /// stretch has more than `SyncRecheckPlan.maxWindowPages` pages (that is left to the whole-history walk).
+    private func recheckWindow(
+        client: LastfmAPIClient, from: Int, to: Int, runIdentity: Date,
+        totalScrobbles: Int, newScrobbles: Int, progress: @escaping @Sendable (SyncProgress) -> Void
+    ) async throws -> (added: Int, updated: Int, removed: Int)? {
+        var added = 0, updated = 0, processed = 0
+        var page = 1, totalPages = 1
+        repeat {
+            let waitingProgress = SyncProgress(
+                phase: .scrobbles, mode: .incremental, totalScrobbles: totalScrobbles, newScrobbles: newScrobbles,
+                processedScrobbles: processed, progressTotal: max(processed, 1)
+            )
+            let result = try await client.fetchRecentTracksPage(page: page, from: from, to: to, onWait: { seconds in
+                var update = waitingProgress
+                update.waitingSeconds = seconds
+                progress(update)
+            })
+            totalPages = result.totalPages
+            if totalPages > SyncRecheckPlan.maxWindowPages { try modelContext.save(); return nil }
+            let (a, u) = try upsert(result.scrobbles, confirmedAt: runIdentity)
+            added += a
+            updated += u
+            processed += result.scrobbles.count
+            progress(SyncProgress(
+                phase: .scrobbles, mode: .incremental, totalScrobbles: totalScrobbles, newScrobbles: newScrobbles,
+                processedScrobbles: processed, progressTotal: max(result.totalScrobbles, processed)
+            ))
+            page += 1
+        } while page <= totalPages
+        try modelContext.save()
+        // Last.fm's `from` may or may not include its own second, so a play exactly there is never judged missing.
+        let removed = try reconcileWindow(lowerUts: from + 1, upperUts: to, runIdentity: runIdentity)
+        try modelContext.save()
+        return (added, updated, removed)
     }
 
     private func checkpoint(state: SyncState, nextPage: Int, to: Int, totalPages: Int, runIdentity: Date) throws {

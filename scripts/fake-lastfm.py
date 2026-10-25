@@ -23,6 +23,9 @@ Scenarios
   strict-rate     Last.fm's real rule: more than 5 requests in any rolling second answer error 29 (6,000 scrobbles)
   rate-limited-forever   every history request answers error 29, always
   timing          10,000 scrobbles with no limits at all; use --latency-ms to simulate how slowly Last.fm answers
+  late-plays      3,000 scrobbles an hour apart (125 days). GET /__inject?new=N&late=N&delete_recent=N&delete_old=N changes the history
+                  between syncs: new = N newer plays; late = N plays dated within the last 10 days but older than the newest (a scrobbler
+                  that sends late); delete_recent = N plays removed from 3 to 5 days ago; delete_old = N plays removed from over 25 days ago
 
 GET /__stats returns what was served, and the dataset's own totals, as JSON, for cross-checking an import. It also reports the
 busiest second (max_requests_in_one_second), the shortest gap between history requests (min_history_gap_ms) and how many requests
@@ -53,11 +56,12 @@ SCENARIOS = {
     "strict-rate": "More than 5 requests in any rolling second are rate-limited (error 29), as Last.fm does; 6,000 scrobbles",
     "rate-limited-forever": "Every history request is rate-limited (error 29), always",
     "timing": "10,000 scrobbles, no limits; with --latency-ms, every history page takes that long (to time an import)",
+    "late-plays": "3,000 scrobbles an hour apart; /__inject adds new, late or deleted plays between syncs",
 }
 PAGE_SIZE = 200
 NOW = int(time.time())
 SIZES = {"empty-account": 0, "small": 50, "medium": 2000, "large": 40000, "slow-import": 4000,
-         "rate-limited-long": 2000, "strict-rate": 6000, "rate-limited-forever": 2000, "timing": 10000}
+         "rate-limited-long": 2000, "strict-rate": 6000, "rate-limited-forever": 2000, "timing": 10000, "late-plays": 3000}
 RATE_LIMIT_ERROR = (29, "Rate Limit Exceeded - Your IP has made too many requests in a short period", 429)
 STRICT_PER_SECOND = 5
 LONG_WINDOW_SECONDS = 90.0
@@ -71,14 +75,14 @@ ERRORS = {
 }
 
 
-def make_scrobbles(total):
-    """Newest first. Track i belongs to artist (i*7 % A) so every artist recurs; timestamps are 4 minutes apart."""
+def make_scrobbles(total, spacing=240):
+    """Newest first. Track i belongs to artist (i*7 % A) so every artist recurs; timestamps are 4 minutes apart (or `spacing` seconds)."""
     artists = max(5, min(900, total // 40))
     rows = []
     for i in range(total):
         a = (i * 7) % artists
         rows.append({
-            "uts": NOW - 3600 - i * 240,
+            "uts": NOW - 3600 - i * spacing,
             "artist": f"Artist {a + 1}",
             "album": f"Album {a + 1}.{(i // 11) % 4 + 1}",
             "track": f"Track {(i * 13) % 600 + 1}",
@@ -92,7 +96,7 @@ class State:
         self.total = SIZES.get(scenario, SIZES["small"] if scenario not in ERRORS else 0)
         if scenario in ("rate-limited", "drops-mid-sync", "flaky-key"):
             self.total = SIZES["medium"]
-        self.rows = make_scrobbles(self.total)
+        self.rows = make_scrobbles(self.total, 3600 if scenario == "late-plays" else 240)
         self.lock = threading.Lock()
         self.history_requests = 0
         self.drops_left = 3
@@ -102,6 +106,22 @@ class State:
         self.history_times = []        # ... of every history request (limit > 1)
         self.rate_limit_answers = 0
         self.first_history_at = None
+
+    def inject(self, new=0, late=0, delete_recent=0, delete_old=0):
+        """Changes the history between syncs (see the late-plays scenario). Late plays are dated within the last 10 days, half an hour
+        off the hourly grid, so they are older than the newest play but never the same as one."""
+        self.injected = getattr(self, "injected", 0)
+        for i in range(new):
+            self.injected += 1
+            self.rows.append({"uts": NOW - 3000 + self.injected * 30, "artist": f"New Artist {self.injected}", "album": "New Album", "track": f"New Track {self.injected}"})
+        for i in range(late):
+            self.injected += 1
+            self.rows.append({"uts": NOW - 3600 * (5 + (self.injected * 7) % 230) - 1800, "artist": f"Late Artist {self.injected}", "album": "Late Album", "track": f"Late Track {self.injected}"})
+        recent = [r for r in self.rows if NOW - 5 * 86400 <= r["uts"] <= NOW - 3 * 86400][:delete_recent]
+        old = [r for r in self.rows if r["uts"] <= NOW - 25 * 86400][:delete_old]
+        gone = {id(r) for r in recent + old}
+        self.rows = [r for r in self.rows if id(r) not in gone]
+        self.rows.sort(key=lambda r: -r["uts"])
 
     def stats(self):
         return {
@@ -151,6 +171,12 @@ def build_handler(state):
         def do_GET(self):
             url = urlparse(self.path)
             if url.path == "/__stats":
+                self._send(200, state.stats())
+                return
+            if url.path == "/__inject":
+                q = {k: int(v[0]) for k, v in parse_qs(url.query).items()}
+                with state.lock:
+                    state.inject(new=q.get("new", 0), late=q.get("late", 0), delete_recent=q.get("delete_recent", 0), delete_old=q.get("delete_old", 0))
                 self._send(200, state.stats())
                 return
             if url.path.startswith("/repos/scrobl/Scroblytics/releases"):

@@ -28,11 +28,11 @@ enum SyncLogWording {
     static func escalationLine(_ reason: Escalation) -> String {
         switch reason {
         case .totalGrewMoreThanFound(let grew, let found):
-            return "Quick sync found \(count(found, "new play")) but Last.fm's total went up by \(grew), so the whole history is being re-checked (usually plays sent late with older times)"
+            return "Quick sync found \(count(found, "new play")) but Last.fm's total went up by \(grew), so it is re-checking (usually plays sent late with older times)"
         case .totalFell(let by):
-            return "Last.fm's total went down by \(by), so the whole history is being re-checked (plays deleted on Last.fm)"
+            return "Last.fm's total went down by \(by), so it is re-checking (plays deleted on Last.fm)"
         case .fewerHereThanLastfm(let onThisMac, let onLastfm):
-            return "This Mac has \(onThisMac.formatted()) plays and Last.fm has \(onLastfm.formatted()), so the whole history is being re-checked"
+            return "This Mac has \(onThisMac.formatted()) plays and Last.fm has \(onLastfm.formatted()), so it is re-checking the whole history"
         }
     }
 
@@ -57,4 +57,53 @@ enum SyncLogWording {
     }
 
     private static func count(_ n: Int, _ noun: String) -> String { "\(n.formatted()) \(noun)\(n == 1 ? "" : "s")" }
+}
+
+/// When a quick sync sees Last.fm's total move by more than it found, the plays it missed are almost always recent: Last.fm only accepts
+/// plays up to about two weeks old, so anything sent since the last sync is dated within two weeks before it. So the sync first re-checks
+/// just that stretch of time, and compares the totals again. If they now agree, that was all there was to find. If they don't, the cause
+/// is further back (a deletion long ago, say) and the whole history is re-checked as before: never worse than re-checking everything.
+enum SyncRecheckPlan {
+    /// How far before the last sync the window starts: Last.fm's two-week limit plus a day of margin.
+    static let lateDays = 15
+    /// A window longer than this (the last sync was long ago) is not worth trying: the whole history is walked instead.
+    static let maxWindowDays = 60
+    /// A window with more pages than this is left to the whole-history walk.
+    static let maxWindowPages = 100
+
+    /// The unix time the window starts at, or nil when a window can't settle it: no earlier sync to measure from, a window longer than
+    /// `maxWindowDays`, or a cause (this is the first comparison of totals) that isn't about recent plays.
+    static func windowStart(escalation: SyncLogWording.Escalation, lastSyncedAt: Date?, now: Date) -> Int? {
+        switch escalation {
+        case .totalGrewMoreThanFound, .totalFell: break
+        case .fewerHereThanLastfm: return nil
+        }
+        guard let lastSyncedAt else { return nil }
+        let start = Int(lastSyncedAt.timeIntervalSince1970) - lateDays * 86_400
+        guard Int(now.timeIntervalSince1970) - start <= maxWindowDays * 86_400 else { return nil }
+        return max(0, start)
+    }
+
+    /// Whole days from the window's start to now, for the log.
+    static func days(from start: Int, to now: Int) -> Int { max(1, (now - start + 86_399) / 86_400) }
+
+    /// Whether what the sync has now accounts for the change in Last.fm's total exactly: the total moved by what was added, less what was
+    /// removed. Any difference means something is still missing (or Last.fm's count counts what its list does not return).
+    static func totalsMatch(previousTotal: Int, remoteTotal: Int, added: Int, removed: Int) -> Bool {
+        remoteTotal - previousTotal == added - removed
+    }
+}
+
+extension SyncLogWording {
+    static func windowStartLine(days: Int) -> String {
+        "Re-checking just the last \(days) days first, then comparing the totals again"
+    }
+
+    static func windowResultLine(days: Int, matched: Bool, added: Int, removed: Int, expectedChange: Int, actualChange: Int) -> String {
+        let found = "found \(added.formatted()) older play\(added == 1 ? "" : "s"), removed \(removed.formatted())"
+        let signed: (Int) -> String = { ($0 >= 0 ? "+" : "") + $0.formatted() }
+        return matched
+            ? "Last \(days) days re-checked: \(found); the totals now agree, so the whole history did not need re-checking"
+            : "Last \(days) days re-checked: \(found); the totals still differ (Last.fm \(signed(expectedChange)), here \(signed(actualChange))), so the whole history is being re-checked"
+    }
 }

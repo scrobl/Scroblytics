@@ -43,6 +43,11 @@ struct QueryPeriod: Codable, Hashable, Sendable {
 /// Which plays count by WHEN in the week and day they happened (local time): only some weekdays, and / or only
 /// some hours. Like `QueryPeriod` it is applied to the plays before anything is aggregated — so "Sunday mornings"
 /// means the plays made then, not items whose most common time was then.
+extension QuerySpec {
+    /// How many plays a query that lists single plays shows to begin with (the other targets show a hundred).
+    static let scrobbleLimit = 1000
+}
+
 struct QueryPlayFilter: Codable, Hashable, Sendable {
     /// 0 = Sunday … 6 = Saturday (the same numbering as the heatmap). nil = every day.
     var weekdays: [Int]?
@@ -349,7 +354,7 @@ extension QuerySpec {
         var releaseYearField: ResolvedField?
         if let perReleaseYear = groupLimit?.perReleaseYear {
             guard perReleaseYear >= 1 else { throw QueryError.unsupported("a per-release-year cap below 1") }
-            guard target != .artist else { throw QueryError.unsupported("a per-release-year cap on an artist query — only albums and tracks have a release year") }
+            guard target == .album || target == .track else { throw QueryError.unsupported("a per-release-year cap on \(target == .artist ? "an artist" : "a scrobble") query — only albums and tracks have a release year") }
             releaseYearField = try registry.resolve(QueryFieldRef("releaseYear"), target: target)
         }
 

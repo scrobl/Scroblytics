@@ -10,6 +10,8 @@ struct QueryEntityID: Hashable, Sendable {
     let target: QueryTarget
     let artist: String
     let name: String
+    /// A scrobble is one play: its time (seconds since 1970) is what tells two plays of the same track apart. 0 for every other target.
+    var at: Double = 0
 }
 
 struct QueryEntity: Identifiable, Hashable, Sendable {
@@ -123,6 +125,7 @@ final class QueryRun: @unchecked Sendable {
         case .artist: QueryEntityID(target: .artist, artist: s.artistName, name: s.artistName)
         case .album: s.albumName.isEmpty ? nil : QueryEntityID(target: .album, artist: s.artistName, name: s.albumName)
         case .track: QueryEntityID(target: .track, artist: s.artistName, name: s.trackName)
+        case .scrobble: QueryEntityID(target: .scrobble, artist: s.artistName, name: s.trackName, at: s.playedAt.timeIntervalSince1970)
         }
     }
 
@@ -162,6 +165,11 @@ final class QueryRun: @unchecked Sendable {
     var universe: Universe {
         memoized("universe") {
             let aggregates = buildAggregates(scrobbles)
+            if target == .scrobble {
+                // One entity per play, newest first: the order a list of plays is read in, and no name sort over every play.
+                let ordered = scrobbles.reversed().compactMap { entityID(for: $0) }.map(QueryEntity.init(id:))
+                return Universe(entities: ordered, aggregates: aggregates)
+            }
             let entities = aggregates.keys
                 .sorted { a, b in
                     let byName = a.name.localizedStandardCompare(b.name)
@@ -182,6 +190,16 @@ final class QueryRun: @unchecked Sendable {
     /// field's own scope. ONE pass, one rule.
     private func buildAggregates<S: Sequence>(_ source: S) -> [QueryEntityID: Universe.Aggregate] where S.Element == ScrobbleSnapshot {
         var aggregates: [QueryEntityID: Universe.Aggregate] = [:]
+        if target == .scrobble {
+            // One play per entity: its own time, picture and album, with none of the per-album tallying the other targets need (that
+            // would allocate a dictionary for every play of a library of a hundred thousand).
+            for s in source {
+                guard let id = entityID(for: s) else { continue }
+                let image = s.imageURL.flatMap { TextNormalization.isLastfmPlaceholderImage($0) ? nil : $0 }
+                aggregates[id] = Universe.Aggregate(plays: 1, first: s.playedAt, last: s.playedAt, imageURL: image, album: s.albumName.isEmpty ? nil : s.albumName)
+            }
+            return aggregates
+        }
         var albumCounts: [QueryEntityID: [String: Int]] = [:]
         for s in source {
             guard let id = entityID(for: s) else { continue }
@@ -195,12 +213,43 @@ final class QueryRun: @unchecked Sendable {
             } else {
                 aggregates[id] = Universe.Aggregate(plays: 1, first: s.playedAt, last: s.playedAt, imageURL: image, album: nil)
             }
-            if target == .track, !s.albumName.isEmpty { albumCounts[id, default: [:]][s.albumName, default: 0] += 1 }
+            if target == .track || target == .scrobble, !s.albumName.isEmpty { albumCounts[id, default: [:]][s.albumName, default: 0] += 1 }
         }
         for (id, counts) in albumCounts {
             aggregates[id]?.album = counts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }?.key
         }
         return aggregates
+    }
+
+    // MARK: - Items behind single plays
+
+    /// For a query that finds single plays: each play by its entity id, in one pass (no array per play, as `scrobblesByEntity` would make).
+    var playByEntity: [QueryEntityID: ScrobbleSnapshot] {
+        memoized("playByEntity") {
+            var plays: [QueryEntityID: ScrobbleSnapshot] = [:]
+            plays.reserveCapacity(scrobbles.count)
+            for s in scrobbles { if let id = entityID(for: s) { plays[id] = s } }
+            return plays
+        }
+    }
+
+    /// The artist, album or track a play (an entity of a single-play run) is of, as the entity of an ordinary run of that kind. nil for an
+    /// album-less play at the album level.
+    func itemID(_ level: QueryTarget, ofPlay play: QueryEntityID) -> QueryEntityID? {
+        guard let s = playByEntity[play] else { return nil }
+        switch level {
+        case .artist: return QueryEntityID(target: .artist, artist: s.artistName, name: s.artistName)
+        case .album: return s.albumName.isEmpty ? nil : QueryEntityID(target: .album, artist: s.artistName, name: s.albumName)
+        case .track: return QueryEntityID(target: .track, artist: s.artistName, name: s.trackName)
+        case .scrobble: return play
+        }
+    }
+
+    /// An ordinary run of `level` over the same plays, library and snapshots: what a play's inherited fields are computed on.
+    func itemRun(_ level: QueryTarget) -> QueryRun {
+        memoized("itemRun.\(level.rawValue)") {
+            QueryRun(target: level, asOf: asOf, calendar: calendar, scrobbles: scrobbles, allTimeScrobbles: allTimeScrobbles, snapshots: snapshots)
+        }
     }
 
     // MARK: - Scopes

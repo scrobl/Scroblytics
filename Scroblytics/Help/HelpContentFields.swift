@@ -9,7 +9,7 @@ extension HelpContent {
             blocks: [
                 .paragraph("Fields are the things you can show as a column, filter on or sort by in [Query](help://query-basics), ask for in [Ask](help://ask), and that the Tools are built from. Each entry below gives what it applies to, its type, and exactly how its value is worked out."),
                 .definitions([
-                    HelpDefinition(term: "Applies to", detail: "Artist, Album or Track. A field is offered only for the kinds it makes sense for."),
+                    HelpDefinition(term: "Applies to", detail: "Artist, Album, Track or Scrobble (a single play). A field is offered only for the kinds it makes sense for."),
                     HelpDefinition(term: "Period", detail: "The query’s own date range (“Only count plays in a period”). With none set, every play counts. Most volume and recency fields count only plays inside it."),
                     HelpDefinition(term: "Date scope", detail: "A date range one column carries for itself (for example “plays this month” next to “plays last month”). It ignores the query’s period and its “certain days or hours” filter, and reads the whole library inside its own range."),
                     HelpDefinition(term: "Baseline", detail: "The second range a comparison field measures its scope against. The default is the last 30 days against the same 30 days a year earlier."),
@@ -22,6 +22,11 @@ extension HelpContent {
         ),
         HelpArticle(id: "fields-name", title: "Name", summary: "The names that identify an item.",
                     blocks: [.fieldGroup(.identity)]),
+        HelpArticle(id: "fields-scrobble", title: "Scrobble", summary: "The time, place and sequence of a single play, for a query that finds scrobbles.",
+                    blocks: [
+                        .paragraph("These fields describe one play: when it happened, where you were, how long after the play before it, which time you have played the track, and the listening session it belongs to (a run of plays each started within a set number of minutes of the one before; the gap is a setting on each session field, 30 minutes to begin with). A query that finds **Scrobbles** also offers the fields of the track, album and artist the play is of, in their own groups under the names **Track · …**, **Album · …** and **Artist · …**. Each is that item’s own field (see its definition in the group it belongs to), computed over the same plays and handed to every play of the item."),
+                        .fieldGroup(.scrobble),
+                    ]),
         HelpArticle(id: "fields-flags", title: "Flags", summary: "Yes/no facts: loved, popular, flagged, in your Apple Music library, missing artwork…",
                     blocks: [.fieldGroup(.flags)]),
         HelpArticle(id: "fields-tags", title: "Tags", summary: "Last.fm community tags and your own tags.",

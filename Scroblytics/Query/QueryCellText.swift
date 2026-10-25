@@ -36,7 +36,7 @@ enum QueryCellText {
 
     static func date(_ date: Date, fieldID: String) -> String {
         switch fieldID {
-        case "firstPlayed", "lastPlayed": AppDateFormatting.recentPlay.string(from: date)
+        case "firstPlayed", "lastPlayed", "playedAt", "sessionStart": AppDateFormatting.recentPlay.string(from: date)
         case "releaseDate": AppDateFormatting.releaseDate.string(from: date)
         default: date.formatted(date: .abbreviated, time: .omitted)
         }

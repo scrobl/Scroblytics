@@ -187,6 +187,12 @@ enum QueryEngine {
     private static func sorted(_ entities: [QueryEntity], by sorts: [ValidatedSort], run: QueryRun) -> [QueryEntity] {
         guard !sorts.isEmpty else { return entities } // already in the universe's deterministic (name, artist) order
 
+        // Plays are listed newest first already: sorting on their time, the way a list of plays is read, is the order they are in (or its
+        // reverse). Skips computing and comparing a value for every play of the library.
+        if run.target == .scrobble, sorts.count == 1, case .field(let resolved) = sorts[0].key, resolved.field.id == "playedAt", resolved.scope == nil {
+            return sorts[0].direction == .descending ? entities : entities.reversed()
+        }
+
         enum Key { case cells([QueryEntityID: QueryCell]), shuffle([QueryEntityID: UInt64]) }
         let keys: [Key] = sorts.map { sort in
             switch sort.key {
@@ -306,7 +312,11 @@ enum QueryEngine {
         for key in order {
             guard let field = fields[key], let ids = affected[key], !ids.isEmpty else { continue }
             summary.append((field.field.name, ids.count, field.field.resolver))
-            if let resolver = field.field.resolver { byResolver[resolver, default: []].formUnion(ids) }
+            if let resolver = field.field.resolver {
+                // A play's inherited field fills in the item it is of: the lookup is for that track, album or artist.
+                if let level = field.field.itemLevel { byResolver[resolver, default: []].formUnion(ids.compactMap { run.itemID(level, ofPlay: $0) }) }
+                else { byResolver[resolver, default: []].formUnion(ids) }
+            }
         }
         return (summary, byResolver)
     }

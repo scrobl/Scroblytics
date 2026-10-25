@@ -133,7 +133,7 @@ struct QueryResultsTable: View {
                         track: row.entity.name,
                         initialValue: false,
                         font: AppTypography.compactMetadata,
-                        enabled: row.entity.target == .track
+                        enabled: row.entity.target == .track || row.entity.target == .scrobble
                     )
                 }
                 if let subtitle = row.subtitle, !subtitle.isEmpty {
@@ -148,7 +148,7 @@ struct QueryResultsTable: View {
         switch target {
         case .artist: .artist
         case .album: .album
-        case .track: .track
+        case .track, .scrobble: .track
         }
     }
 
@@ -158,7 +158,7 @@ struct QueryResultsTable: View {
             ImageTarget(kind: .artist, artist: entity.name, album: nil, track: nil)
         case .album:
             ImageTarget(kind: .album, artist: entity.artist, album: entity.name, track: nil)
-        case .track:
+        case .track, .scrobble:
             ImageTarget(kind: .track, artist: entity.artist, album: nil, track: entity.name)
         }
     }
@@ -231,7 +231,7 @@ struct QueryCellView: View {
         switch entity.target {
         case .artist: .artist(entity.name)
         case .album: .album(artist: entity.artist, name: entity.name)
-        case .track: .track(artist: entity.artist, name: entity.name)
+        case .track, .scrobble: .track(artist: entity.artist, name: entity.name)
         }
     }
 }

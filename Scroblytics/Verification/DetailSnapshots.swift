@@ -603,6 +603,20 @@ enum DetailSnapshots {
                 for (width, dark) in [(1000, true), (1000, false), (600, true)] as [(CGFloat, Bool)] {
                     await render(tool, width: width, dark: dark, container: container, settle: 15, to: base.appending(path: "trips-tool-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
+                // Query finding single plays, on the made-up plays and trips the tool scene just seeded.
+                var playsSpec = QuerySpec(target: .scrobble)
+                playsSpec.columns = ["playedAt", "playPlace", "listenNumber", "playGap"].map { QueryFieldRef($0) }
+                playsSpec.sorts = [QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .descending)]
+                playsSpec.limit = QuerySpec.scrobbleLimit
+                let request = AskQueryRequest(spec: playsSpec, action: .run)
+                for (width, dark) in [(1200, true), (1200, false), (800, true)] as [(CGFloat, Bool)] {
+                    let queryScene = QueryView(modelContainer: container, settings: ChartDateSettings(), isActive: true, askRequest: .constant(request))
+                        .frame(width: width, height: 640)
+                        .environment(TagStore())
+                        .environment(AskSimilarRouter())
+                        .environment(AskSuggestionStore())
+                    await render(queryScene, width: width, dark: dark, container: container, settle: 25, to: base.appending(path: "query-scrobbles-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
                 WeatherTripStore.save([])
                 for (name, card, images) in await nativeShareCards() where name == "weathermap" {
                     for size in ShareSize.allCases {

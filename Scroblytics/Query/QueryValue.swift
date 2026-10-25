@@ -4,7 +4,10 @@ import Foundation
 /// (`PopularityKind`, `TopChartsEntity`); kept separate so the query layer has
 /// no dependency on either.
 enum QueryTarget: String, Codable, CaseIterable, Sendable, Hashable {
-    case artist, album, track
+    case artist, album, track, scrobble
+
+    /// What Ask can find: items, not single plays (yet).
+    static var askTargets: [QueryTarget] { [.artist, .album, .track] }
 }
 
 enum QueryValueType: String, Codable, Sendable {

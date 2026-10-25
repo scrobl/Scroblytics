@@ -421,7 +421,7 @@ struct MissingDataView: View {
         switch row.target {
         case .artist: navigation.goToArtist(ArtistIdentity(name: row.artist))
         case .album: navigation.goToAlbum(AlbumIdentity(artist: row.artist, name: row.name))
-        case .track: navigation.goToTrack(TrackIdentity(artist: row.artist, name: row.name, album: row.album, imageURL: row.imageURL))
+        case .track, .scrobble: navigation.goToTrack(TrackIdentity(artist: row.artist, name: row.name, album: row.album, imageURL: row.imageURL))
         }
     }
 
@@ -459,7 +459,7 @@ struct MissingDataView: View {
         switch row.target {
         case .artist: target = ImageTarget(kind: .artist, artist: row.artist, album: nil, track: nil)
         case .album: target = ImageTarget(kind: .album, artist: row.artist, album: row.name, track: nil)
-        case .track: target = ImageTarget(kind: .track, artist: row.artist, album: row.album, track: row.name)
+        case .track, .scrobble: target = ImageTarget(kind: .track, artist: row.artist, album: row.album, track: row.name)
         }
         let panel = NSOpenPanel()
         panel.title = "Choose Image"
@@ -486,7 +486,7 @@ struct MissingDataView: View {
                 target: .album(artist: row.artist, album: row.name),
                 detected: override == nil ? current?.releaseDateDetected : nil, override: override
             )
-        case .track:
+        case .track, .scrobble:
             let key = TextNormalization.lovedKey(artist: row.artist, track: row.name)
             var descriptor = FetchDescriptor<Track>(predicate: #Predicate<Track> { $0.identityKey == key })
             descriptor.fetchLimit = 1
@@ -604,7 +604,7 @@ private struct Row: View {
         switch row.target {
         case .artist: ImageTarget(kind: .artist, artist: row.artist, album: nil, track: nil)
         case .album: ImageTarget(kind: .album, artist: row.artist, album: row.name, track: nil)
-        case .track: ImageTarget(kind: .track, artist: row.artist, album: row.album, track: row.name)
+        case .track, .scrobble: ImageTarget(kind: .track, artist: row.artist, album: row.album, track: row.name)
         }
     }
 
@@ -612,7 +612,7 @@ private struct Row: View {
         switch target {
         case .artist: .artist
         case .album: .album
-        case .track: .track
+        case .track, .scrobble: .track
         }
     }
 }

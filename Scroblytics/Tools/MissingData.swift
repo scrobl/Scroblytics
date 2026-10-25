@@ -8,6 +8,7 @@ extension QueryTarget {
         case .artist: "Artists"
         case .album: "Albums"
         case .track: "Tracks"
+        case .scrobble: "Scrobbles"
         }
     }
 }

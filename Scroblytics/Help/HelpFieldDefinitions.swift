@@ -10,7 +10,21 @@ import Foundation
 enum HelpFieldDefinitions {
     static func definition(for id: String) -> String? { text[id] }
 
-    static let text: [String: String] = identity.merging(volume) { a, _ in a }
+    static let text: [String: String] = baseText.merging(inherited) { a, _ in a }
+
+    /// A play's inherited fields (“Track · Plays”) are the item's own field, so they read as its definition, said for the item the play is of.
+    private static let inherited: [String: String] = {
+        var out: [String: String] = [:]
+        for entry in QueryFieldRegistry.inheritedFieldIDs {
+            for id in entry.ids {
+                guard let base = baseText[id] else { continue }
+                out[QueryFieldRegistry.inheritedFieldID(entry.level, id)] = "For the \(entry.level.rawValue) this play is of: " + base
+            }
+        }
+        return out
+    }()
+
+    private static let baseText: [String: String] = identity.merging(volume) { a, _ in a }
         .merging(ranking) { a, _ in a }
         .merging(engagement) { a, _ in a }
         .merging(recency) { a, _ in a }
@@ -23,6 +37,35 @@ enum HelpFieldDefinitions {
         .merging(album) { a, _ in a }
         .merging(similar) { a, _ in a }
         .merging(tagFields) { a, _ in a }
+        .merging(scrobbleFields) { a, _ in a }
+
+    // MARK: Scrobble (a query that finds single plays)
+
+    private static let scrobbleFields: [String: String] = [
+        "playedAt": "The date and time of the play, in your local time. A scrobble query lists plays newest first by default; sort on this to read them oldest first, or use it as a condition (before, after, on, between) to find the plays of a day or a stretch of days.",
+        "playAlbum": "The album the play was scrobbled under, exactly as it was recorded. A play with no album has no value. Use it as a condition to list the plays from one album, in the order you heard them.",
+        "hourOfDay": "The hour the play started in, 0 to 23, in your local time: 0 is midnight to 1 AM, 12 is noon to 1 PM, 23 is 11 PM to midnight. “Hour of day at least 21” finds the late-night plays.",
+        "playDayOfWeek": "The day of the week of the play, in your local time. (For an artist, album or track the same-named field is the day most of its plays were on; a single play has just one.)",
+        "playTimeOfDay": "The part of the day of the play, in your local time: Night (9 PM–5 AM), Morning (5 AM–noon), Afternoon (noon–5 PM) or Evening (5–9 PM).",
+        "playWeekdayOrWeekend": "Whether the play was on a weekday (Monday to Friday) or a weekend (Saturday or Sunday), in your local time.",
+        "playSeason": "The season of the play: Winter, Spring, Summer or Autumn, as whole calendar months for the hemisphere chosen in Settings › General › Dates.",
+        "playGap": "How long after the play before it this one started, in listening-time units (“4m 0s”). It is the time between the two starts, over your whole history, so a play at the start of a period still measures back to the one before the period. A few minutes means the same sitting; hours or days means a new one. No value for your very first play.",
+        "listenNumber": "Which time you have played this track: 1 is the first time you ever did, 12 the twelfth. Counted over your whole history (not just the plays the query keeps), in the order of the plays; tracks are told apart by artist and title.",
+        "firstListen": "True when this is the first time you ever played the track, over your whole history. Use it to list what you discovered on a day or in a period.",
+        "playPlace": "The city you were in at the time: the trip you were on, or your home place. “Home” when trips are recorded but no home place is chosen. No value when neither is recorded. Trips are added in [Tools › Trips](help://tool-trips); it works without weather.",
+        "playRegion": "The state or region you were in at the time, where the place is in one. A place chosen from the city search records its state or region; one you only typed a name for, or entered as coordinates, has none, so its plays have no value here.",
+        "playCountry": "The country you were in at the time, where the place is in one. A place chosen from the city search records its country; one you only typed a name for, or entered as coordinates, has none.",
+        "playWeather": "The weather in the hour of the play, where you were (home, or the trip you were on): Clear, Cloudy, Fog, Rain, Snow or Thunderstorm. Needs weather turned on in Settings › Weather and downloaded; a play with no weather for its hour has no value.",
+        "sessionStart": "When the listening session this play is in began: the start of its first play. A session is a run of plays each started within a set number of minutes (30 to begin with; a setting on the field) of the one before it, found over your whole history, so a play at the start of a period still knows which session it is in. Plays in the same session share this value, so it groups a night's listening and sorts sessions by when they happened.",
+        "sessionPosition": "Which play of its session this is: 1 for the play that began it, 2 for the next, and so on. Sessions are found over your whole history, so a play's number does not change with the period or the filters. The gap that ends a session is a setting on the field (30 minutes to begin with).",
+        "sessionSize": "How many plays the session this play is in has, counting every play of it, not only the ones the query keeps. Use it to find long sittings (“plays in session at least 40”). The gap that ends a session is a setting on the field.",
+        "sessionLength": "How long the session lasted, from the start of its first play to the start of its last (a session of one play is 0). It does not include the length of the last song, because a scrobble records only when a play began.",
+        "sessionArtists": "How many different artists the session this play is in has, over the whole session.",
+        "startsSession": "True when this play began a session: it came after a silence longer than the gap (30 minutes to begin with, a setting on the field), or is your first play ever. Listing the plays where this is true gives one row per session.",
+        "endsSession": "True when this was the last play of its session: nothing followed it within the gap. The last play of a session often shows what you were listening to when you stopped.",
+        "artistRun": "How many plays by this play's artist came one after another, within the session, in the run this play is part of: 1 when the plays before and after it were by other artists, 6 for six songs in a row by the same artist. A run never crosses into another session.",
+        "playTemperature": "The temperature in the hour of the play, where you were, in the unit chosen in Settings › Weather (a condition on it is typed in that unit). Needs weather turned on and downloaded.",
+    ]
 
     // MARK: Name
 

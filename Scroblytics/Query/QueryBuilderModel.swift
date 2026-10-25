@@ -32,12 +32,12 @@ struct QueryDisplayRow: Identifiable, Sendable {
             switch row.entity.target {
             case .artist: target = ImageTarget(kind: .artist, artist: row.entity.artist, album: nil, track: nil)
             case .album: target = ImageTarget(kind: .album, artist: row.entity.artist, album: row.entity.name, track: nil)
-            case .track: target = ImageTarget(kind: .track, artist: row.entity.artist, album: info?.album, track: row.entity.name)
+            case .track, .scrobble: target = ImageTarget(kind: .track, artist: row.entity.artist, album: info?.album, track: row.entity.name)
             }
             let subtitle: String? = switch row.entity.target {
             case .artist: nil
             case .album: row.entity.artist
-            case .track: [row.entity.artist, info?.album].compactMap { $0 }.joined(separator: " · ")
+            case .track, .scrobble: [row.entity.artist, info?.album].compactMap { $0 }.joined(separator: " · ")
             }
             return QueryDisplayRow(
                 row: row,
@@ -378,12 +378,21 @@ final class QueryBuilderModel {
             next.resultSorts = kept.isEmpty ? nil : kept
         }
         next.columns = next.columns.filter { let keep = applicable.contains($0.id); if !keep { removed += 1 }; return keep }
-        if next.columns.isEmpty { next.columns = [QueryFieldRef("plays"), QueryFieldRef("lastPlayed")] }
         if var groupLimit = next.groupLimit {
             if groupLimit.perArtist != nil, target == .artist { groupLimit.perArtist = nil; removed += 1 }
             if groupLimit.perAlbum != nil, target != .track { groupLimit.perAlbum = nil; removed += 1 }
-            if groupLimit.perReleaseYear != nil, target == .artist { groupLimit.perReleaseYear = nil; removed += 1 }
+            if groupLimit.perReleaseYear != nil, target != .album, target != .track { groupLimit.perReleaseYear = nil; removed += 1 }
             next.groupLimit = groupLimit.isEmpty ? nil : groupLimit
+        }
+        // Plays are listed newest first, a thousand at a time; the other targets start from their most played and a hundred.
+        if target == .scrobble {
+            if next.columns.isEmpty { next.columns = [QueryFieldRef("playedAt")] }
+            if next.sorts.isEmpty { next.sorts = [QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .descending)] }
+            if next.limit == nil || next.limit == 100 { next.limit = QuerySpec.scrobbleLimit }
+        } else {
+            if next.columns.isEmpty { next.columns = [QueryFieldRef("plays"), QueryFieldRef("lastPlayed")] }
+            if next.sorts.isEmpty, spec.target == .scrobble { next.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)] }
+            if next.limit == QuerySpec.scrobbleLimit, spec.target == .scrobble { next.limit = 100 }
         }
         return (next, removed)
     }

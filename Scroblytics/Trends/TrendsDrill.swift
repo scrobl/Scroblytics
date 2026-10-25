@@ -7,6 +7,13 @@ enum TrendsDrill {
         var spec = QuerySpec(target: target)
         spec.period = QueryPeriod(from: from, to: to)
         spec.playFilter = playFilter
+        if target == .scrobble {
+            // The plays themselves, newest first: each play in the period is a row, so there is nothing to filter out.
+            spec.sorts = [QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .descending)]
+            spec.columns = [QueryFieldRef("playedAt")]
+            spec.limit = QuerySpec.scrobbleLimit
+            return spec
+        }
         // Only what was played in the period; without this a zero-play item would match everything.
         spec.groups = [[QueryCondition("plays", .greaterThan, [.number(0)])]]
         if let tag { spec.groups[0].append(QueryCondition("tags", .tagsIsAny, [.tags([tag])])) }

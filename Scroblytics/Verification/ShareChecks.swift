@@ -1043,7 +1043,7 @@ enum ShareChecks {
                     switch target {
                     case .artist: key = play.artistName
                     case .album: if play.albumName.isEmpty { continue }; key = play.artistName + "\u{0}" + play.albumName
-                    case .track: key = play.artistName + "\u{0}" + play.trackName
+                    case .track, .scrobble: key = play.artistName + "\u{0}" + play.trackName
                     }
                     counts[year, default: [:]][key, default: 0] += 1
                 }

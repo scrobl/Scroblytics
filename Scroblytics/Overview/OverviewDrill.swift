@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a click on a cell of Overview's "Last 24 Hours" or "Current streak" strip hands to Query: the plays of that one hour or day,
-/// by track, most played first. Built on `TrendsDrill.spec`, so it reads like the specs Trends' charts hand over.
+/// one row for each, newest first. Built on `TrendsDrill.spec`, so it reads like the specs Trends' charts hand over.
 enum OverviewDrill {
     struct Drill: Equatable {
         let spec: QuerySpec
@@ -24,7 +24,7 @@ enum OverviewDrill {
         let filter = QueryPlayFilter(weekdays: nil, fromHour: hour, toHour: hour)
         let day = slotDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
         return Drill(
-            spec: TrendsDrill.spec(from: range.from, to: range.to, target: .track, playFilter: filter),
+            spec: TrendsDrill.spec(from: range.from, to: range.to, target: .scrobble, playFilter: filter),
             detail: "Scrobbles · \(day) · \(QueryPlayFilter.hourLabel(hour))"
         )
     }
@@ -37,7 +37,7 @@ enum OverviewDrill {
         let range = dayRange(containing: date, calendar: calendar)
         let label = date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year())
         return Drill(
-            spec: TrendsDrill.spec(from: range.from, to: range.to, target: .track),
+            spec: TrendsDrill.spec(from: range.from, to: range.to, target: .scrobble),
             detail: "Scrobbles · \(label)"
         )
     }

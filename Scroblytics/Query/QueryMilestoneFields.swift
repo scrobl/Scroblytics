@@ -14,6 +14,7 @@ extension QueryFieldRegistry {
             case .artist: entries = all.artists
             case .album: entries = all.albums
             case .track: entries = all.tracks
+            case .scrobble: entries = []   // milestone fields are not offered for single plays
             }
             return Dictionary(uniqueKeysWithValues: entries.map { entry in
                 (QueryEntityID(target: run.target, artist: entry.artist ?? entry.name, name: entry.name), entry.stats)

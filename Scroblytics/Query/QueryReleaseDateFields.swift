@@ -17,8 +17,8 @@ extension QueryFieldRegistry {
             case .track:
                 let primary = ReleaseDateEngine.primaryAlbum(scrobbles: byEntity[entity.id] ?? [])
                 return (entity.id, snapshot.trackResolution(artist: entity.artist, track: entity.name, primaryAlbum: primary))
-            case .artist:
-                preconditionFailure("release date fields are not offered for artists")
+            case .artist, .scrobble:
+                preconditionFailure("release date fields are not offered for artists or single plays")
             }
         })
     }

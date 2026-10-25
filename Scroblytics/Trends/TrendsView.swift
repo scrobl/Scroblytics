@@ -73,7 +73,7 @@ struct TrendsView: View {
         switch item.id.target {
         case .artist: navigation.goToArtist(ArtistIdentity(name: item.id.artist))
         case .album: navigation.goToAlbum(AlbumIdentity(artist: item.id.artist, name: item.id.name))
-        case .track: navigation.goToTrack(TrackIdentity(artist: item.id.artist, name: item.id.name))
+        case .track, .scrobble: navigation.goToTrack(TrackIdentity(artist: item.id.artist, name: item.id.name))
         }
     }
 

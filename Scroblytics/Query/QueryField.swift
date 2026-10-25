@@ -8,11 +8,12 @@ import Foundation
 /// may omit fields that do not apply, but must not reorder the remaining ones.
 /// Every selectable field must also show its required `QueryField.help` tooltip.
 enum QueryFieldGroup: Int, CaseIterable, Sendable, Comparable {
-    case identity, flags, tags, volume, ranking, engagement, recency, sentiment, dates, context, duration, tempo, metadata, similarity
+    case identity, scrobble, flags, tags, volume, ranking, engagement, recency, sentiment, dates, context, duration, tempo, metadata, similarity
 
     var title: String {
         switch self {
         case .identity: "Name"
+        case .scrobble: "Scrobble"
         case .flags: "Flags"
         case .tags: "Tags"
         case .volume: "Volume"
@@ -178,6 +179,9 @@ struct QueryField: Sendable {
     /// Offered to the larger models (Claude, OpenAI, Gemini, a local server) even though `askable` is false: they have the
     /// context to carry a field the on-device model would only misuse. Meaningless when `askable` is true.
     var askableByLargeModels = false
+    /// Set on a field of a single play that is another kind's field for the track, album or artist the play is of: which kind. The
+    /// engine then reports the item (not the play) to the lookup that fills a pending value in.
+    var itemLevel: QueryTarget?
     /// The pipeline that resolves this field's pending values, if the user can start one.
     let resolver: QueryResolverKind?
     /// Batch compute — one call gives the answer for many entities at once,

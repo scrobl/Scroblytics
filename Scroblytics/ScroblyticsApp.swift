@@ -177,6 +177,7 @@ struct ScroblyticsApp: App {
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
         EditionChecks.runHeadlessIfRequested(container: modelContainer)
         ShareChecks.runHeadlessIfRequested(container: modelContainer)
+        ScrobbleQueryChecks.runHeadlessIfRequested(container: modelContainer)
         DetailSnapshots.runHeadlessIfRequested(container: modelContainer)
         DetailDump.runHeadlessIfRequested(container: modelContainer)
         PerfChecks.runHeadlessIfRequested(container: modelContainer)

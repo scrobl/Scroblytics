@@ -165,7 +165,7 @@ struct TripsView: View {
             Button {
                 if let stay, stay.plays > 0, let result {
                     _ = result
-                    openQuery(TrendsPlacesEngine.drillSpec(for: stay, target: .track), "Scrobbles · in \(trip.shortName) · " + TrendsDrill.rangeLabel(from: stay.from, to: stay.until), nil)
+                    openQuery(TrendsPlacesEngine.drillSpec(for: stay, target: .scrobble), "Scrobbles · in \(trip.shortName) · " + TrendsDrill.rangeLabel(from: stay.from, to: stay.until), nil)
                 }
             } label: {
                 ViewThatFits(in: .horizontal) {

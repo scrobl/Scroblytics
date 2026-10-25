@@ -16,7 +16,7 @@ enum AskSchema {
     static func intro() throws -> GenerationSchema {
         let root = DynamicGenerationSchema(name: "AskIntro", properties: [
             .init(name: K.target, description: "What the request is about",
-                  schema: DynamicGenerationSchema(name: "TargetChoice", anyOf: QueryTarget.allCases.map(\.rawValue))),
+                  schema: DynamicGenerationSchema(name: "TargetChoice", anyOf: QueryTarget.askTargets.map(\.rawValue))),
             .init(name: K.scoped, description: "true only if the request limits plays or activity to a time window: in 2023, the last 30 days, this month, last year, since March…",
                   schema: DynamicGenerationSchema(type: Bool.self)),
             .init(name: K.absence, description: "true only if the request asks about something that has no value: missing, blank, unknown, not set, never…",

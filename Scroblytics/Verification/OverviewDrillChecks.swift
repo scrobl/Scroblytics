@@ -23,6 +23,8 @@ enum OverviewDrillChecks {
                 guard let validated = try? spec.validate(against: .standard) else { return nil }
                 let run = QueryRun(target: spec.target, asOf: Date(), scrobbles: spec.countedPlays(all), allTimeScrobbles: all, snapshots: QuerySnapshots())
                 let result = QueryEngine.evaluate(validated, run: run)
+                // Each row of a scrobble query is one play, so the plays are the rows that match (before any limit).
+                if spec.target == .scrobble { return (result.matchedCount, result.rows.count) }
                 guard let key = result.columns.first(where: { $0.field.id == "plays" })?.cacheKey else { return nil }
                 let plays = result.rows.reduce(0) { sum, row in
                     if case .value(.number(let n))? = row.cells[key] { return sum + Int(n) }
@@ -40,7 +42,7 @@ enum OverviewDrillChecks {
             let hourDrill = OverviewDrill.hour(slotDate: slot, hour: 15)
             check("an hour opens that day as the period", hourDrill.spec.period == QueryPeriod(from: startOfDay, to: endOfDay))
             check("and filters the plays to exactly that clock hour, any weekday", hourDrill.spec.playFilter == QueryPlayFilter(weekdays: nil, fromHour: 15, toHour: 15))
-            check("by track, with plays above zero, most played first, with the usual columns", hourDrill.spec.target == .track && hourDrill.spec.groups.count == 1 && hourDrill.spec.sorts.count == 1 && !hourDrill.spec.columns.isEmpty)
+            check("lists the plays themselves, newest first, with the time as a column", hourDrill.spec.target == .scrobble && hourDrill.spec.groups.isEmpty && hourDrill.spec.sorts.count == 1 && hourDrill.spec.columns == [QueryFieldRef("playedAt")] && hourDrill.spec.limit == QuerySpec.scrobbleLimit)
             check("the hour is named for Query's header", hourDrill.detail.hasPrefix("Scrobbles · ") && hourDrill.detail.contains("3 PM"), hourDrill.detail)
 
             let dayDrill = OverviewDrill.day(key: "2026-06-15")

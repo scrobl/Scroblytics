@@ -83,7 +83,7 @@ extension QueryFieldRegistry {
                 if a.target != .artist, a.artist != b.artist { return a.artist < b.artist }
                 switch a.target {
                 case .artist: return a.name < b.name
-                case .track: return a.name < b.name
+                case .track, .scrobble: return a.name < b.name
                 case .album:
                     if pa.first != pb.first { return pa.first < pb.first }
                     return a.name < b.name
@@ -217,12 +217,12 @@ extension QueryFieldRegistry {
         let all: Set<QueryTarget> = [.artist, .album, .track]
 
         return [
-            QueryField(id: "name", name: "Name", group: .identity, type: .text, targets: all,
+            QueryField(id: "name", name: "Name", group: .identity, type: .text, targets: all.union([.scrobble]),
                        help: "The artist, album or track name.") { _, _, entities in
                 Dictionary(uniqueKeysWithValues: entities.map { ($0.id, .value(.text($0.name))) })
             },
-            QueryField(id: "artist", name: "Artist", group: .identity, type: .text, targets: [.album, .track],
-                       help: "The artist an album or track belongs to.") { _, _, entities in
+            QueryField(id: "artist", name: "Artist", group: .identity, type: .text, targets: [.album, .track, .scrobble],
+                       help: "The artist an album, track or play belongs to.") { _, _, entities in
                 Dictionary(uniqueKeysWithValues: entities.map { ($0.id, .value(.text($0.artist))) })
             },
             QueryField(id: "artistDiscographySize", name: "Artist discography size", group: .context, type: .numeric, targets: all,

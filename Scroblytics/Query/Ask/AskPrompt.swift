@@ -124,7 +124,7 @@ enum AskPrompt {
     /// One line per field, once, with the kinds of thing it works with.
     static func fieldCatalog(registry: QueryFieldRegistry) -> [String] {
         var byID: [String: (field: QueryField, targets: [String])] = [:]
-        for target in QueryTarget.allCases {
+        for target in QueryTarget.askTargets {
             for field in registry.modelAskFields(for: target) {
                 byID[field.id, default: (field, [])].targets.append(target.rawValue)
             }

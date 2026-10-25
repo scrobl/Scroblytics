@@ -245,11 +245,12 @@ struct QueryView: View {
                         Text("Artists").tag(QueryTarget.artist)
                         Text("Albums").tag(QueryTarget.album)
                         Text("Tracks").tag(QueryTarget.track)
+                        Text("Scrobbles").tag(QueryTarget.scrobble)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(minWidth: 180, maxWidth: 320)
-                    .help("What the query finds: artists, albums or tracks. Changing it keeps the conditions that still apply.")
+                    .frame(minWidth: 240, maxWidth: 420)
+                    .help("What the query finds: artists, albums, tracks, or single plays (scrobbles). Changing it keeps the conditions that still apply.")
 
                     Spacer(minLength: 8)
                     askButton
@@ -732,7 +733,7 @@ struct QueryView: View {
                         }
                     }
                 }
-                if model.spec.target != .artist {
+                if model.spec.target == .album || model.spec.target == .track {
                     Toggle("At most N per release year", isOn: Binding(
                         get: { model.spec.groupLimit?.perReleaseYear != nil },
                         set: { setCap(\.perReleaseYear, to: $0 ? 1 : nil) }
@@ -1092,7 +1093,7 @@ struct QueryView: View {
             navigation.goToArtist(ArtistIdentity(name: entity.name, imageURL: row.imageURL))
         case .album:
             navigation.goToAlbum(AlbumIdentity(artist: entity.artist, name: entity.name, imageURL: row.imageURL))
-        case .track:
+        case .track, .scrobble:
             navigation.goToTrack(TrackIdentity(
                 artist: entity.artist,
                 name: entity.name,

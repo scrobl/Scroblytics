@@ -66,6 +66,35 @@ final class DetailNavigationCoordinator {
         toolPageBeforeQuery = (path.count, origin, originLabel)
     }
 
+    /// Where the Query page stood when a page was opened on top of it (the Collage Generator, from its results): what the origin was, so the
+    /// breadcrumb and Back of the query are as it left them once that page is closed.
+    private var queryUnderneath: (depth: Int, origin: DetailNavigationOrigin, label: String?, originDepth: Int)?
+
+    /// Whether the page now on top was opened from the Query page and returns to it.
+    var isOverQuery: Bool { queryUnderneath != nil }
+
+    /// Opens `destination` on top of the Query page; `returnToQuery()`, the page's own Back, or popping it by any means puts the query's origin back.
+    func pushOverQuery<D: Hashable>(_ destination: D) {
+        queryUnderneath = (path.count, origin, originLabel, originDepth)
+        path.append(destination)
+    }
+
+    /// Closes what was opened over the query and shows the query again.
+    func returnToQuery() {
+        guard let under = queryUnderneath else { return }
+        if path.count > under.depth { path.removeLast(path.count - under.depth) }
+        restoreQueryOriginIfPopped()
+    }
+
+    /// Called whenever the stack changes: once the page opened over the query is gone, the query's origin is back in force.
+    func restoreQueryOriginIfPopped() {
+        guard let under = queryUnderneath, path.count <= under.depth else { return }
+        queryUnderneath = nil
+        origin = under.origin
+        originLabel = under.label
+        originDepth = under.originDepth
+    }
+
     /// Back to the tab that opened this one. A Query opened from a tool returns to that tool's page; otherwise the cross-tab stack is
     /// cleared so a later handoff starts cleanly.
     func returnToPredecessor() {

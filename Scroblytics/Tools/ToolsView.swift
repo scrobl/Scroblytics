@@ -36,7 +36,9 @@ struct ToolsView: View {
                         .onAppear { if descriptor.id != .query { navigation.setOrigin(.tools, label: descriptor.name) } }
                         // Query provides a context-aware parent breadcrumb. Hiding the generic stack button
                         // prevents a Trends handoff from accidentally returning to the Tools landing page.
-                        .navigationBarBackButtonHidden(descriptor.id == .query || overviewToolRequest == descriptor.id)
+                        .navigationBarBackButtonHidden(
+                            descriptor.id == .query || overviewToolRequest == descriptor.id || (descriptor.id == .collageGenerator && navigation.isOverQuery)
+                        )
                 }
                 .navigationDestination(for: ArtistIdentity.self) { ArtistDetailView(identity: $0, settings: settings, navigation: navigation) }
                 .navigationDestination(for: AlbumIdentity.self) { AlbumDetailView(identity: $0, settings: settings, navigation: navigation) }
@@ -50,8 +52,9 @@ struct ToolsView: View {
         .onChange(of: CollageHandoff.shared.pending?.id) {
             // The Query tool's Collage button: the collage goes on top of the query, so Back returns to it with its results as they were.
             guard CollageHandoff.shared.pending != nil, let collage = ToolDescriptor.all.first(where: { $0.id == .collageGenerator }) else { return }
-            navigation.path.append(collage)
+            navigation.pushOverQuery(collage)
         }
+        .onChange(of: navigation.path.count) { navigation.restoreQueryOriginIfPopped() }
         .onChange(of: overviewToolRequest) { routeOverviewTool() }
         .onChange(of: openToolRequest) { routeOpenTool() }
         .onChange(of: similarRouter.pending?.id) { routeSimilarRequest() }

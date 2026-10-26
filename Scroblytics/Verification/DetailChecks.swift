@@ -323,6 +323,27 @@ enum DetailChecks {
             landing.returnToPredecessor()
             check("a Query opened from the Tools page itself returns to the Tools page", landing.path.isEmpty)
 
+            // A page opened over the Query page (the Collage Generator from its results) returns to it with its navigation as it was.
+            let collage = ToolDescriptor.all.first { $0.id == .collageGenerator }!
+            let overQuery = DetailNavigationCoordinator(origin: .tools)
+            overQuery.path.append(ToolDescriptor.query)
+            overQuery.setOrigin(.query)
+            overQuery.pushOverQuery(collage)
+            check("a page opened over the query says so, and the query is under it", overQuery.isOverQuery && overQuery.path.count == 2)
+            overQuery.setOrigin(.tools, label: "Collage Generator")
+            overQuery.returnToQuery()
+            check("returning puts the query on top again, with its own origin and Back as before", overQuery.path.count == 1 && !overQuery.isOverQuery && overQuery.origin == .query && overQuery.originLabel == nil, "\(overQuery.path.count) \(overQuery.origin) \(String(describing: overQuery.originLabel))")
+            overQuery.pushOverQuery(collage)
+            overQuery.setOrigin(.tools, label: "Collage Generator")
+            overQuery.path.removeLast()
+            overQuery.restoreQueryOriginIfPopped()
+            check("closing the page by the system Back puts the query's origin back too", !overQuery.isOverQuery && overQuery.origin == .query && overQuery.originLabel == nil)
+            overQuery.pushOverQuery(collage)
+            overQuery.setOrigin(.tools, label: "Collage Generator")
+            overQuery.path.append(ArtistIdentity(name: "Artist A"))
+            overQuery.restoreQueryOriginIfPopped()
+            check("opening an artist from the collage keeps the collage as the origin until it is closed", overQuery.isOverQuery && overQuery.originLabel == "Collage Generator" && overQuery.path.count == 3)
+
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

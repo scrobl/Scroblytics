@@ -87,6 +87,7 @@ struct CollageGeneratorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if navigation.isOverQuery { queryBreadcrumb }
                 PageSettingsHeader("Collage Generator") {
                     CollagePrimaryControls(
                         grid: $options.grid,
@@ -165,6 +166,31 @@ struct CollageGeneratorView: View {
             guard hasLoadedOptions else { return }
             ToolFilterSettingsStore.save(newValue, toolId: Self.toolID, context: modelContext)
             Task { await reload() }
+        }
+    }
+
+    /// "‹ Query › Collage Generator": the way back to the query this collage was made from, as the Query page itself shows its way back.
+    private var queryBreadcrumb: some View {
+        HStack(spacing: 8) {
+            Button { navigation.returnToQuery() } label: {
+                Image(systemName: "chevron.left")
+                    .font(AppTypography.navigationIcon)
+                    .frame(width: 34, height: 34)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay(Circle().stroke(.separator.opacity(0.5), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("Back to the query")
+            Button("Query") { navigation.returnToQuery() }
+                .buttonStyle(.plain)
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.right")
+                .font(AppTypography.denseBadge)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            Text("Collage Generator").font(AppTypography.compactTitle)
+            Spacer()
         }
     }
 

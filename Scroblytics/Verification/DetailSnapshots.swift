@@ -633,7 +633,9 @@ enum DetailSnapshots {
                 // The Collage Generator made from a Query's results.
                 let collageItems = (1...10).map { CollageItem(id: "q\($0)", name: "Album \($0)", artist: "Artist \(($0 % 4) + 1)", album: "Album \($0)", metricValue: 0, imageURL: nil, periodLabel: nil, valueText: "\(120 - $0 * 9)") }
                 CollageHandoff.shared.offer(CollageQueryPayload(title: "Loved albums · released in the 90s", entity: .album, items: collageItems, valueLabel: "Plays", totalRows: 37))
-                let collageScene = NavigationStack { CollageGeneratorView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools)) }
+                let collageNavigation = DetailNavigationCoordinator(origin: .tools)
+                collageNavigation.pushOverQuery(ToolDescriptor.query)
+                let collageScene = NavigationStack { CollageGeneratorView(modelContainer: container, navigation: collageNavigation) }
                     .frame(width: 1100, height: 900)
                     .environment(TagStore())
                 await render(collageScene, width: 1100, dark: true, container: container, settle: 25, to: base.appending(path: "collage-from-query-dark.png"))

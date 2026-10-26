@@ -24,8 +24,8 @@ targets:
         DEAD_CODE_STRIPPING: YES
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.9.12"
-        CURRENT_PROJECT_VERSION: "13"
+        MARKETING_VERSION: "0.9.13"
+        CURRENT_PROJECT_VERSION: "14"
         SWIFT_VERSION: "6.0"
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_ENTITLEMENTS: Config/Scroblytics.entitlements

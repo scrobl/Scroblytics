@@ -595,12 +595,23 @@ private struct CollageDisplayControls: View {
         Toggle("Scroblytics", isOn: $showsTag)
             .help("Adds “Scroblytics” under the collage")
         HStack {
-            Image(systemName: "minus.magnifyingglass")
-            Slider(value: $zoom, in: 0.5...2, step: 0.1)
+            Button { zoom = CollageZoom.stepped(zoom, by: -CollageZoom.step) } label: { Image(systemName: "minus.magnifyingglass").foregroundStyle(.primary) }
+                .buttonStyle(.borderless)
+                .disabled(zoom <= CollageZoom.range.lowerBound)
+                .help("Zoom out")
+                .accessibilityLabel("Zoom out")
+            Slider(value: $zoom, in: CollageZoom.range, step: CollageZoom.step)
                 .frame(width: 140)
-            Image(systemName: "plus.magnifyingglass")
+            Button { zoom = CollageZoom.stepped(zoom, by: CollageZoom.step) } label: { Image(systemName: "plus.magnifyingglass").foregroundStyle(.primary) }
+                .buttonStyle(.borderless)
+                .disabled(zoom >= CollageZoom.range.upperBound)
+                .help("Zoom in")
+                .accessibilityLabel("Zoom in")
             Button("Fit") { zoom = 1 }
+                .fixedSize()
+                .help("Zoom to fit the window")
         }
+        .fixedSize(horizontal: true, vertical: false)
         Spacer(minLength: 0)
         Button(action: onExport) {
             if isExporting {

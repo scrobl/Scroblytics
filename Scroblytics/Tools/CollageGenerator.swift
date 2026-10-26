@@ -14,6 +14,17 @@ enum CollageSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// The collage preview's zoom: the slider's range and step, and the step the magnifying glasses take.
+enum CollageZoom {
+    static let range: ClosedRange<Double> = 0.5...2
+    static let step = 0.1
+
+    /// `zoom` moved by `delta`, kept on the slider's own steps (no drift from adding 0.1 again and again) and inside its range.
+    static func stepped(_ zoom: Double, by delta: Double) -> Double {
+        min(max(((zoom + delta) * 10).rounded() / 10, range.lowerBound), range.upperBound)
+    }
+}
+
 enum CollagePeriod: String, Codable, CaseIterable, Identifiable {
     case week, month, year, decade
 

@@ -87,6 +87,13 @@ enum CollageQueryChecks {
             let big = payload(spec(.artist), over: many)
             check("rows beyond the largest grid are left out, and the collage says how many there were", big?.items.count == CollageQuerySource.maxItems && big?.totalRows == 200 && CollageQuerySource.maxItems == 144)
 
+            // The preview's zoom: the magnifying glasses step it, staying on the slider's steps and inside its range.
+            var zoom = 1.0
+            for _ in 0..<7 { zoom = CollageZoom.stepped(zoom, by: CollageZoom.step) }
+            check("zooming in step by step lands on the slider's steps with no drift, and stops at the largest zoom", zoom == 1.7 && CollageZoom.stepped(2, by: 0.1) == 2 && CollageZoom.stepped(1.95, by: 0.1) == 2)
+            for _ in 0..<12 { zoom = CollageZoom.stepped(zoom, by: -CollageZoom.step) }
+            check("zooming out stops at the smallest zoom", zoom == 0.5 && CollageZoom.stepped(0.5, by: -0.1) == 0.5 && CollageZoom.stepped(1.0, by: -0.1) == 0.9)
+
             // The hand-off is taken once.
             let handoff = CollageHandoff()
             handoff.offer(albums!)

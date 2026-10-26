@@ -124,6 +124,19 @@ enum DetailChecks {
                 entries: [entry("Reprise", plays: 9, daysAgo: 1), entry("Reprise (Remastered)", plays: 2, daysAgo: 2)]
             )
             check("a title that appears twice on the tracklist is paired in order", twice[0].entry?.playcount == 9 && twice[2].entry?.playcount == 2 && twice[1].entry == nil, "\(twice.map { $0.entry?.playcount ?? -1 })")
+            // Titles made only of symbols, as on an album whose tracks are "/=/" and "/=/=/": each keeps its own key and its own plays.
+            let symbolKeys = ["/=/", "/=/=/", " /=/ ", "Song One", "夜に駆ける", "群青"].map { TextNormalization.normalizeTrackTitle($0) }
+            check("a title of only symbols keeps a key of its own, apart from a longer one and unaffected by spaces", !symbolKeys[0].isEmpty && symbolKeys[0] != symbolKeys[1] && symbolKeys[0] == symbolKeys[2], "\(symbolKeys)")
+            check("titles in another alphabet are told apart too, and Latin titles are normalised as before", symbolKeys[4] != symbolKeys[5] && !symbolKeys[4].isEmpty && symbolKeys[3] == "song one" && TextNormalization.normalizeTrackTitle("Song One - 2011 Remaster") == "song one")
+            let symbolList: [AlbumTrackRows.ListedTrack] = [.init(title: "/=/", heardThisCycle: true), .init(title: "Interlude", heardThisCycle: true), .init(title: "/=/=/", heardThisCycle: false)]
+            let symbolRows = AlbumTrackRows.merge(tracklist: symbolList, entries: [entry("/=/=/", plays: 6, daysAgo: 1), entry("/=/", plays: 7, daysAgo: 2)])
+            check("on an album with symbol-only tracks each row gets its own plays, whatever order they were ranked in", symbolRows[0].entry?.playcount == 7 && symbolRows[2].entry?.playcount == 6 && symbolRows[1].entry == nil && symbolRows.count == 3, "\(symbolRows.map { $0.entry?.playcount ?? -1 })")
+            let symbolTitles = ["/=/", "Interlude", "/=/=/"]
+            check("the turnover counts symbol-only tracks as heard: a full listen-through is a cycle, and they count towards coverage", AlbumTurnoverEngine.coverageOf(scrobbleTitles: symbolTitles, canonicalTitles: symbolTitles) == 1)
+            let day = Date(timeIntervalSince1970: 1_700_000_000)
+            let listenThrough = symbolTitles.enumerated().map { ScrobbleSnapshot(artistName: "Artist A", albumName: "Album", trackName: $0.element, imageURL: nil, playedAt: day.addingTimeInterval(Double($0.offset) * 240)) }
+            let cycles = AlbumTurnoverEngine.computeCycles(scrobbles: listenThrough, canonicalTitles: symbolTitles)
+            check("…and the turnover finds the cycle, ending with the last track", cycles.cycleDurationsDays.count == 1 && cycles.lastCycleEndDate == listenThrough.last?.playedAt, "\(cycles.cycleDurationsDays) \(String(describing: cycles.lastCycleEndDate))")
             let noList = AlbumTrackRows.merge(tracklist: nil, entries: played)
             check("with no tracklist the rows are exactly the played tracks, none marked as listed", noList.count == played.count && noList.allSatisfy { $0.kind == .extra && $0.position == nil && $0.heardThisCycle == nil })
             check("an empty tracklist is treated as none", AlbumTrackRows.merge(tracklist: [], entries: played).count == played.count)

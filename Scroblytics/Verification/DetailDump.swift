@@ -202,3 +202,31 @@ enum DetailDump {
     }
 }
 #endif
+
+#if DEBUG
+/// `SCROBLYTICS_TITLEKEYS_DUMP=1` (with `SCROBLYTICS_STORE_PATH` on a COPY of a library): which track titles have no Latin letters or digits
+/// (symbols, or another alphabet), whether each now has a key of its own, and which albums have more than one of them.
+enum TitleKeysDump {
+    @MainActor
+    static func runHeadlessIfRequested(container: ModelContainer) {
+        guard ProcessInfo.processInfo.environment["SCROBLYTICS_TITLEKEYS_DUMP"] != nil else { return }
+        Task { @MainActor in
+            let history = (try? await ScrobbleHistoryCache.shared.snapshots(container: container)) ?? []
+            func hasLatin(_ s: String) -> Bool { s.unicodeScalars.contains { ($0.value >= 48 && $0.value <= 57) || ($0.value >= 65 && $0.value <= 90) || ($0.value >= 97 && $0.value <= 122) } }
+            var tracks: [String: (album: String, plays: Int)] = [:]
+            for play in history where !play.trackName.isEmpty && !hasLatin(play.trackName) {
+                let key = play.artistName + "\u{0}" + play.albumName + "\u{0}" + play.trackName
+                tracks[key] = (play.albumName, (tracks[key]?.plays ?? 0) + 1)
+            }
+            let keys = Dictionary(grouping: tracks.keys, by: { $0.split(separator: "\u{0}", omittingEmptySubsequences: false).dropLast().joined(separator: "\u{0}") })
+            print("titles with no Latin letter or digit: \(tracks.count.formatted()), plays \(tracks.values.map(\.plays).reduce(0, +).formatted()); every one has a non-empty key: \(tracks.keys.allSatisfy { !TextNormalization.normalizeTrackTitle(String($0.split(separator: "\u{0}", omittingEmptySubsequences: false).last ?? "")).isEmpty })")
+            for (album, members) in keys.sorted(by: { $0.value.count > $1.value.count }) where members.count > 1 {
+                let titles = members.map { String($0.split(separator: "\u{0}", omittingEmptySubsequences: false).last ?? "") }
+                let distinct = Set(titles.map { TextNormalization.normalizeTrackTitle($0) }).count
+                print("- \(album.replacingOccurrences(of: "\u{0}", with: " · ")): \(titles.joined(separator: "  ")) → \(distinct) distinct keys of \(titles.count)")
+            }
+            exit(0)
+        }
+    }
+}
+#endif

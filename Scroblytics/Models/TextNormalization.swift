@@ -231,7 +231,14 @@ enum TextNormalization {
             with: " ",
             options: [.regularExpression, .caseInsensitive]
         )
-        return collapse(t)
+        let collapsed = collapse(t)
+        // A title with no Latin letters or digits (made of symbols, like "/=/" and "/=/=/", or of another alphabet) collapses to nothing, which
+        // would make every such title on an album the same key, and one that matches nothing where empty keys are left out. It keeps its
+        // own characters instead (lowercased, without spaces), so each is told apart and still matches its own entry.
+        if collapsed.isEmpty {
+            return title.lowercased().filter { !$0.isWhitespace && !$0.isNewline }
+        }
+        return collapsed
     }
 
     /// Album-agnostic key for matching a loved/flagged/overridden track — the

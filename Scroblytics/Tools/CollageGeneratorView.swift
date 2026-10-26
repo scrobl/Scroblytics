@@ -34,6 +34,8 @@ struct CollageGeneratorView: View {
     @State private var errorMessage: String?
     @State private var hasLoadedOptions = false
     @State private var zoom = 1.0
+    /// Set when the collage is made from a Query's results (the Query tool's Collage button) instead of the tool's own choices.
+    @State private var queryPayload: CollageQueryPayload?
     @State private var accountName: String?
     @State private var avatar: Data?
     /// The caption under the collage (what it shows and when) and the two identity lines. Kept in the app's preferences, not in the
@@ -45,7 +47,7 @@ struct CollageGeneratorView: View {
     @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
 
     private var entity: TopChartsEntity {
-        TopChartsEntity(rawValue: options.entityRawValue) ?? .album
+        queryPayload?.entity ?? TopChartsEntity(rawValue: options.entityRawValue) ?? .album
     }
 
     private var metric: TopChartsMetric {
@@ -55,9 +57,9 @@ struct CollageGeneratorView: View {
     /// What the caption under the collage says, from the current choices.
     private var footer: CollageFooter {
         CollageFooter(
-            details: showsDetails ? CollageCaption.make(
+            details: showsDetails ? (queryPayload?.caption ?? CollageCaption.make(
                 source: options.source, entity: entity, metric: metric, period: options.period, rangeLabel: rangeLabel
-            ).text(date: Date()) : nil,
+            )).text(date: Date()) : nil,
             identity: ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsTag, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle, avatar: showsName && showsAvatar ? avatar : nil)
         )
     }
@@ -97,6 +99,8 @@ struct CollageGeneratorView: View {
                         customTo: $options.customTo,
                         rangeOptions: rangeOptions,
                         isLoading: isLoading,
+                        fromQuery: queryPayload.map { FromQuery(title: $0.title, shown: min($0.items.count, options.grid.tileCount), total: $0.totalRows) },
+                        onUseTopItems: { queryPayload = nil; Task { await reload() } },
                         onRefresh: { Task { await reload() } }
                     )
                 }
@@ -114,7 +118,7 @@ struct CollageGeneratorView: View {
                     showsAvatar: $showsAvatar,
                     showsTag: $showsTag,
                     accountName: accountName,
-                    periodAvailable: options.source == .period,
+                    periodAvailable: options.source == .period || (queryPayload?.hasPeriodLabels ?? false),
                     zoom: $zoom,
                     canExport: !items.isEmpty && !isLoading && !isExporting,
                     isExporting: isExporting,
@@ -141,8 +145,14 @@ struct CollageGeneratorView: View {
                 context: modelContext,
                 default: Self.defaults
             )
+            if let payload = CollageHandoff.shared.take() { useQueryResults(payload) }
             await reload()
             hasLoadedOptions = true
+        }
+        .onChange(of: CollageHandoff.shared.pending?.id) {
+            guard hasLoadedOptions, let payload = CollageHandoff.shared.take() else { return }
+            useQueryResults(payload)
+            Task { await reload() }
         }
         .task {
             for await _ in NotificationCenter.default.notifications(named: .scrobbleSyncDidComplete) {
@@ -230,7 +240,9 @@ struct CollageGeneratorView: View {
         errorMessage = nil
         do {
             let loaded: [CollageItem]
-            if options.source == .top {
+            if let queryPayload {
+                loaded = Array(queryPayload.items.prefix(options.grid.tileCount))
+            } else if options.source == .top {
                 let entries = try await TopChartsEngine.fetchRankings(
                     container: modelContainer,
                     durationContext: modelContext,
@@ -267,6 +279,12 @@ struct CollageGeneratorView: View {
             images = [:]
         }
         isLoading = false
+    }
+
+    /// Makes the collage from a Query's results, in a grid just big enough for them (change it if you like).
+    private func useQueryResults(_ payload: CollageQueryPayload) {
+        queryPayload = payload
+        options.grid = CollageQuerySource.suggestedGrid(count: payload.items.count)
     }
 
     @MainActor
@@ -388,6 +406,13 @@ struct CollageGeneratorView: View {
     }
 }
 
+/// What the collage tool says about the query a collage was made from.
+private struct FromQuery: Equatable {
+    var title: String
+    var shown: Int
+    var total: Int
+}
+
 private struct CollagePrimaryControls: View {
     @Binding var grid: CollageGrid
     @Binding var source: CollageSource
@@ -399,11 +424,47 @@ private struct CollagePrimaryControls: View {
     @Binding var customTo: Date
     let rangeOptions: [DateRangeOption]
     let isLoading: Bool
+    let fromQuery: FromQuery?
+    let onUseTopItems: () -> Void
     let onRefresh: () -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
 
     var body: some View {
+        if let fromQuery {
+            queryControls(fromQuery)
+        } else {
+            ownControls
+        }
+    }
+
+    /// A collage made from a Query's results: only the layout is the tool's to choose; which items, and their order, are the query's.
+    @ViewBuilder
+    private func queryControls(_ fromQuery: FromQuery) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .bottom, spacing: 16) {
+                labeled("Layout") {
+                    Picker("Layout", selection: $grid) {
+                        ForEach(CollageGrid.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .frame(width: 150)
+                }
+                .fixedSize()
+                Button(action: onUseTopItems) { Label("Use Top Items Instead", systemImage: "arrow.uturn.backward") }
+                    .help("Leave the query’s results and choose a listening period and what to rank by here")
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Label("From Query: \(fromQuery.title)", systemImage: "magnifyingglass").lineLimit(2)
+                Text(fromQuery.total > fromQuery.shown
+                     ? "The first \(fromQuery.shown.formatted()) of \(fromQuery.total.formatted()) results, in the order the query put them."
+                     : "All \(fromQuery.total.formatted()) results, in the order the query put them.")
+                    .font(AppTypography.supporting).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ownControls: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
             labeled("Layout") {
                 Picker("Layout", selection: $grid) {
@@ -672,7 +733,7 @@ private struct CollageTile: View {
                         badge(period)
                     }
                     Spacer()
-                    if showStat {
+                    if showStat, !statText.isEmpty {
                         badge(statText)
                     }
                 }
@@ -685,6 +746,7 @@ private struct CollageTile: View {
     }
 
     private var statText: String {
+        if let valueText = item.valueText { return valueText }
         if metric == .scrobbles {
             return "\(item.metricValue.formatted()) plays"
         }
@@ -729,7 +791,7 @@ struct CollageCaption: Equatable {
     }
 
     func text(date: Date) -> String {
-        [title, period, measure, date.formatted(date: .abbreviated, time: .omitted)].joined(separator: " · ")
+        [title, period, measure, date.formatted(date: .abbreviated, time: .omitted)].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
 

@@ -47,6 +47,11 @@ struct ToolsView: View {
             navigation.rememberToolPage()
             navigation.path.append(ToolDescriptor.query)
         }
+        .onChange(of: CollageHandoff.shared.pending?.id) {
+            // The Query tool's Collage button: the collage goes on top of the query, so Back returns to it with its results as they were.
+            guard CollageHandoff.shared.pending != nil, let collage = ToolDescriptor.all.first(where: { $0.id == .collageGenerator }) else { return }
+            navigation.path.append(collage)
+        }
         .onChange(of: overviewToolRequest) { routeOverviewTool() }
         .onChange(of: openToolRequest) { routeOpenTool() }
         .onChange(of: similarRouter.pending?.id) { routeSimilarRequest() }

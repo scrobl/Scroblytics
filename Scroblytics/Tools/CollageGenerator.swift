@@ -51,6 +51,9 @@ struct CollageItem: Identifiable, Hashable, Sendable {
     let metricValue: Int
     let imageURL: String?
     let periodLabel: String?
+    /// What the tile's badge says when it is not the plays or time of the collage's own ranking (a collage made from a query shows the
+    /// value of the column the results are sorted by). nil: the badge shows `metricValue`.
+    var valueText: String? = nil
 }
 
 struct ChartTopperEntry: Identifiable, Hashable, Sendable {

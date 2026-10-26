@@ -991,6 +991,13 @@ struct QueryView: View {
             Spacer()
             ShareButton(card: { makeShareCard() }, isEnabled: canShare)
                 .controlSize(.small)
+            if CollageQuerySource.entity(for: model.spec.target) != nil, model.validationError == nil, !model.displayRows.isEmpty {
+                Button("Collage", systemImage: "square.grid.3x3") {
+                    if let payload = makeCollage() { CollageHandoff.shared.offer(payload) }
+                }
+                .controlSize(.small)
+                .help("Make a collage of these results, in this order, in the Collage Generator")
+            }
             if model.spec.target == .track, !model.displayRows.isEmpty {
                 Button(allQueryTracksFlagged ? "All Flagged" : "Flag All", systemImage: "flag") {
                     flagAllQueryTracks()
@@ -1056,12 +1063,29 @@ struct QueryView: View {
 
     /// The results as they are listed: titled with the question put to Ask while the query still is what it asked for, otherwise the
     /// saved set's name, otherwise a description of the filters.
-    private func makeShareCard() -> ShareCard? {
-        guard canShare, let result = model.result else { return nil }
+    /// What the results answer, as a title: the question put to Ask while the query still is what it asked for, otherwise the saved set's
+    /// name, otherwise a description of the filters.
+    private var resultsTitle: String {
         let chips = AskChips.describe(model.spec, registry: model.registry)
         let filters = chips.filter { $0.kind == .condition || $0.kind == .alternative }.map(\.text)
-        let title = model.currentQuestion ?? loadedSet?.name
+        return model.currentQuestion ?? loadedSet?.name
             ?? (filters.isEmpty ? "All \(model.spec.target.rawValue)s" : filters.joined(separator: " · "))
+    }
+
+    /// The results as a collage (artists, albums and tracks, as in the Collage Generator): the rows in the order the query put them,
+    /// with the value of the column they are sorted by on each tile.
+    private func makeCollage() -> CollageQueryPayload? {
+        guard let result = model.result, model.validationError == nil else { return nil }
+        return CollageQuerySource.payload(
+            title: resultsTitle, target: model.spec.target, rows: model.displayRows, columns: result.columns,
+            sortedColumn: ShareCards.sortedColumnIndex(columns: result.columns, sorts: model.spec.sorts, target: model.spec.target, registry: model.registry),
+            entityInfo: result.entityInfo
+        )
+    }
+
+    private func makeShareCard() -> ShareCard? {
+        guard canShare, let result = model.result else { return nil }
+        let title = resultsTitle
         return ShareCards.queryResult(
             title: title, target: model.spec.target, measure: "", rows: model.displayRows, columns: result.columns,
             sortedColumn: ShareCards.sortedColumnIndex(columns: result.columns, sorts: model.spec.sorts, target: model.spec.target, registry: model.registry)

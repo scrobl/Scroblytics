@@ -180,6 +180,7 @@ struct ScroblyticsApp: App {
         ScrobbleQueryChecks.runHeadlessIfRequested(container: modelContainer)
         WeatherGapDump.runHeadlessIfRequested(container: modelContainer)
         TitleKeysDump.runHeadlessIfRequested(container: modelContainer)
+        CollageQueryChecks.runHeadlessIfRequested(container: modelContainer)
         DetailSnapshots.runHeadlessIfRequested(container: modelContainer)
         DetailDump.runHeadlessIfRequested(container: modelContainer)
         PerfChecks.runHeadlessIfRequested(container: modelContainer)

@@ -639,6 +639,36 @@ enum DetailSnapshots {
                     .frame(width: 1100, height: 900)
                     .environment(TagStore())
                 await render(collageScene, width: 1100, dark: true, container: container, settle: 25, to: base.appending(path: "collage-from-query-dark.png"))
+                // The Collage Generator made of a saved query, on the made-up plays the scenes above seeded.
+                var savedSpec = QuerySpec(target: .album)
+                savedSpec.columns = ["plays", "lastPlayed"].map { QueryFieldRef($0) }
+                savedSpec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+                savedSpec.limit = 25
+                let savedSet = SavedConditionSet(name: "Most played albums", specJSON: (try? QuerySpec.encoder().encode(savedSpec)) ?? Data())
+                let otherSet = SavedConditionSet(name: "Songs I keep coming back to", specJSON: (try? QuerySpec.encoder().encode(QueryBuilderModel.defaultSpec(target: .track))) ?? Data())
+                container.mainContext.insert(savedSet)
+                container.mainContext.insert(otherSet)
+                var collageOptions = CollageGeneratorView.Options()
+                collageOptions.source = .savedQuery
+                collageOptions.savedQueryID = savedSet.id.uuidString
+                ToolFilterSettingsStore.save(collageOptions, toolId: "collageGenerator", context: container.mainContext)
+                for (width, dark) in [(1100, true), (1100, false), (760, true), (460, true)] as [(CGFloat, Bool)] {                    let savedScene = NavigationStack { CollageGeneratorView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools)) }
+                        .frame(width: width, height: 900)
+                        .environment(TagStore())
+                        .environment(PopularityStore())
+                    await render(savedScene, width: width, dark: dark, container: container, settle: 25, to: base.appending(path: "collage-saved-query-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+                container.mainContext.delete(savedSet)
+                container.mainContext.delete(otherSet)
+                var noSavedOptions = CollageGeneratorView.Options()
+                noSavedOptions.source = .savedQuery
+                ToolFilterSettingsStore.save(noSavedOptions, toolId: "collageGenerator", context: container.mainContext)
+                let noneScene = NavigationStack { CollageGeneratorView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools)) }
+                    .frame(width: 900, height: 700)
+                    .environment(TagStore())
+                    .environment(PopularityStore())
+                await render(noneScene, width: 900, dark: true, container: container, settle: 25, to: base.appending(path: "collage-saved-query-none-dark.png"))
+                ToolFilterSettingsStore.save(CollageGeneratorView.Options(), toolId: "collageGenerator", context: container.mainContext)
                 WeatherTripStore.save([])
                 for (name, card, images) in await nativeShareCards() where name == "weathermap" {
                     for size in ShareSize.allCases {

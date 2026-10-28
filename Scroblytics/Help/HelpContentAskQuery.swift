@@ -39,7 +39,7 @@ extension HelpContent {
                 .heading("Combining conditions"),
                 .bullets([
                     "Conditions inside one **group** must **all** be true (AND). A query matches when **any** group matches (OR). With no groups, everything matches.",
-                    "Saved sets (Sets menu) store the whole query; the menu also has templates, such as Time Machine comparisons.",
+                    "Saved sets (Sets menu) store the whole query; the menu also has templates, such as Time Machine comparisons. A saved set of artists, albums or tracks can also be made into a picture in the [Collage Generator](help://tool-collage) (source **A saved query**).",
                 ]),
                 .heading("Operators by type"),
                 .table(headers: ["Type", "Operators"], rows: [

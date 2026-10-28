@@ -1,4 +1,5 @@
 #if DEBUG
+import AppKit
 import Foundation
 import SwiftData
 
@@ -99,6 +100,69 @@ enum CollageQueryChecks {
             handoff.offer(albums!)
             check("a hand-off is picked up once", handoff.pending?.id == albums?.id && handoff.take()?.id == albums?.id && handoff.take() == nil && handoff.pending == nil)
 
+            // A saved query as the collage's source.
+            @MainActor func saved(_ name: String, _ spec: QuerySpec) -> SavedConditionSet {
+                SavedConditionSet(name: name, specJSON: (try? QuerySpec.encoder().encode(spec)) ?? Data())
+            }
+            let albumSet = saved("Most played albums", spec(.album))
+            let trackSet = saved("Favorite songs", spec(.track))
+            let artistSet = saved("Artists", spec(.artist))
+            let playsSet = saved("Every play", spec(.scrobble, sort: "playedAt", columns: ["playedAt"]))
+            let damaged = SavedConditionSet(name: "Damaged", specJSON: Data("not json".utf8))
+            check("the saved queries a collage can be made of are the artist, album and track ones, by name", SavedQueryCollage.eligible([trackSet, playsSet, albumSet, damaged, artistSet]).map(\.name) == ["Artists", "Favorite songs", "Most played albums"], "\(SavedQueryCollage.eligible([trackSet, playsSet, albumSet, damaged, artistSet]).map(\.name))")
+            check("a saved query's kind is the collage's kind, and plays and a damaged one have none", SavedQueryCollage.entity(of: albumSet) == .album && SavedQueryCollage.entity(of: trackSet) == .track && SavedQueryCollage.entity(of: artistSet) == .artist && SavedQueryCollage.entity(of: playsSet) == nil && SavedQueryCollage.entity(of: damaged) == nil)
+
+            let fromSet = try? await SavedQueryCollage.payload(for: albumSet, container: container, popularity: nil, history: plays)
+            check("a saved query's tiles are exactly the rows Query lists for it, in its order, with the sorted column's value", fromSet?.items.map(\.name) == albums?.items.map(\.name) && fromSet?.items.map(\.valueText) == albums?.items.map(\.valueText) && fromSet?.items.map(\.artist) == albums?.items.map(\.artist) && fromSet?.valueLabel == "Plays", "\(String(describing: fromSet?.items.map(\.name)))")
+            check("its caption names the saved query and says it is one", fromSet?.caption.text(date: start) == "Most played albums · Saved query · Showing Plays · \(start.formatted(date: .abbreviated, time: .omitted))", "\(String(describing: fromSet?.caption.text(date: start)))")
+            let trackFromSet = try? await SavedQueryCollage.payload(for: trackSet, container: container, popularity: nil, history: plays)
+            check("a saved tracks query gives tracks with their albums", trackFromSet?.entity == .track && trackFromSet?.items.map(\.name) == tracks?.items.map(\.name) && trackFromSet?.items.first?.album == "Album X")
+            var limited = spec(.track)
+            limited.limit = 2
+            let limitedSet = try? await SavedQueryCollage.payload(for: saved("Top two", limited), container: container, popularity: nil, history: plays)
+            check("a saved query's own limit and conditions decide the rows", limitedSet?.items.map(\.name) == ["Song 1", "Song 3"] && limitedSet?.totalRows == 2, "\(String(describing: limitedSet?.items.map(\.name)))")
+            var noLimit = spec(.track)
+            noLimit.limit = nil
+            let allTracks = try? await SavedQueryCollage.payload(for: saved("All", noLimit), container: container, popularity: nil, history: plays)
+            check("with no limit every row is a result, however many the grid holds", allTracks?.totalRows == 4)
+
+            @MainActor func failure(_ set: SavedConditionSet, history: [ScrobbleSnapshot]) async -> String? {
+                do { _ = try await SavedQueryCollage.payload(for: set, container: container, popularity: nil, history: history); return nil } catch { return error.localizedDescription }
+            }
+            let playsFailure = await failure(playsSet, history: plays)
+            check("a saved query of plays is refused, saying what a collage is made of", playsFailure?.contains("artists, albums or tracks") == true && playsFailure?.contains("Every play") == true, "\(String(describing: playsFailure))")
+            let damagedFailure = await failure(damaged, history: plays)
+            check("a damaged saved query is refused by name, not shown as an empty collage", damagedFailure?.contains("“Damaged” couldn’t be opened") == true, "\(String(describing: damagedFailure))")
+            let emptyFailure = await failure(albumSet, history: [])
+            check("a saved query with no results says so instead of drawing nothing", emptyFailure?.contains("no results") == true && emptyFailure?.contains("Most played albums") == true, "\(String(describing: emptyFailure))")
+            let unfinished = QueryResult(rows: [], columns: [], matchedCount: 0, universeCount: 0, pending: [(field: "Tempo", count: 3, resolver: .bpm)], pendingEntities: [:], entityInfo: [:])
+            check("values still being looked up are flagged so a missing row is not mistaken for no match", SavedQueryCollage.pendingNote(unfinished)?.contains("haven’t been looked up") == true && SavedQueryCollage.pendingNote(QueryResult(rows: [], columns: [], matchedCount: 0, universeCount: 0, pending: [], pendingEntities: [:], entityInfo: [:])) == nil)
+
+            // The tool's saved options: the new source and choice round-trip, and options saved before them still load.
+            var chosen = CollageGeneratorView.Options()
+            chosen.source = .savedQuery
+            chosen.savedQueryID = albumSet.id.uuidString
+            let roundTrip = (try? JSONEncoder().encode(chosen)).flatMap { try? JSONDecoder().decode(CollageGeneratorView.Options.self, from: $0) }
+            check("the saved-query source and its choice are remembered", roundTrip == chosen && roundTrip?.source == .savedQuery && roundTrip?.savedQueryID == albumSet.id.uuidString)
+            let old = #"{"grid":"3 × 3","source":"top","entityRawValue":"album","metricRawValue":"scrobbles","period":"year","rangeID":"last365","customFrom":0,"customTo":0,"showTitles":true,"showStats":true,"showPeriod":true}"#
+            let oldDecoded = (try? JSONDecoder().decode(CollageGeneratorView.Options.self, from: Data(old.utf8)))
+            check("options saved before the saved-query source still load, with no query chosen", oldDecoded != nil && oldDecoded?.savedQueryID == nil && oldDecoded?.source == .top, "\(String(describing: oldDecoded))")
+            check("the source is offered as “A saved query”", CollageSource.allCases.map(\.label) == ["Top items", "One per release period", "A saved query"])
+
+            // The line under the collage: typed text replaces the automatic caption, blank keeps it.
+            let auto = "Top Albums · Last 365 days"
+            check("typed text is the line under the collage, whether or not the automatic caption is on", CollageFooter.details(typed: "My year in albums", automatic: auto, showsAutomatic: false) == "My year in albums" && CollageFooter.details(typed: "My year in albums", automatic: auto, showsAutomatic: true) == "My year in albums")
+            check("a blank or spaces-only caption keeps the automatic line when it is on, and nothing when it is off", CollageFooter.details(typed: "", automatic: auto, showsAutomatic: true) == auto && CollageFooter.details(typed: "  \n ", automatic: auto, showsAutomatic: true) == auto && CollageFooter.details(typed: "   ", automatic: auto, showsAutomatic: false) == nil)
+            check("typed text is trimmed and kept to one line's worth", CollageFooter.details(typed: "  hello  ", automatic: auto, showsAutomatic: false) == "hello" && CollageFooter.details(typed: String(repeating: "a", count: 500), automatic: auto, showsAutomatic: false)?.count == CollageFooter.customCaptionLimit)
+            let typedFooter = CollageFooter(details: CollageFooter.details(typed: "Mine", automatic: auto, showsAutomatic: false), identity: .anonymous)
+            check("a typed caption alone makes the strip, so the collage is taller by exactly the strip", !typedFooter.isEmpty && CollageCanvas.heightRatio(grid: .three, footer: typedFooter) > CollageCanvas.heightRatio(grid: .three, footer: .none) && CollageFooter(details: CollageFooter.details(typed: " ", automatic: auto, showsAutomatic: false), identity: .anonymous).isEmpty)
+            let typedPNG = CollageGeneratorView.renderPNG(items: albums?.items ?? [], images: [:], grid: .three, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: true, footer: typedFooter)
+            let plainPNG = CollageGeneratorView.renderPNG(items: albums?.items ?? [], images: [:], grid: .three, metric: .scrobbles, showTitles: true, showStats: true, showPeriod: true, footer: .none)
+            if let out = ProcessInfo.processInfo.environment["SCROBLYTICS_COLLAGEQUERY_PNG"], let typedPNG { try? typedPNG.write(to: URL(fileURLWithPath: out)) }
+            let typedSize = typedPNG.flatMap { NSBitmapImageRep(data: $0) }.map { ($0.pixelsWide, $0.pixelsHigh) }
+            let plainSize = plainPNG.flatMap { NSBitmapImageRep(data: $0) }.map { ($0.pixelsWide, $0.pixelsHigh) }
+            check("a saved collage with a typed caption has the strip: the same width and a taller picture than without it", typedSize != nil && plainSize != nil && typedSize!.0 == plainSize!.0 && typedSize!.1 > plainSize!.1, "\(String(describing: typedSize)) vs \(String(describing: plainSize))")
+
             // A copy of a real library: the top albums against an independent recount.
             let history = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
             if history.count > 1000 {
@@ -115,6 +179,8 @@ enum CollageQueryChecks {
                     return counted.map { String($0) } == item.valueText?.replacingOccurrences(of: ",", with: "")
                 } == true)
                 check("real library: that many rows fill a 5 × 5 grid", real.map { CollageQuerySource.suggestedGrid(count: $0.items.count) } == .five)
+                let realSaved = try? await SavedQueryCollage.payload(for: saved("Top albums", top), container: container, popularity: nil)
+                check("real library: the same query saved and run here gives the same 25 tiles in the same order", realSaved?.items.map(\.valueText) == real?.items.map(\.valueText) && realSaved?.items.map(\.name) == real?.items.map(\.name) && realSaved?.items.count == 25, "\(String(describing: realSaved?.items.prefix(3).map(\.name)))")
             } else {
                 print("      (no library copy here: the real-data cross-check was skipped)")
             }

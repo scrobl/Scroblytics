@@ -4,12 +4,15 @@ import SwiftData
 enum CollageSource: String, Codable, CaseIterable, Identifiable {
     case top
     case period
+    /// The rows of a query saved in Query, in the order it puts them.
+    case savedQuery
 
     var id: Self { self }
     var label: String {
         switch self {
         case .top: "Top items"
         case .period: "One per release period"
+        case .savedQuery: "A saved query"
         }
     }
 }

@@ -16,6 +16,8 @@ struct CollageGeneratorView: View {
         var showTitles = true
         var showStats = true
         var showPeriod = true
+        /// The saved query (`SavedConditionSet.id`) the "A saved query" source makes the collage of. Optional, so options saved before it decode.
+        var savedQueryID: String?
     }
 
     private static let toolID = "collageGenerator"
@@ -36,30 +38,53 @@ struct CollageGeneratorView: View {
     @State private var zoom = 1.0
     /// Set when the collage is made from a Query's results (the Query tool's Collage button) instead of the tool's own choices.
     @State private var queryPayload: CollageQueryPayload?
+    /// The rows of the chosen saved query, while the source is "A saved query".
+    @State private var savedPayload: CollageQueryPayload?
+    /// The saved query's rows from its last run here, so changing the layout (or anything else that reloads) doesn't run it again.
+    /// Refresh, and a finished sync, drop it.
+    @State private var savedCache: (id: UUID, stamp: Date, payload: CollageQueryPayload)?
+    /// Set when the person picks a saved query, so the grid is sized to its rows once they are known.
+    @State private var suggestGridOnLoad = false
+    @Query(sort: \SavedConditionSet.name) private var savedSets: [SavedConditionSet]
+    @Environment(PopularityStore.self) private var popularityStore
     @State private var accountName: String?
     @State private var avatar: Data?
     /// The caption under the collage (what it shows and when) and the two identity lines. Kept in the app's preferences, not in the
     /// saved tool options, so options saved by earlier versions still load. The two identity switches are the Share popover's.
     @AppStorage("collage.showsDetails") private var showsDetails = false
+    /// A line the person types for under the collage, in place of the automatic one. Per collage, like the Share sheets' typed title: not remembered.
+    @State private var customCaption = ""
     @AppStorage(ShareSettings.showsNameKey) private var showsName = false
     @AppStorage(ShareSettings.showsAvatarKey) private var showsAvatar = false
     @AppStorage(ShareSettings.showsFooterKey) private var showsTag = false
     @AppStorage(ShareSettings.logoKey) private var logoRaw = LastfmLogoStyle.circle.rawValue
 
-    private var entity: TopChartsEntity {
-        queryPayload?.entity ?? TopChartsEntity(rawValue: options.entityRawValue) ?? .album
+    /// The query rows the collage is made of, when it is made of a query's: handed over from Query, or the chosen saved query's.
+    private var activePayload: CollageQueryPayload? {
+        queryPayload ?? (options.source == .savedQuery ? savedPayload : nil)
     }
+
+    private var entity: TopChartsEntity {
+        activePayload?.entity ?? TopChartsEntity(rawValue: options.entityRawValue) ?? .album
+    }
+
+    private var eligibleSets: [SavedConditionSet] { SavedQueryCollage.eligible(savedSets) }
 
     private var metric: TopChartsMetric {
         TopChartsMetric(rawValue: options.metricRawValue) ?? .scrobbles
     }
 
+    /// What the automatic caption under the collage says ("Top Albums · Last 365 days · Ranked by scrobbles · today's date").
+    private var automaticCaption: String {
+        (activePayload?.caption ?? CollageCaption.make(
+            source: options.source, entity: entity, metric: metric, period: options.period, rangeLabel: rangeLabel
+        )).text(date: Date())
+    }
+
     /// What the caption under the collage says, from the current choices.
     private var footer: CollageFooter {
         CollageFooter(
-            details: showsDetails ? (queryPayload?.caption ?? CollageCaption.make(
-                source: options.source, entity: entity, metric: metric, period: options.period, rangeLabel: rangeLabel
-            )).text(date: Date()) : nil,
+            details: CollageFooter.details(typed: customCaption, automatic: automaticCaption, showsAutomatic: showsDetails),
             identity: ShareIdentity(name: showsName ? accountName : nil, showsFooter: showsTag, logo: LastfmLogoStyle(rawValue: logoRaw) ?? .circle, avatar: showsName && showsAvatar ? avatar : nil)
         )
     }
@@ -99,10 +124,13 @@ struct CollageGeneratorView: View {
                         customFrom: $options.customFrom,
                         customTo: $options.customTo,
                         rangeOptions: rangeOptions,
+                        savedQueryID: $options.savedQueryID,
+                        savedQueries: eligibleSets.map { SavedQueryChoice(id: $0.id.uuidString, name: $0.name, entity: SavedQueryCollage.entity(of: $0)) },
+                        savedNote: savedPayload.flatMap { options.source == .savedQuery ? savedNote($0) : nil },
                         isLoading: isLoading,
                         fromQuery: queryPayload.map { FromQuery(title: $0.title, shown: min($0.items.count, options.grid.tileCount), total: $0.totalRows) },
                         onUseTopItems: { queryPayload = nil; Task { await reload() } },
-                        onRefresh: { Task { await reload() } }
+                        onRefresh: { savedCache = nil; Task { await reload() } }
                     )
                 }
 
@@ -115,11 +143,13 @@ struct CollageGeneratorView: View {
                     showStats: $options.showStats,
                     showPeriod: $options.showPeriod,
                     showsDetails: $showsDetails,
+                    customCaption: $customCaption,
+                    automaticCaption: showsDetails ? automaticCaption : nil,
                     showsName: $showsName,
                     showsAvatar: $showsAvatar,
                     showsTag: $showsTag,
                     accountName: accountName,
-                    periodAvailable: options.source == .period || (queryPayload?.hasPeriodLabels ?? false),
+                    periodAvailable: options.source == .period || (activePayload?.hasPeriodLabels ?? false),
                     zoom: $zoom,
                     canExport: !items.isEmpty && !isLoading && !isExporting,
                     isExporting: isExporting,
@@ -157,14 +187,18 @@ struct CollageGeneratorView: View {
         }
         .task {
             for await _ in NotificationCenter.default.notifications(named: .scrobbleSyncDidComplete) {
+                savedCache = nil
                 await reload()
             }
         }
         .onChange(of: showsName) { Task { await refreshAvatar() } }
         .onChange(of: showsAvatar) { Task { await refreshAvatar() } }
-        .onChange(of: options) { _, newValue in
+        .onChange(of: options) { oldValue, newValue in
             guard hasLoadedOptions else { return }
             ToolFilterSettingsStore.save(newValue, toolId: Self.toolID, context: modelContext)
+            if newValue.source == .savedQuery, oldValue.source != .savedQuery || oldValue.savedQueryID != newValue.savedQueryID {
+                suggestGridOnLoad = true
+            }
             Task { await reload() }
         }
     }
@@ -254,6 +288,7 @@ struct CollageGeneratorView: View {
     }
 
     private var emptyDescription: String {
+        if options.source == .savedQuery { return "That saved query has no results to show." }
         if options.source == .period {
             return "This view needs resolved release dates. Try another entity or period, or resolve missing dates in Missing Data."
         }
@@ -268,6 +303,8 @@ struct CollageGeneratorView: View {
             let loaded: [CollageItem]
             if let queryPayload {
                 loaded = Array(queryPayload.items.prefix(options.grid.tileCount))
+            } else if options.source == .savedQuery {
+                loaded = try await loadSavedQuery()
             } else if options.source == .top {
                 let entries = try await TopChartsEngine.fetchRankings(
                     container: modelContainer,
@@ -301,10 +338,44 @@ struct CollageGeneratorView: View {
             images = await loadImages(for: loaded)
         } catch {
             errorMessage = error.localizedDescription
+            if options.source == .savedQuery { savedPayload = nil }
             items = []
             images = [:]
         }
         isLoading = false
+    }
+
+    /// Runs the chosen saved query and returns the rows it fills the grid with. Nothing chosen (or the chosen one gone) picks the first
+    /// one that can be made into a collage; none at all is said plainly rather than shown as an empty collage.
+    @MainActor
+    private func loadSavedQuery() async throws -> [CollageItem] {
+        savedPayload = nil
+        let sets = eligibleSets
+        guard !sets.isEmpty else { throw SavedQueryCollageNotice.noneSaved }
+        let chosen = sets.first { $0.id.uuidString == options.savedQueryID } ?? sets[0]
+        let payload: CollageQueryPayload
+        if let cache = savedCache, cache.id == chosen.id, cache.stamp == chosen.updatedAt {
+            payload = cache.payload
+        } else {
+            payload = try await SavedQueryCollage.payload(for: chosen, container: modelContainer, popularity: popularityStore)
+            savedCache = (chosen.id, chosen.updatedAt, payload)
+        }
+        savedPayload = payload
+        if suggestGridOnLoad {
+            // The change this makes reloads once more, from the cache.
+            suggestGridOnLoad = false
+            options.grid = CollageQuerySource.suggestedGrid(count: payload.items.count)
+        }
+        return Array(payload.items.prefix(options.grid.tileCount))
+    }
+
+    /// The line under the controls about a saved query's rows: how many fit, and a warning if lookups were unfinished.
+    private func savedNote(_ payload: CollageQueryPayload) -> String {
+        let shown = min(payload.items.count, options.grid.tileCount)
+        let count = payload.totalRows > shown
+            ? "\(payload.entity.displayName): the first \(shown.formatted()) of \(payload.totalRows.formatted()) results, in the order the query puts them."
+            : "\(payload.entity.displayName): all \(payload.totalRows.formatted()) results, in the order the query puts them."
+        return [count, payload.pendingNote].compactMap { $0 }.joined(separator: " ")
     }
 
     /// Makes the collage from a Query's results, in a grid just big enough for them (change it if you like).
@@ -433,6 +504,19 @@ struct CollageGeneratorView: View {
 }
 
 /// What the collage tool says about the query a collage was made from.
+/// One saved query the collage can be made of.
+private struct SavedQueryChoice: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var entity: TopChartsEntity?
+}
+
+/// Said when the "A saved query" source has nothing to run.
+private enum SavedQueryCollageNotice: LocalizedError {
+    case noneSaved
+    var errorDescription: String? { "There is no saved query of artists, albums or tracks yet. Build one in Query and choose Save, then pick it here." }
+}
+
 private struct FromQuery: Equatable {
     var title: String
     var shown: Int
@@ -449,6 +533,9 @@ private struct CollagePrimaryControls: View {
     @Binding var customFrom: Date
     @Binding var customTo: Date
     let rangeOptions: [DateRangeOption]
+    @Binding var savedQueryID: String?
+    let savedQueries: [SavedQueryChoice]
+    let savedNote: String?
     let isLoading: Bool
     let fromQuery: FromQuery?
     let onUseTopItems: () -> Void
@@ -502,17 +589,28 @@ private struct CollagePrimaryControls: View {
                     ForEach(CollageSource.allCases) { Text($0.label).tag($0) }
                 }
             }
-            labeled("Content") {
-                Picker("Content", selection: $entityRawValue) {
-                    ForEach(TopChartsEntity.allCases) { Text($0.displayName).tag($0.rawValue) }
+            if source == .savedQuery {
+                labeled("Saved query") {
+                    Picker("Saved query", selection: Binding(get: { savedQueryID ?? savedQueries.first?.id ?? "" }, set: { savedQueryID = $0 })) {
+                        ForEach(savedQueries) { Text($0.name).tag($0.id) }
+                    }
+                    .disabled(savedQueries.isEmpty)
+                }
+            } else {
+                labeled("Content") {
+                    Picker("Content", selection: $entityRawValue) {
+                        ForEach(TopChartsEntity.allCases) { Text($0.displayName).tag($0.rawValue) }
+                    }
+                }
+                labeled("Rank by") {
+                    Picker("Rank by", selection: $metricRawValue) {
+                        ForEach(TopChartsMetric.allCases) { Text($0.displayName).tag($0.rawValue) }
+                    }
                 }
             }
-            labeled("Rank by") {
-                Picker("Rank by", selection: $metricRawValue) {
-                    ForEach(TopChartsMetric.allCases) { Text($0.displayName).tag($0.rawValue) }
-                }
-            }
-            if source == .top {
+            if source == .savedQuery {
+                EmptyView()
+            } else if source == .top {
                 labeled("Listening period") {
                     Picker("Listening period", selection: $rangeID) {
                         ForEach(rangeOptions) { Text($0.label).tag($0.id) }
@@ -537,10 +635,18 @@ private struct CollagePrimaryControls: View {
             .fixedSize()
         }
 
-        Button(action: onRefresh) {
-            Label("Refresh", systemImage: "arrow.clockwise")
+        VStack(alignment: .leading, spacing: 8) {
+            if source == .savedQuery {
+                Text(savedQueries.isEmpty
+                     ? "No saved query of artists, albums or tracks yet. Build one in Query and choose Save, then come back."
+                     : (savedNote ?? "The saved query’s results, in the order Query puts them, with the value of the column they are sorted by on each tile."))
+                    .font(AppTypography.supporting).foregroundStyle(.secondary)
+            }
+            Button(action: onRefresh) {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .disabled(isLoading)
         }
-        .disabled(isLoading)
     }
 
     private func labeled<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -556,6 +662,9 @@ private struct CollageDisplayControls: View {
     @Binding var showStats: Bool
     @Binding var showPeriod: Bool
     @Binding var showsDetails: Bool
+    @Binding var customCaption: String
+    /// The automatic caption, when it is on: what a blank Caption field falls back to.
+    let automaticCaption: String?
     @Binding var showsName: Bool
     @Binding var showsAvatar: Bool
     @Binding var showsTag: Bool
@@ -568,24 +677,31 @@ private struct CollageDisplayControls: View {
     let onCopy: () -> Void
     let shareImage: ShareCardImage
 
+    /// The card runs the width of the window: the choices fill rows and wrap onto more when the window is narrow, and the three
+    /// buttons that make the picture are always a row of their own below them.
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) { controls }
-            VStack(alignment: .leading, spacing: 12) { controls }
+        VStack(alignment: .leading, spacing: 14) {
+            CollageWrappingRow(spacing: 16) { options }
+            HStack(spacing: 12) { actions }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).stroke(.separator.opacity(0.45)) }
     }
 
     @ViewBuilder
-    private var controls: some View {
+    private var options: some View {
         Toggle("Titles", isOn: $showTitles)
         Toggle("Stats", isOn: $showStats)
         Toggle("Period labels", isOn: $showPeriod)
             .disabled(!periodAvailable)
         Toggle("What and when", isOn: $showsDetails)
             .help("A caption under the collage: what it shows, the period and today’s date")
+        TextField("Caption", text: $customCaption, prompt: Text(automaticCaption ?? "Add a line under the collage"))
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 200, idealWidth: 300, maxWidth: 360)
+            .help("Your own line under the collage, in place of “What and when”. Leave it blank to use the automatic one (if it is on).")
         Toggle("My Last.fm name", isOn: $showsName)
             .disabled(accountName == nil)
             .help(accountName.map { "Adds “\($0)” under the collage" } ?? "No Last.fm account is saved")
@@ -612,7 +728,10 @@ private struct CollageDisplayControls: View {
                 .help("Zoom to fit the window")
         }
         .fixedSize(horizontal: true, vertical: false)
-        Spacer(minLength: 0)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
         Button(action: onExport) {
             if isExporting {
                 ProgressView().controlSize(.small)
@@ -631,6 +750,47 @@ private struct CollageDisplayControls: View {
             Label("Share…", systemImage: "square.and.arrow.up")
         }
         .disabled(!canExport)
+    }
+}
+
+/// Lays its children out left to right, starting a new row when the next one would not fit, with each row's children centered on the
+/// row's height (a checkbox, a text field and a slider differ in height).
+private struct CollageWrappingRow: Layout {
+    var spacing: CGFloat = 12
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(width: proposal.width ?? .infinity, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arranged = arrange(width: bounds.width, subviews: subviews)
+        for (index, frame) in arranged.frames.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        var rows: [[Int]] = [[]]
+        var x: CGFloat = 0
+        for (index, size) in sizes.enumerated() {
+            if x > 0, x + size.width > width { rows.append([]); x = 0 }
+            rows[rows.count - 1].append(index)
+            x += size.width + spacing
+        }
+        var frames = [CGRect](repeating: .zero, count: sizes.count)
+        var y: CGFloat = 0, widest: CGFloat = 0
+        for row in rows where !row.isEmpty {
+            let height = row.map { sizes[$0].height }.max() ?? 0
+            var left: CGFloat = 0
+            for index in row {
+                frames[index] = CGRect(x: left, y: y + (height - sizes[index].height) / 2, width: sizes[index].width, height: sizes[index].height)
+                left += sizes[index].width + spacing
+            }
+            widest = max(widest, left - spacing)
+            y += height + spacing
+        }
+        return (CGSize(width: widest, height: max(0, y - spacing)), frames)
     }
 }
 
@@ -808,6 +968,16 @@ struct CollageFooter: Equatable {
 
     static let none = CollageFooter(details: nil, identity: .anonymous)
 
+    /// The longest line a typed caption can be (the strip is one line, shrunk to fit; more would only be cut).
+    static let customCaptionLimit = 200
+
+    /// The line under the collage: what the person typed (trimmed, cut to `customCaptionLimit`), else the automatic caption when it is on, else none.
+    static func details(typed: String, automatic: String, showsAutomatic: Bool) -> String? {
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { return String(text.prefix(customCaptionLimit)) }
+        return showsAutomatic ? automatic : nil
+    }
+
     var isEmpty: Bool { details == nil && !ShareCardFooter.isShown(identity) }
 }
 
@@ -824,6 +994,9 @@ struct CollageCaption: Equatable {
             return CollageCaption(title: "Top \(entity.displayName)", period: rangeLabel, measure: measure)
         case .period:
             return CollageCaption(title: "Top \(entity.displayName)", period: "One favorite per release \(period.rawValue)", measure: measure)
+        case .savedQuery:
+            // A saved query's own caption comes with its rows (`CollageQueryPayload.caption`); this is only the fallback before they load.
+            return CollageCaption(title: entity.displayName, period: "Saved query", measure: "")
         }
     }
 

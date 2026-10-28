@@ -51,6 +51,22 @@ enum OverviewChecks {
                       }
                   })
 
+            // The picture on an album-turnover row: the person's own artwork, then the detected cover, then the scrobbles' own.
+            let placeholder = "https://lastfm.example/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562f.png"
+            let scrobbleCover = "https://lastfm.example/i/u/300x300/aaaa.jpg"
+            let customURL = "file:///custom/album-one.png", detectedURL = "file:///cache/album-one.png"
+            let detectedKey = ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .album, artist: "Artist A", album: "Album One", track: nil))
+            let customKey = ImageResolutionEngine.customAlbumLookupKey(artist: "Artist A", album: "Album One")
+            @MainActor func picture(_ lookup: [String: String], scrobble: String?) -> String? {
+                AlbumTurnoverEngine.effectiveImageURL(artist: "Artist A", album: "Album One", scrobbleImageURL: scrobble, imageLookup: lookup)
+            }
+            check("the person's own artwork wins over the detected cover and the scrobbles' cover", picture([customKey: customURL, detectedKey: detectedURL], scrobble: scrobbleCover) == customURL)
+            check("with only the album's own artwork row (custom on the album), that is shown", picture([detectedKey: customURL], scrobble: placeholder) == customURL)
+            check("a detected cover wins over the scrobbles' cover", picture([detectedKey: detectedURL], scrobble: scrobbleCover) == detectedURL)
+            check("the scrobbles' own cover is the last resort", picture([:], scrobble: scrobbleCover) == scrobbleCover)
+            check("Last.fm's blank placeholder is never shown, so an album with nothing else has no picture (the app's own placeholder)", picture([:], scrobble: placeholder) == nil && picture([:], scrobble: nil) == nil)
+            check("custom artwork is for that album alone", picture([ImageResolutionEngine.customAlbumLookupKey(artist: "Artist A", album: "Album Two"): customURL], scrobble: placeholder) == nil)
+
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

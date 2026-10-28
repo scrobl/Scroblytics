@@ -707,7 +707,9 @@ struct OverviewView: View {
         Task {
             let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
             if let turnovers = try? await AlbumTurnoverEngine.fetchRankings(context: modelContext, client: client) {
-                albumTurnoverEntries = OverviewRandomSample.pickThree(from: AlbumTurnoverEngine.overviewCandidates(from: turnovers))
+                let container = modelContext.container
+                let imageLookup = (try? await TopChartsEngine.artworkLookup(container: container)) ?? [:]
+                albumTurnoverEntries = OverviewRandomSample.pickThree(from: AlbumTurnoverEngine.overviewCandidates(from: turnovers, imageLookup: imageLookup))
             } else {
                 albumTurnoverEntries = []
             }

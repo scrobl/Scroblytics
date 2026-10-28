@@ -265,6 +265,12 @@ private actor TopChartsDataReader {
 /// sampler. This/Prev/Move/Peak only need a second ranking pass over
 /// already-available local scrobble data.
 enum TopChartsEngine {
+    /// The library's artwork index (the person's own artwork first, then the detected cover, for each artist and album), read off the main
+    /// actor, for a list that is not Top Charts but should show the same picture for the same item.
+    static func artworkLookup(container: ModelContainer) async throws -> [String: String] {
+        try await offMain { try await TopChartsDataReader(modelContainer: container).fetchPresentationLookups(includeLoved: false).1 }
+    }
+
     private struct PoolCacheValue {
         let current: [RankableScrobble]
         let compare: [RankableScrobble]?

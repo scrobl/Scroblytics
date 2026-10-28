@@ -42,6 +42,8 @@ struct AlbumTurnoversView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var options = defaultOptions
     @State private var turnovers: [AlbumTurnoverEngine.AlbumTurnover] = []
+    /// The library's artwork index, so a row shows the person's own artwork when they set one (and the detected cover before the scrobble's).
+    @State private var imageLookup: [String: String] = [:]
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var hasLoadedOptions = false
@@ -124,6 +126,11 @@ struct AlbumTurnoversView: View {
                 await reload(using: options)
             }
         }
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: .imageDidChange) {
+                await reloadImages()
+            }
+        }
         .onChange(of: options) { oldValue, newValue in
             guard hasLoadedOptions else { return }
             ToolFilterSettingsStore.save(newValue, toolId: Self.toolID, context: modelContext)
@@ -156,7 +163,7 @@ struct AlbumTurnoversView: View {
         } else {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(visibleTurnovers, id: \.groupKey) { turnover in
-                    AlbumTurnoverRow(turnover: turnover) {
+                    AlbumTurnoverRow(turnover: turnover, imageURL: AlbumTurnoverEngine.effectiveImageURL(for: turnover, imageLookup: imageLookup)) {
                         navigation.goToAlbum(AlbumIdentity(artist: turnover.artist, name: turnover.album))
                     }
                 }
@@ -203,10 +210,18 @@ struct AlbumTurnoversView: View {
             guard requestedOptions.includeCompilations == options.includeCompilations,
                   requestedOptions.candidateLimit == options.candidateLimit else { return }
             turnovers = loaded
+            await reloadImages()
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private func reloadImages() async {
+        let container = modelContainer
+        if let lookup = try? await TopChartsEngine.artworkLookup(container: container) {
+            imageLookup = lookup
+        }
     }
 
     private static func sorted(
@@ -373,6 +388,8 @@ private struct AlbumTurnoversStatus: View {
 
 private struct AlbumTurnoverRow: View {
     let turnover: AlbumTurnoverEngine.AlbumTurnover
+    /// The picture to show: the person's own artwork, else the detected cover, else the scrobbles'.
+    let imageURL: String?
     let onOpen: () -> Void
 
     @State private var expanded = false
@@ -393,12 +410,12 @@ private struct AlbumTurnoverRow: View {
             .buttonStyle(.plain)
             .entityContextMenu(
                 target: ImageTarget(kind: .album, artist: turnover.artist, album: turnover.album, track: nil),
-                currentImageURL: turnover.imageURL,
+                currentImageURL: imageURL,
                 onOpen: onOpen
             )
 
             if expanded {
-                AlbumTurnoverTrackList(turnover: turnover)
+                AlbumTurnoverTrackList(turnover: turnover, imageURL: imageURL)
                     .padding(.leading, 56)
                     .padding(.trailing, 12)
                     .padding(.bottom, 10)
@@ -438,7 +455,7 @@ private struct AlbumTurnoverRow: View {
     }
 
     private var artwork: some View {
-        EntityThumbnail(url: turnover.imageURL, entity: .album)
+        EntityThumbnail(url: imageURL, entity: .album)
             .frame(width: 42, height: 42)
     }
 
@@ -500,6 +517,7 @@ private struct AlbumTurnoverRow: View {
 
 private struct AlbumTurnoverTrackList: View {
     let turnover: AlbumTurnoverEngine.AlbumTurnover
+    let imageURL: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -545,7 +563,7 @@ private struct AlbumTurnoverTrackList: View {
                         album: turnover.album,
                         track: track.title
                     ),
-                    currentImageURL: turnover.imageURL
+                    currentImageURL: imageURL
                 )
             }
         }

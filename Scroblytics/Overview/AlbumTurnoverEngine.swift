@@ -981,13 +981,28 @@ enum AlbumTurnoverEngine {
     /// Overview-card-specific filter — mirrors `AlbumTurnoversCard`'s "1 or 2
     /// tracks away from completing the current cycle" rule (the same "Only
     /// show albums close to turnover" filter as the Album Turnover tool).
-    /// Custom image overrides/popularity flags are still deferred — not
-    /// built anywhere else either — but the plain locally-known
-    /// artwork (from the album's own scrobbles) isn't, so it's used here.
-    static func overviewCandidates(from turnovers: [AlbumTurnover]) -> [AlbumTurnoverOverviewEntry] {
+    /// The picture on each is the person's own artwork when they set one, else the detected cover, else the album's own scrobbles'
+    /// (`imageLookup` is the library's artwork index, the one Top Charts reads).
+    static func overviewCandidates(from turnovers: [AlbumTurnover], imageLookup: [String: String] = [:]) -> [AlbumTurnoverOverviewEntry] {
         turnovers
             .filter { !$0.inProgressMissing.isEmpty && $0.inProgressMissing.count <= 2 }
-            .map { AlbumTurnoverOverviewEntry(id: $0.groupKey, artist: $0.artist, album: $0.album, missingCount: $0.inProgressMissing.count, imageURL: $0.imageURL) }
+            .map {
+                AlbumTurnoverOverviewEntry(
+                    id: $0.groupKey, artist: $0.artist, album: $0.album, missingCount: $0.inProgressMissing.count,
+                    imageURL: effectiveImageURL(for: $0, imageLookup: imageLookup)
+                )
+            }
+    }
+
+    /// The picture to show for an album's turnover: custom artwork, then the detected cover, then the album's own scrobbles'.
+    static func effectiveImageURL(for turnover: AlbumTurnover, imageLookup: [String: String]) -> String? {
+        effectiveImageURL(artist: turnover.artist, album: turnover.album, scrobbleImageURL: turnover.imageURL, imageLookup: imageLookup)
+    }
+
+    static func effectiveImageURL(artist: String, album: String, scrobbleImageURL: String?, imageLookup: [String: String]) -> String? {
+        ImageResolutionEngine.effectiveImageURL(
+            for: ImageTarget(kind: .album, artist: artist, album: album, track: nil), lookup: imageLookup, fallbackURL: scrobbleImageURL
+        )
     }
 
     // MARK: - Overview totals "N turned over" stat

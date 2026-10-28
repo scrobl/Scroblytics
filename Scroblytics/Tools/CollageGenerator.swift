@@ -105,6 +105,7 @@ actor ChartToppersReader {
         let releaseDates = ReleaseDateEngine.loadSnapshot(context: modelContext)
         let imageLookup = try ImageResolutionEngine.imageLookup(context: modelContext)
         let lovedKeys = LovedTracksEngine.lovedSet(context: modelContext)
+        let separateEditions = AlbumTurnoverEngine.separateEditionKeys(context: modelContext)
         let flaggedKeys = Set(
             (try modelContext.fetch(FetchDescriptor<FlaggedTrack>())).map {
                 TextNormalization.lovedKey(artist: $0.artist, track: $0.track)
@@ -121,7 +122,8 @@ actor ChartToppersReader {
             releaseDates: releaseDates,
             imageLookup: imageLookup,
             lovedKeys: lovedKeys,
-            flaggedKeys: flaggedKeys
+            flaggedKeys: flaggedKeys,
+            separateEditions: separateEditions
         )
     }
 }
@@ -148,7 +150,8 @@ actor CollagePeriodReader {
             limit: limit,
             durations: durations,
             releaseDates: releaseDates,
-            imageLookup: imageLookup
+            imageLookup: imageLookup,
+            separateEditions: AlbumTurnoverEngine.separateEditionKeys(context: modelContext)
         )
     }
 }
@@ -168,6 +171,10 @@ enum CollagePeriodEngine {
         var firstPlayedAt: Date
         var fallbackImageURL: String?
         var representativeTracks: [String: RepresentativeTrack]
+        /// For an album: how many plays each name the album was scrobbled under has (editions counted together have several).
+        var albumNames: [String: Int] = [:]
+        /// An edition counted on its own keeps its own exact name.
+        var isSeparateEdition = false
     }
 
     private struct RepresentativeTrack {
@@ -187,7 +194,8 @@ enum CollagePeriodEngine {
         limit: Int,
         durations: [String: Int],
         releaseDates: ReleaseDateEngine.Snapshot,
-        imageLookup: [String: String]
+        imageLookup: [String: String],
+        separateEditions: Set<String> = []
     ) -> [CollageItem] {
         rankPeriods(
             scrobbles,
@@ -200,7 +208,8 @@ enum CollagePeriodEngine {
             releaseDates: releaseDates,
             imageLookup: imageLookup,
             lovedKeys: [],
-            flaggedKeys: []
+            flaggedKeys: [],
+            separateEditions: separateEditions
         )
         .prefix(limit)
         .compactMap { period in
@@ -228,7 +237,8 @@ enum CollagePeriodEngine {
         releaseDates: ReleaseDateEngine.Snapshot,
         imageLookup: [String: String],
         lovedKeys: Set<String>,
-        flaggedKeys: Set<String>
+        flaggedKeys: Set<String>,
+        separateEditions: Set<String> = []
     ) -> [ChartTopperPeriod] {
         var aggregates: [BucketKey: Aggregate] = [:]
 
@@ -237,11 +247,12 @@ enum CollagePeriodEngine {
                   let date = ReleaseDateEngine.periodStart(of: releaseDate),
                   let periodStart = bucketStart(date, period: period) else { continue }
 
-            let identity = identity(for: row, entity: entity)
+            let identity = identity(for: row, entity: entity, separateEditions: separateEditions)
             let key = BucketKey(periodStart: periodStart, entityKey: identity.key)
             let seconds = durations[DurationEngine.cacheKey(artist: row.artistName, track: row.trackName), default: 0]
             let representativeKey = TextNormalization.lovedKey(artist: row.artistName, track: row.trackName)
             if var value = aggregates[key] {
+                if entity == .album { value.albumNames[row.albumName, default: 0] += 1 }
                 value.count += 1
                 value.seconds += seconds
                 value.firstPlayedAt = min(value.firstPlayedAt, row.playedAt)
@@ -281,8 +292,20 @@ enum CollagePeriodEngine {
                             seconds: seconds,
                             lastPlayedAt: row.playedAt
                         )
-                    ]
+                    ],
+                    albumNames: entity == .album ? [row.albumName: 1] : [:],
+                    isSeparateEdition: identity.separate
                 )
+            }
+        }
+
+        // Editions counted together are shown under their plain name (one that was scrobbled, else the most played), not under whichever
+        // happened to be played first; an edition counted on its own keeps its own.
+        if entity == .album {
+            for (key, value) in aggregates where !value.isSeparateEdition && value.albumNames.count > 1 {
+                guard let name = TextNormalization.preferredAlbumName(value.albumNames) else { continue }
+                aggregates[key]?.name = name
+                aggregates[key]?.album = name
             }
         }
 
@@ -365,22 +388,30 @@ enum CollagePeriodEngine {
 
     private nonisolated static func identity(
         for row: ScrobbleSnapshot,
-        entity: TopChartsEntity
-    ) -> (key: String, name: String, album: String?) {
+        entity: TopChartsEntity,
+        separateEditions: Set<String>
+    ) -> (key: String, name: String, album: String?, separate: Bool) {
         switch entity {
         case .artist:
-            return (TextNormalization.artistIdentityKey(row.artistName), row.artistName, nil)
+            return (TextNormalization.artistIdentityKey(row.artistName), row.artistName, nil, false)
         case .album:
+            // An edition the person counts on its own (Fix album match…) is an album of its own, whatever its name's wording.
+            if !separateEditions.isEmpty {
+                let edition = TextNormalization.editionIdentityKey(artist: row.artistName, album: row.albumName)
+                if separateEditions.contains(edition) { return ("\u{0}ED\u{0}\(edition)", row.albumName, row.albumName, true) }
+            }
             return (
                 TextNormalization.albumIdentityKey(artist: row.artistName, album: row.albumName),
                 row.albumName,
-                row.albumName
+                row.albumName,
+                false
             )
         case .track:
             return (
                 TextNormalization.lovedKey(artist: row.artistName, track: row.trackName),
                 row.trackName,
-                row.albumName.isEmpty ? nil : row.albumName
+                row.albumName.isEmpty ? nil : row.albumName,
+                false
             )
         }
     }

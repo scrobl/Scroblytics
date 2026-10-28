@@ -155,11 +155,7 @@ enum AlbumTurnoverEngine {
                 if variantCounts[s.albumName] == nil { variantsOrdered.append(s.albumName) }
                 variantCounts[s.albumName, default: 0] += 1
             }
-            // Display name = most-played original variant.
-            let displayName = variantsOrdered.sorted { a, b in
-                let ca = variantCounts[a]!, cb = variantCounts[b]!
-                return ca != cb ? ca > cb : a < b
-            }.first!
+            let displayName = displayName(counts: variantCounts, variants: variantsOrdered)!
             groups.append(AlbumGroup(
                 artist: groupScrobbles[0].artistName,
                 displayName: displayName,
@@ -169,6 +165,19 @@ enum AlbumTurnoverEngine {
             ))
         }
         return separateEditions.isEmpty ? groups : splitEditions(groups, separate: separateEditions)
+    }
+
+    /// The name an album is shown under: its most played name, except that when that is one edition of an album whose plain name was also
+    /// scrobbled, the plain name. Only names that normalize the same as the most played one can replace it, so the group's key (which is
+    /// made from the normalized name) never changes with the choice.
+    nonisolated static func displayName(counts: [String: Int], variants: [String]) -> String? {
+        guard let top = variants.sorted(by: { a, b in
+            let ca = counts[a] ?? 0, cb = counts[b] ?? 0
+            return ca != cb ? ca > cb : a < b
+        }).first else { return nil }
+        let norm = TextNormalization.normalizeAlbumName(top)
+        let sameAlbum = counts.filter { TextNormalization.normalizeAlbumName($0.key) == norm }
+        return TextNormalization.preferredAlbumName(sameAlbum) ?? top
     }
 
     /// Pulls each separated edition's name variants out of its group into a group of its own (see
@@ -188,10 +197,7 @@ enum AlbumTurnoverEngine {
                 var counts: [String: Int] = [:]
                 for s in scrobbles { counts[s.albumName, default: 0] += 1 }
                 let ordered = group.variants.filter { variants.contains($0) }
-                let displayName = ordered.sorted { a, b in
-                    let ca = counts[a] ?? 0, cb = counts[b] ?? 0
-                    return ca != cb ? ca > cb : a < b
-                }.first ?? group.displayName
+                let displayName = displayName(counts: counts, variants: ordered) ?? group.displayName
                 return AlbumGroup(
                     artist: group.artist, displayName: displayName,
                     normalizedName: editionKey == nil ? group.normalizedName : TextNormalization.normalizeAlbumName(displayName),

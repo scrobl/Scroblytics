@@ -262,6 +262,24 @@ enum TextNormalization {
         "\(artist)\(albumKeySeparator)\(normalizeAlbumName(album))"
     }
 
+    /// True when an album name carries no edition wording: "Album" is plain, "Album (25th Anniversary Edition)" and "Album - Deluxe" are not.
+    static func isPlainAlbumName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let withoutParens = stripEditionParens(trimmed).trimmingCharacters(in: .whitespaces)
+        return stripTrailingEdition(withoutParens).trimmingCharacters(in: .whitespaces) == trimmed
+    }
+
+    /// The name to show for several editions counted as one album, given how many plays each name has: a plain name when one was
+    /// scrobbled, else the most played, the first alphabetically on a tie. nil when there are no names.
+    static func preferredAlbumName(_ playsByName: [String: Int]) -> String? {
+        playsByName.keys.sorted { a, b in
+            let plainA = isPlainAlbumName(a), plainB = isPlainAlbumName(b)
+            if plainA != plainB { return plainA }
+            let countA = playsByName[a] ?? 0, countB = playsByName[b] ?? 0
+            return countA != countB ? countA > countB : a < b
+        }.first
+    }
+
     /// One exact album name of one artist, edition words kept (case and spacing ignored): the identity of an
     /// edition that is counted on its own (`AlbumEditionMatch`). Unlike `albumIdentityKey`, "Album" and
     /// "Album (25th Anniversary Edition)" differ.

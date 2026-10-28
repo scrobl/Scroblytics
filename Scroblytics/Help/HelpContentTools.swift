@@ -124,6 +124,7 @@ extension HelpContent {
             summary: "The #1 artist, album or track for each release period.",
             blocks: [
                 .paragraph("A release-date retrospective: for each release **week, month, year or decade**, the top artist, album or track by the chosen Metric, based on when the music was **released**, not when you played it. Each period expands to a top 10. Music with no known release date is left out, so resolve dates in [Missing Data](help://tool-missing-data) first. Release dates use UTC."),
+                .paragraph("**Editions.** For albums, editions of one album by one artist (Deluxe, Remastered, Anniversary…) count as one album, with all their plays, and are named by the plain name when you played it, otherwise by the edition you played most. An edition you chose to **Count this edition on its own** (in Fix album match…) is respected: it is its own row, with only its own plays. Its release date is still the album’s, because release dates are kept per album, so both rows appear in the same period. The same applies to the [Collage Generator](help://tool-collage)’s release-period source."),
             ]
         ),
         HelpArticle(

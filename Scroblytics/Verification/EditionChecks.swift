@@ -337,6 +337,129 @@ enum EditionChecks {
                 check("choosing to count a reviewed edition on its own turns it back on", AlbumTurnoverEngine.separateEditionKeys(context: context) == [specialKey] && AlbumTurnoverEngine.loadSnapshot(context: context).reviewedEditions.isEmpty)
             }
 
+            // MARK: Chart Toppers and the Collage Generator
+            do {
+                // Release-period charts group editions by their normalized name unless the person counted one on its own; a group
+                // shows the plain name when one was scrobbled; an edition counted on its own is a row of its own.
+                func releaseDates(for albums: [(String, String)], date: String) -> ReleaseDateEngine.Snapshot {
+                    var snapshot = ReleaseDateEngine.Snapshot()
+                    for (artistName, album) in albums {
+                        snapshot.albumsByIdentityKey[TextNormalization.albumIdentityKey(artist: artistName, album: album)] = ReleaseDateEngine.Snapshot.AlbumInfo(
+                            artistKey: TextNormalization.artistIdentityKey(artistName), override: nil, detected: date, resolved: true
+                        )
+                    }
+                    return snapshot
+                }
+                func rows(_ plays: [ScrobbleSnapshot], separate: Set<String> = [], dates: ReleaseDateEngine.Snapshot) -> [ChartTopperEntry] {
+                    CollagePeriodEngine.rankPeriods(
+                        plays, entity: .album, metric: .scrobbles, period: .decade, yearRange: 0, entriesPerPeriod: 1_000_000, durations: [:],                        releaseDates: dates, imageLookup: [:], lovedKeys: [], flaggedKeys: [], separateEditions: separate
+                    ).flatMap(\.entries)
+                }
+                let other = "Artist B"
+                // The anniversary edition is played first, so the first name seen is not the plain one.
+                var charted: [ScrobbleSnapshot] = []
+                for t in core + bonus { charted.append(play(deluxe, t)) }
+                for _ in 0..<2 { for t in core { charted.append(play(standard, t)) } }
+                for t in core { charted.append(play(deluxe, t, artist: other)) }
+                for t in core { charted.append(play(standard, t, artist: other)) }
+                let dates = releaseDates(for: [(artist, standard), (other, standard)], date: "1994-09-27")
+                let together = rows(charted, dates: dates)
+                let mine = together.filter { $0.artist == artist }
+                check("editions are one album in the chart, with all their plays", mine.count == 1 && mine.first?.metricValue == 16, "\(mine.map { "\($0.name)=\($0.metricValue)" })")
+                check("shown under the plain name, though the other edition was played first", mine.first?.name == standard && mine.first?.album == standard, mine.first?.name ?? "nil")
+                check("another artist's same-named editions are their own album", together.filter { $0.artist == other }.count == 1 && together.filter { $0.artist == other }.first?.metricValue == 8)
+
+                let apart = rows(charted, separate: [deluxeKey], dates: dates).filter { $0.artist == artist }
+                check("an edition counted on its own is a row of its own, each with only its own plays",
+                      Set(apart.map(\.name)) == [standard, deluxe] && apart.first { $0.name == standard }?.metricValue == 8 && apart.first { $0.name == deluxe }?.metricValue == 8, "\(apart.map { "\($0.name)=\($0.metricValue)" })")
+                check("separating changes no total, and another artist's editions are untouched",
+                      apart.reduce(0) { $0 + $1.metricValue } == 16 && rows(charted, separate: [deluxeKey], dates: dates).filter { $0.artist == other }.map(\.metricValue) == [8])
+                check("an edition's key is for its artist alone: another artist's edition by the same name stays merged",
+                      !rows(charted, separate: [deluxeKey], dates: dates).filter { $0.artist == other }.contains { $0.name == deluxe })
+
+                // Names: plain when scrobbled; else the most played; a lone name is itself.
+                let counts = ["Album One (25th Anniversary Edition)": 5, "Album One (Remastered)": 8]
+                check("with no plain name scrobbled, the most played edition's name is shown", TextNormalization.preferredAlbumName(counts) == "Album One (Remastered)")
+                check("a plain name wins over a more played edition", TextNormalization.preferredAlbumName(["Album One": 2, "Album One (Deluxe)": 30]) == "Album One")
+                check("ties go to the first alphabetically, and one name is itself", TextNormalization.preferredAlbumName(["B": 3, "A": 3]) == "A" && TextNormalization.preferredAlbumName(["Only": 1]) == "Only" && TextNormalization.preferredAlbumName([:]) == nil)
+                check("what counts as plain",
+                      TextNormalization.isPlainAlbumName("Album One") && !TextNormalization.isPlainAlbumName("Album One (25th Anniversary Edition)")
+                      && !TextNormalization.isPlainAlbumName("Album One (Deluxe Edition)") && !TextNormalization.isPlainAlbumName("Album One - Remastered"))
+                var variantsOnly: [ScrobbleSnapshot] = []
+                for t in core { variantsOnly.append(play(deluxe, t, artist: "Artist C")) }
+                for t in core { variantsOnly.append(play("Album One (Remastered)", t, artist: "Artist C")) }
+                for t in core.prefix(2) { variantsOnly.append(play("Album One (Remastered)", t, artist: "Artist C")) }
+                let variantRows = rows(variantsOnly, dates: releaseDates(for: [("Artist C", standard)], date: "1994-09-27"))
+                check("two editions and no plain name: the more played one names the album", variantRows.count == 1 && variantRows.first?.name == "Album One (Remastered)" && variantRows.first?.metricValue == 10, "\(variantRows.map { "\($0.name)=\($0.metricValue)" })")
+
+                // Album groups (turnover, Fix album match, banners) name a combined album the same way.
+                var named: [ScrobbleSnapshot] = []
+                for _ in 0..<2 { for t in core { named.append(play(standard, t, artist: "Artist D")) } }
+                for t in core + bonus { named.append(play(deluxe, t, artist: "Artist D")) }
+                for _ in 0..<2 { for t in core + bonus { named.append(play(deluxe, t, artist: "Artist D")) } }
+                let namedGroups = AlbumTurnoverEngine.buildAlbumGroups(from: named)
+                check("a combined album's group is named by its plain name even when an edition was played more", namedGroups.count == 1 && namedGroups.first?.displayName == standard && namedGroups.first?.variants.count == 2, namedGroups.first?.displayName ?? "nil")
+                let namedKey = namedGroups.first.map(AlbumTurnoverEngine.groupKey)
+                check("and its key does not depend on which name is shown", namedKey == AlbumTurnoverEngine.groupKey(artist: "Artist D", displayName: deluxe) && namedKey == AlbumTurnoverEngine.groupKey(artist: "Artist D", displayName: standard))
+                let namedApart = AlbumTurnoverEngine.buildAlbumGroups(from: named, separateEditions: [TextNormalization.editionIdentityKey(artist: "Artist D", album: deluxe)])
+                check("an edition counted on its own keeps its own name, and the rest of the album keeps the plain one",
+                      Set(namedApart.map(\.displayName)) == [standard, deluxe] && namedApart.count == 2, "\(namedApart.map(\.displayName))")
+                let onlyEditions = AlbumTurnoverEngine.buildAlbumGroups(from: variantsOnly)
+                check("with no plain name played, the most played edition names the group", onlyEditions.first?.displayName == "Album One (Remastered)", onlyEditions.first?.displayName ?? "nil")
+
+                // The collage's "one per release period" source follows the same rule.
+                let picked = CollagePeriodEngine.rank(charted, entity: .album, metric: .scrobbles, period: .decade, limit: 5, durations: [:], releaseDates: dates, imageLookup: [:], separateEditions: [deluxeKey])
+                check("the collage source gives the edition counted on its own the same way", picked.filter { $0.artist == artist }.allSatisfy { $0.name == standard || $0.name == deluxe } && picked.count == 1, "\(picked.map(\.name))")
+
+                // A copy of a real library: separating every edition moves plays between rows and loses none; merged rows read plainly.
+                let history = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+                if history.count > 1000 {
+                    let real = ReleaseDateEngine.loadSnapshot(context: context)
+                    let mergedRows = rows(history, dates: real)
+                    var namesByAlbum: [String: Set<String>] = [:]
+                    var pairs: [String: (artist: String, album: String)] = [:]
+                    for p in history where !p.albumName.isEmpty {
+                        let key = TextNormalization.albumIdentityKey(artist: p.artistName, album: p.albumName)
+                        namesByAlbum[key, default: []].insert(p.albumName)
+                        pairs[TextNormalization.editionIdentityKey(artist: p.artistName, album: p.albumName)] = (p.artistName, p.albumName)
+                    }
+                    let everyEdition = Set(pairs.keys)
+                    let splitRows = rows(history, separate: everyEdition, dates: real)
+                    var expected = 0
+                    for p in history where !p.albumName.isEmpty {
+                        if let date = real.albumResolution(artist: p.artistName, album: p.albumName).date, ReleaseDateEngine.periodStart(of: date) != nil { expected += 1 }
+                    }
+                    let mergedTotal = mergedRows.reduce(0) { $0 + $1.metricValue }
+                    let splitTotal = splitRows.reduce(0) { $0 + $1.metricValue }
+                    check("real library: the chart counts every dated play once, merged or separated", mergedTotal == expected && splitTotal == expected, "merged \(mergedTotal), separated \(splitTotal), expected \(expected)")
+                    let multi = namesByAlbum.filter { $0.value.count > 1 }.count
+                    check("real library: separating every edition never gives fewer rows", splitRows.count >= mergedRows.count, "\(splitRows.count) vs \(mergedRows.count) (\(multi) albums with more than one name)")
+                    let unreadable = mergedRows.filter { row in
+                        let key = TextNormalization.albumIdentityKey(artist: row.artist, album: row.name)
+                        let names = namesByAlbum[key] ?? []
+                        return names.contains(where: TextNormalization.isPlainAlbumName) && !TextNormalization.isPlainAlbumName(row.name)
+                    }
+                    check("real library: no merged album is named for an edition when its plain name was scrobbled", unreadable.isEmpty, "\(unreadable.prefix(3).map(\.name))")
+                    // Album groups: naming a group plainly never changes its key (what its saved cycle results are filed under).
+                    let realGroups = AlbumTurnoverEngine.buildAlbumGroups(from: history)
+                    var renamed = 0, keyChanged = 0, editionNamed = 0
+                    for group in realGroups {
+                        var counts: [String: Int] = [:]
+                        for s in group.scrobbles { counts[s.albumName, default: 0] += 1 }
+                        guard let mostPlayed = group.variants.sorted(by: { (counts[$0] ?? 0) != (counts[$1] ?? 0) ? (counts[$0] ?? 0) > (counts[$1] ?? 0) : $0 < $1 }).first else { continue }
+                        if mostPlayed != group.displayName { renamed += 1 }
+                        if AlbumTurnoverEngine.groupKey(artist: group.artist, displayName: mostPlayed) != AlbumTurnoverEngine.groupKey(for: group) { keyChanged += 1 }
+                        let norm = TextNormalization.normalizeAlbumName(group.displayName)
+                        let hasPlain = group.variants.contains { TextNormalization.normalizeAlbumName($0) == norm && TextNormalization.isPlainAlbumName($0) }
+                        if hasPlain && !TextNormalization.isPlainAlbumName(group.displayName) { editionNamed += 1 }
+                    }
+                    check("real library: naming album groups plainly changes no group's key, and leaves none named for an edition when its plain name was played", keyChanged == 0 && editionNamed == 0, "keys changed \(keyChanged), edition-named \(editionNamed), renamed \(renamed) of \(realGroups.count)")
+                    print("      (\(renamed) of \(realGroups.count) album groups are now shown under their plain name)")
+                } else {
+                    print("      (no library copy here: the real-data cross-check was skipped)")
+                }
+            }
+
             cleanUp()
             HeadlessTask.finish(failures)
         }

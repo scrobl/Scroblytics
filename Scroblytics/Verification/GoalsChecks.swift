@@ -545,6 +545,28 @@ enum GoalsChecks {
             check("the list's history covers only tracks still to hear", bigHistory.keys.allSatisfy { key in bigAnalysis.remaining.contains { $0.key == key } })
             check("the large forecast starts where the burn-down ends", bigForecast.median.first == Double(bigAnalysis.remainingNow))
 
+            // MARK: Backup and restore (through the real store)
+            let backupContext = ModelContext(container)
+            var backed = ListeningGoal(title: "Backed up", start: at(0), deadline: at(40), lookbackDays: 30)
+            backed.criteria = GoalCriteria(loved: .notLoved, artists: ["Artist A"], tags: ["shoegaze"])
+            backed.setAside = [GoalSetAside(key: "artist a|song 1", artist: "Artist A", track: "Song 1")]
+            backed.showOnOverview = true
+            let original = GoalsState(goals: [backed, ListeningGoal(title: "Second", start: at(5), deadline: at(50))], selected: backed.id)
+            ToolFilterSettingsStore.save(original, toolId: GoalsState.toolId, context: backupContext)
+            try? backupContext.save()
+            if let document = try? NativeBackupEngine.makeDocument(context: backupContext), let (archive, _) = try? NativeBackupEngine.inspect(document: document) {
+                check("a backup carries the goals", archive.toolFilters.contains { $0.toolId == GoalsState.toolId })
+                ToolFilterSettingsStore.save(GoalsState(), toolId: GoalsState.toolId, context: backupContext)
+                try? backupContext.save()
+                check("the goals can be wiped before restoring", ToolFilterSettingsStore.load(GoalsState.self, toolId: GoalsState.toolId, context: backupContext, default: GoalsState()).goals.isEmpty)
+                try? NativeBackupEngine.restore(archive, context: backupContext)
+                let restored = ToolFilterSettingsStore.load(GoalsState.self, toolId: GoalsState.toolId, context: ModelContext(container), default: GoalsState())
+                check("a restored backup brings the goals back exactly", restored == original, "\(restored.goals.count) goals")
+                check("their criteria, set-aside tracks and Overview choice survive", restored.goals.first?.criteria == backed.criteria && restored.goals.first?.setAside == backed.setAside && restored.goals.first?.showOnOverview == true)
+            } else {
+                check("a backup can be made and read back", false)
+            }
+
             print(failures == 0 ? "ALL GOALS CHECKS PASSED" : "\(failures) GOALS CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

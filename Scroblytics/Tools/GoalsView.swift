@@ -596,6 +596,12 @@ struct GoalsView: View {
                 Text(narrowed ? "\(matching.count.formatted()) of \(a.remaining.count.formatted())" : a.remaining.count.formatted())
                     .font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary)
                 Spacer()
+                if !matching.isEmpty {
+                    // The tracks the list shows now (after Search, Show and Sort), not only the first rows.
+                    AppleMusicPlaylistExportButton(defaultPlaylistName: "\(goal.title): still to hear") {
+                        matching.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.track, album: result.history[$0.key]?.album ?? "") }
+                    }
+                }
             }
             if !a.remaining.isEmpty {
                 ViewThatFits(in: .horizontal) {

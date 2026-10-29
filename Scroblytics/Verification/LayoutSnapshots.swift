@@ -246,6 +246,27 @@ enum LayoutSnapshots {
                     }
                 }
             }
+            // The Overview's row of goals: one, two and three of them, at widths where it stays one row and where it wraps.
+            for count in [1, 2, 3] {
+                for width in [1200, 760, 520] as [CGFloat] {
+                    let chosen = Array(landingAnalyses.prefix(count)).map { (goal: $0.0, analysis: $0.1) }
+                    let view = OverviewGoalsSection(openGoal: { _ in }, preview: chosen)
+                        .padding(16)
+                        .environment(LovedTracksStore()).environment(FlaggedTracksStore()).modelContainer(container)
+                        .environment(\.colorScheme, .dark)
+                    let height: CGFloat = width < 600 ? 330 * CGFloat(count) + 60 : (width < 900 && count == 3 ? 700 : 380)
+                    let host = NSHostingView(rootView: view.frame(width: width, height: height, alignment: .topLeading).background(Color(white: 0.1)))
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: .darkAqua)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: width, height: height))
+                    for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "goals-overview-\(count)-\(Int(width)).png"))
+                    }
+                }
+            }
             // The chart's zoom (the choice is a stored preference, put back afterwards) and the goal editor.
             let savedRange = UserDefaults.standard.object(forKey: "goals.chart.range")
             for range in [GoalChartRange.back90, .back7, .ahead] {

@@ -359,6 +359,20 @@ enum GoalsChecks {
                 check("leaving the forecasts out changes the picture", a != nil && b != nil && a != b)
             }
 
+            // MARK: Goals on the Overview
+            func chosen(_ title: String, start: Int, on: Bool) -> ListeningGoal {
+                var g = ListeningGoal(title: title, start: at(start), deadline: at(start + 100)); g.showOnOverview = on; return g
+            }
+            let overviewState = GoalsState(goals: [chosen("A", start: -30, on: true), chosen("B", start: -10, on: true), chosen("C", start: -20, on: false),
+                                                   chosen("D", start: -50, on: true), chosen("E", start: -5, on: true)])
+            check("the Overview takes the chosen goals, the most recently started first, and no more than three",
+                  overviewState.overviewGoals.map(\.title) == ["E", "B", "A"], "\(overviewState.overviewGoals.map(\.title))")
+            check("no goal is on the Overview until it is chosen, and the choice is saved",
+                  !chosen("x", start: 0, on: false).showOnOverview
+                    && (try? JSONDecoder().decode(ListeningGoal.self, from: JSONEncoder().encode(chosen("x", start: 0, on: true))))?.showOnOverview == true
+                    && (try? JSONDecoder().decode(GoalsState.self, from: Data("{\"goals\":[{\"id\":\"\(goal.id.uuidString)\",\"title\":\"x\",\"start\":0,\"deadline\":86400}]}".utf8)))?.goals.first?.showOnOverview == false)
+            check("with none chosen the Overview has nothing to show", GoalsState(goals: [chosen("A", start: -3, on: false)]).overviewGoals.isEmpty && GoalsState().overviewGoals.isEmpty)
+
             // MARK: The "Still to hear" list: history, filters, sorts
             // Still to hear here: Songs 6, 7, 8 (heard before the goal or never). Song 6 has one play, on day -3.
             var withPictures = plays

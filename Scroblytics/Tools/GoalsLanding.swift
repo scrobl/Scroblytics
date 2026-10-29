@@ -106,6 +106,12 @@ struct GoalCard: View {
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    /// Whether the goal is one of those on the Overview, whether another can still be added, and the toggle; nil leaves the choice out.
+    var isOnOverview = false
+    var overviewHasRoom = true
+    var onToggleOverview: (() -> Void)? = nil
+    /// The "…" menu (open, edit, delete): left off where the card is only a summary (the Overview).
+    var showsMenu = true
 
     @State private var hovering = false
 
@@ -136,16 +142,19 @@ struct GoalCard: View {
             HStack(spacing: 10) {
                 ShareButton(title: goal.title, iconOnly: true, card: shareCard, isEnabled: analysis != nil)
                     .buttonStyle(.borderless).foregroundStyle(.secondary).imageScale(.large)
-                Menu {
-                    Button("Open", action: onOpen)
-                    Button("Edit…", action: onEdit)
-                    Divider()
-                    Button("Delete…", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis.circle").imageScale(.large).foregroundStyle(.secondary)
+                if showsMenu {
+                    Menu {
+                        Button("Open", action: onOpen)
+                        Button("Edit…", action: onEdit)
+                        overviewItem
+                        Divider()
+                        Button("Delete…", role: .destructive, action: onDelete)
+                    } label: {
+                        Image(systemName: "ellipsis.circle").imageScale(.large).foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help("Open, edit or delete this goal")
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("Open, edit or delete this goal")
             }
             .padding(12)
         }
@@ -171,17 +180,35 @@ struct GoalCard: View {
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Open", action: onOpen)
-            Button("Edit…", action: onEdit)
-            Divider()
-            Button("Delete…", role: .destructive, action: onDelete)
+            if showsMenu {
+                Button("Edit…", action: onEdit)
+                overviewItem
+                Divider()
+                Button("Delete…", role: .destructive, action: onDelete)
+            }
+        }
+    }
+
+    /// Show on the Overview, or take off it; refused while the Overview's row is full.
+    @ViewBuilder
+    private var overviewItem: some View {
+        if let onToggleOverview {
+            Button(isOnOverview ? "Remove from Overview" : "Show on Overview", action: onToggleOverview)
+                .disabled(!isOnOverview && !overviewHasRoom)
+                .help(!isOnOverview && !overviewHasRoom ? "The Overview shows up to \(GoalsState.overviewLimit) goals. Remove one first." : "")
         }
     }
 
     private var titleRow: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(goal.title).font(AppTypography.sectionTitle).lineLimit(1)
-            Text("\(GoalsView.dayLabel(goal.start)) – \(GoalsView.dayLabel(goal.deadline))")
-                .font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
+            HStack(spacing: 5) {
+                Text("\(GoalsView.dayLabel(goal.start)) – \(GoalsView.dayLabel(goal.deadline))").lineLimit(1)
+                if isOnOverview && showsMenu {
+                    Image(systemName: "pin.fill").font(.caption2).help("Shown on the Overview")
+                }
+            }
+            .font(AppTypography.metadata).foregroundStyle(.secondary)
             Text(goal.criteria.summary).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(.trailing, 70)

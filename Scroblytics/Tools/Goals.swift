@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// A loved track the person has taken out of one goal (a duplicate, another recording of a song, something they don't want to chase).
 /// The names are kept so it can be listed and put back.
@@ -35,12 +36,14 @@ struct ListeningGoal: Codable, Identifiable, Equatable, Sendable {
     var setAside: [GoalSetAside]
     /// Which tracks the goal is about.
     var criteria: GoalCriteria
+    /// Shown on the Overview, in its row of goals (at most `GoalsState.overviewLimit` of them).
+    var showOnOverview: Bool
 
     init(
         id: UUID = UUID(), title: String, start: Date, deadline: Date, createdAt: Date = .now,
         lookbackDays: Int = 90, dedicatedShare: Double? = nil, expectNewLoves: Bool = true, lovesPerMonth: Double? = nil,
         countBulkLovesFromStart: Bool = true, inAppleLibraryOnly: Bool = false, setAside: [GoalSetAside] = [],
-        criteria: GoalCriteria = GoalCriteria()
+        criteria: GoalCriteria = GoalCriteria(), showOnOverview: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -55,10 +58,11 @@ struct ListeningGoal: Codable, Identifiable, Equatable, Sendable {
         self.inAppleLibraryOnly = inAppleLibraryOnly
         self.setAside = setAside
         self.criteria = criteria
+        self.showOnOverview = showOnOverview
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, start, deadline, createdAt, lookbackDays, dedicatedShare, expectNewLoves, lovesPerMonth, countBulkLovesFromStart, inAppleLibraryOnly, setAside, criteria
+        case id, title, start, deadline, createdAt, lookbackDays, dedicatedShare, expectNewLoves, lovesPerMonth, countBulkLovesFromStart, inAppleLibraryOnly, setAside, criteria, showOnOverview
     }
 
     init(from decoder: Decoder) throws {
@@ -76,11 +80,23 @@ struct ListeningGoal: Codable, Identifiable, Equatable, Sendable {
         inAppleLibraryOnly = try c.decodeIfPresent(Bool.self, forKey: .inAppleLibraryOnly) ?? false
         setAside = try c.decodeIfPresent([GoalSetAside].self, forKey: .setAside) ?? []
         criteria = try c.decodeIfPresent(GoalCriteria.self, forKey: .criteria) ?? GoalCriteria()
+        showOnOverview = try c.decodeIfPresent(Bool.self, forKey: .showOnOverview) ?? false
     }
 }
 
 /// What the Goals tool saves (as one tool-options record, so backups carry it).
 struct GoalsState: Codable, Equatable, Sendable {
+    /// The key the goals are saved under in the tool options.
+    static let toolId = "goals"
+
+    /// How many goals the Overview has room for.
+    static let overviewLimit = 3
+
+    /// The goals chosen for the Overview, most recently started first, no more than fit.
+    var overviewGoals: [ListeningGoal] {
+        Array(goals.filter(\.showOnOverview).sorted { $0.start != $1.start ? $0.start > $1.start : $0.createdAt > $1.createdAt }.prefix(Self.overviewLimit))
+    }
+
     var goals: [ListeningGoal] = []
     var selected: UUID?
 
@@ -847,5 +863,38 @@ enum GoalCompute {
             forecasts[kind] = GoalSimulator.forecast(kind, setup: setup, dedicatedPlaysPerDay: dedicated, seed: seed)
         }
         return result(forecasts, needed: needed, dedicated: dedicated)
+    }
+}
+
+
+extension Notification.Name {
+    /// Posted when the person's goals are saved, so the Overview's row of them follows.
+    static let goalsDidChange = Notification.Name("GoalsDidChange")
+}
+
+/// A goal another screen (the Overview) wants the Goals page to open on.
+@MainActor
+@Observable
+final class GoalsOpenRequest {
+    static let shared = GoalsOpenRequest()
+    var goalID: UUID?
+}
+
+/// The numbers behind goals' cards (the burn-down without the forecasts), for the Goals page and the Overview.
+@MainActor
+enum GoalSummaryLoader {
+    static func load(goals: [ListeningGoal], context: ModelContext, container: ModelContainer, calendar: Calendar) async throws -> [UUID: GoalAnalysis] {
+        guard !goals.isEmpty else { return [:] }
+        let stored = try context.fetch(FetchDescriptor<LovedTrackEntry>())
+        let loves = stored.map { GoalLove(key: $0.cacheKey, artist: $0.artist, track: $0.track, lovedAt: $0.lovedAt) }
+        let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        let presence = goals.contains { $0.inAppleLibraryOnly } ? LibraryPresenceSnapshot.load(context: context) : nil
+        let tags = goals.contains { !$0.criteria.tags.isEmpty } ? EntityTagsEngine.loadSnapshot(context: context) : EntityTagsSnapshot.empty
+        return await Task.detached(priority: .userInitiated) {
+            let members = GoalMembership.members(for: goals, loved: loves, plays: plays, tags: tags)
+            return Dictionary(uniqueKeysWithValues: goals.map { goal in
+                (goal.id, GoalCompute.analysis(goal: goal, members: members[goal.id] ?? GoalMembers(loves: []), plays: plays, presence: presence, now: .now, calendar: calendar))
+            })
+        }.value
     }
 }

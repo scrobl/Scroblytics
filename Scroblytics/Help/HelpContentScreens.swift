@@ -24,6 +24,7 @@ extension HelpContent {
                     ["**Similar Sounds**", "No", "One artist, one album and one track from your library similar to what you played in the last 14 days ([how](help://metrics-similar))."],
                     ["**The Long Tail**", "Yes", "How concentrated your listening is ([Long tail](help://metrics-distribution))."],
                     ["**Top Tags**", "Yes (always plays)", "Your most-played tags, from artists’ community tags, ignoring the Metric switch."],
+                    ["**Goals**", "No", "The goals you chose for it (up to three) as their cards in one row, above Most recent: how far along each is and whether it is ahead of its plan. A card opens the goal; “View all” opens [Goals](help://tool-goals). Shown only when you have chosen some."],
                     ["**Most recent**", "Yes", "Your last 10 scrobbles in the range with chart rank, previous rank and movement ([columns](help://metrics-chart-columns)). “View all” opens the full scrobble history."],
                 ]),
                 .paragraph("Cards that pick **3 random** items re-draw each time Overview loads from a fixed pool of qualifying items. Clicking a card opens the related screen or tool."),

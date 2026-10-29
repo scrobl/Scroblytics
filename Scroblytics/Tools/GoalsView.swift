@@ -31,6 +31,7 @@ struct GoalsView: View {
     @State private var hoveredDate: Date?
     @State private var showAllRemaining = false
     @State private var showSetAside = false
+    private var openRequest = GoalsOpenRequest.shared
     @State private var remainingSearch = ""
     @State private var remainingFilter: GoalRemainingFilter = .all
     @AppStorage("goals.remaining.sort") private var remainingSortRaw = GoalRemainingSort.recentlyLoved.rawValue
@@ -65,7 +66,7 @@ struct GoalsView: View {
         }
         .navigationTitle("Goals")
         .sheet(item: $editor) { request in
-            GoalEditor(request: request, calendar: calendar) { saved in
+            GoalEditor(request: request, calendar: calendar, overviewTaken: state.goals.filter { $0.showOnOverview && $0.id != request.goalID }.count) { saved in
                 if let index = state.goals.firstIndex(where: { $0.id == saved.id }) { state.goals[index] = saved } else { state.goals.append(saved) }
             }
         }
@@ -97,15 +98,18 @@ struct GoalsView: View {
             }
             state = ToolFilterSettingsStore.load(GoalsState.self, toolId: Self.toolId, context: modelContext, default: GoalsState())
             hasLoadedState = true
+            consumeOpenRequest()
             imageLookup = (try? ImageResolutionEngine.imageLookup(context: modelContext)) ?? [:]
             scheduleReload()
         }
         .onChange(of: state) { _, newValue in
             guard hasLoadedState, preview == nil, landingPreview == nil else { return }
             ToolFilterSettingsStore.save(newValue, toolId: Self.toolId, context: modelContext)
+            NotificationCenter.default.post(name: .goalsDidChange, object: nil)
         }
         .onChange(of: state.goals) { _, _ in scheduleReload(after: .milliseconds(300)) }
         .onChange(of: openGoalID) { _, _ in scheduleReload() }
+        .onChange(of: openRequest.goalID) { _, _ in consumeOpenRequest() }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in scheduleReload() }
     }
 
@@ -188,7 +192,9 @@ struct GoalsView: View {
                         GoalCard(
                             goal: goal, analysis: summaries[goal.id],
                             shareCard: { summaries[goal.id].flatMap { GoalShareCards.card(goal: goal, analysis: $0, result: nil) } },
-                            onOpen: { openGoalID = goal.id }, onEdit: { editor = .edit(goal) }, onDelete: { deleting = goal }
+                            onOpen: { openGoalID = goal.id }, onEdit: { editor = .edit(goal) }, onDelete: { deleting = goal },
+                            isOnOverview: goal.showOnOverview, overviewHasRoom: state.goals.filter(\.showOnOverview).count < GoalsState.overviewLimit,
+                            onToggleOverview: { update(goal.id) { $0.showOnOverview.toggle() } }
                         )
                     }
                 }
@@ -678,6 +684,13 @@ struct GoalsView: View {
         return "\(plays) · last \(dayLabel(last))"
     }
 
+    /// Another screen (the Overview) asked for a goal's page.
+    private func consumeOpenRequest() {
+        guard hasLoadedState, let id = openRequest.goalID else { return }
+        openRequest.goalID = nil
+        if state.goals.contains(where: { $0.id == id }) { openGoalID = id }
+    }
+
     // MARK: - Share
 
     /// The open goal as a card: the chart as the page has it, with its forecasts.
@@ -781,18 +794,7 @@ struct GoalsView: View {
         let goals = state.goals
         guard !goals.isEmpty else { summaries = [:]; return }
         do {
-            let stored = try modelContext.fetch(FetchDescriptor<LovedTrackEntry>())
-            let loves = stored.map { GoalLove(key: $0.cacheKey, artist: $0.artist, track: $0.track, lovedAt: $0.lovedAt) }
-            let plays = try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
-            let presence = goals.contains { $0.inAppleLibraryOnly } ? LibraryPresenceSnapshot.load(context: modelContext) : nil
-            let tags = goals.contains { !$0.criteria.tags.isEmpty } ? EntityTagsEngine.loadSnapshot(context: modelContext) : EntityTagsSnapshot.empty
-            let calendar = self.calendar
-            let computed = await Task.detached(priority: .userInitiated) {
-                let members = GoalMembership.members(for: goals, loved: loves, plays: plays, tags: tags)
-                return Dictionary(uniqueKeysWithValues: goals.map { goal in
-                    (goal.id, GoalCompute.analysis(goal: goal, members: members[goal.id] ?? GoalMembers(loves: []), plays: plays, presence: presence, now: .now, calendar: calendar))
-                })
-            }.value
+            let computed = try await GoalSummaryLoader.load(goals: goals, context: modelContext, container: modelContainer, calendar: calendar)
             if Task.isCancelled { return }
             summaries = computed
         } catch {
@@ -808,6 +810,11 @@ struct GoalsView: View {
             get: { selectedGoal![keyPath: keyPath] },
             set: { value in update { $0[keyPath: keyPath] = value } }
         )
+    }
+
+    private func update(_ id: UUID, _ change: (inout ListeningGoal) -> Void) {
+        guard let index = state.goals.firstIndex(where: { $0.id == id }) else { return }
+        change(&state.goals[index])
     }
 
     private func update(_ change: (inout ListeningGoal) -> Void) {
@@ -1010,12 +1017,20 @@ enum GoalEditorRequest: Identifiable {
         case .edit(let goal): goal.id.uuidString
         }
     }
+
+    /// The goal being edited, if any.
+    var goalID: UUID? {
+        if case .edit(let goal) = self { return goal.id }
+        return nil
+    }
 }
 
 /// Creates or edits a goal.
 struct GoalEditor: View {
     let request: GoalEditorRequest
     let calendar: Calendar
+    /// How many other goals are already on the Overview.
+    var overviewTaken = 0
     let onSave: (ListeningGoal) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -1029,6 +1044,7 @@ struct GoalEditor: View {
     @State private var deadline = Date()
     @State private var existing: ListeningGoal?
     @State private var libraryOnly = false
+    @State private var showOnOverview = false
 
     private var criteriaNote: String {
         var text = criteria.loved == .loved
@@ -1077,6 +1093,12 @@ struct GoalEditor: View {
             Toggle("Only count tracks that are in my Apple Music library", isOn: $libraryOnly)
             Text("Leaves out tracks known to be missing from your library, such as ones that are no longer available to stream, as of the last check in Library Gaps. A track that was never checked stays in.")
                 .font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Show on the Overview", isOn: $showOnOverview)
+                .disabled(!showOnOverview && overviewTaken >= GoalsState.overviewLimit)
+            if !showOnOverview && overviewTaken >= GoalsState.overviewLimit {
+                Text("The Overview shows up to \(GoalsState.overviewLimit) goals, and they are all taken. Take one off first.")
+                    .font(AppTypography.metadata).foregroundStyle(.orange)
+            }
             if calendar.startOfDay(for: deadline) <= calendar.startOfDay(for: start) {
                 Text("The deadline needs to be after the start.").font(AppTypography.metadata).foregroundStyle(.orange)
             }
@@ -1089,6 +1111,7 @@ struct GoalEditor: View {
                     goal.start = calendar.startOfDay(for: start)
                     goal.deadline = calendar.startOfDay(for: deadline)
                     goal.inAppleLibraryOnly = libraryOnly
+                    goal.showOnOverview = showOnOverview
                     goal.criteria = criteria
                     onSave(goal)
                     dismiss()
@@ -1111,6 +1134,7 @@ struct GoalEditor: View {
                 start = goal.start
                 deadline = goal.deadline
                 libraryOnly = goal.inAppleLibraryOnly
+                showOnOverview = goal.showOnOverview
                 criteria = goal.criteria
                 titleEdited = true
             }

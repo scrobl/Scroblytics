@@ -479,6 +479,10 @@ struct OverviewView: View {
                                 LongTailCard(stats: longTailStats, onOpen: { openTrends(.longTail) })
                                 TopTagsCard(tags: topTags, loading: topTagsLoading, onOpen: { openTrends(.topTags) })
                             }
+                            OverviewGoalsSection(openGoal: { id in
+                                GoalsOpenRequest.shared.goalID = id
+                                openTool(.goals)
+                            })
                             RecentScrobblesSection(entries: recentScrobbles, layoutMode: layout.recentScrobblesMode)
                         }
                     }

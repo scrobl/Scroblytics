@@ -666,6 +666,30 @@ enum GoalsChecks {
                 print("  tag '\(topTag)': \(members.loves.count) tracks counted, \(members.pendingTags) not looked up yet (of \(firstSeen.count))")
                 check("a tag counts only tracks that can be told", members.loves.count + members.pendingTags <= firstSeen.count)
             }
+            // What the Overview does for three chosen goals (their burn-downs, no forecasts), and what Share does for a goal with forecasts.
+            let threeGoals = [
+                ListeningGoal(title: "p1", start: startAny, deadline: calendar.date(byAdding: .day, value: 60, to: now)!),
+                ListeningGoal(title: "p2", start: startAny, deadline: calendar.date(byAdding: .day, value: 60, to: now)!, criteria: GoalCriteria(loved: .any)),
+                ListeningGoal(title: "p3", start: startAny, deadline: calendar.date(byAdding: .day, value: 60, to: now)!, criteria: GoalCriteria(loved: .any, artists: [topArtist])),
+            ]
+            let loaderBegan = Date()
+            let sums = (try? await GoalSummaryLoader.load(goals: threeGoals, context: context, container: container, calendar: calendar)) ?? [:]
+            print(String(format: "  Overview row of three goals (loaded from the store, burn-down only): %.2f s for %d goals", Date().timeIntervalSince(loaderBegan), sums.count))
+            let again = Date()
+            _ = try? await GoalSummaryLoader.load(goals: threeGoals, context: context, container: container, calendar: calendar)
+            print(String(format: "  the same again (history already in memory): %.2f s", Date().timeIntervalSince(again)))
+            if let big = threeGoals.dropFirst().first {
+                let shareMembers = GoalMembership.members(for: [big], loved: loves, plays: plays, tags: tagSnapshot)[big.id]!
+                let shareResult = GoalCompute.run(goal: big, members: shareMembers, plays: plays, now: now, calendar: calendar)
+                if let card = GoalShareCards.card(goal: big, analysis: shareResult.analysis, result: shareResult, calendar: calendar, now: now) {
+                    for size in [ShareSize.wide, .square] {
+                        var o = card.defaultOptions; o.size = size
+                        let began = Date()
+                        let png = ShareRenderer.png(card: card, options: o, identity: .anonymous, images: [:], scale: 2)
+                        print(String(format: "  share card for an all-tracks goal, %@, 2x: %.2f s (%d KB)", size.label, Date().timeIntervalSince(began), (png?.count ?? 0) / 1024))
+                    }
+                }
+            }
             print(failures == 0 ? "GOALS DUMP OK" : "\(failures) GOALS DUMP CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

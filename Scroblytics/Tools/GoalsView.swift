@@ -636,9 +636,11 @@ struct GoalsView: View {
                                 .buttonStyle(.borderless).foregroundStyle(.secondary)
                                 .help("Set aside from this goal: it stops counting, heard or not. You can put it back below.")
                         }
-                        .contextMenu {
-                            Button("Set Aside from This Goal") { setAside(love, in: goal) }
-                        }
+                        .entityContextMenu(
+                            target: ImageTarget(kind: .track, artist: love.artist, album: info?.album, track: love.track), currentImageURL: url,
+                            onOpen: { navigation.goToTrack(TrackIdentity(artist: love.artist, name: love.track, album: info?.album, imageURL: url)) },
+                            extraActions: [EntityContextAction(title: "Set Aside from This Goal") { setAside(love, in: goal) }]
+                        )
                         Divider()
                     }
                 }

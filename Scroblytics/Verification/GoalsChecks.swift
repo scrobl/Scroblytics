@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftData
 
@@ -322,6 +323,41 @@ enum GoalsChecks {
                   shaped.criteria.summary)
             let wildCriteria = Data("{\"loved\":\"nonsense\",\"artists\":[\"A\"]}".utf8)
             check("an unknown loved setting reads as loved", (try? JSONDecoder().decode(GoalCriteria.self, from: wildCriteria))?.loved == .loved)
+
+            // MARK: Sharing a goal
+            let shareResult = GoalCompute.run(goal: goal, loves: loves, plays: plays, now: now, calendar: calendar)
+            let shared = GoalShareCards.card(goal: goal, analysis: shareResult.analysis, result: shareResult, calendar: calendar, now: now)
+            check("a goal becomes a native chart card with its name, dates and what it counts",
+                  shared?.title == "Hear them all" && shared?.native != nil && shared?.measure == "Loved tracks" && shared?.kindID == "goal.burndown"
+                    && shared?.period.contains("–") == true && shared?.defaultOptions.size == .wide)
+            check("its sentence says where the goal stands, and its text lines carry the numbers",
+                  shared?.native?.caption.hasPrefix("7 of 10 loved tracks heard (70%): 3 to go") == true
+                    && shared?.native?.textLines.contains("Heard: 7 of 10") == true && shared?.native?.textLines.contains("To hear: 3") == true
+                    && shared?.native?.textLines.contains { $0.hasPrefix("Your habits:") && $0.hasSuffix("chance of finishing by the deadline") } == true,
+                  "\(shared?.native?.caption ?? "nil") \(shared?.native?.textLines ?? [])")
+            check("the forecasts can be left out of the card, and the card from a list has none to offer",
+                  Set(shared?.native?.controls.map(\.id) ?? []) == ["plan", "forecasts", "bands", "legend"]
+                    && Set(GoalShareCards.card(goal: goal, analysis: shareResult.analysis, result: nil, calendar: calendar)?.native?.controls.map(\.id) ?? []) == ["plan", "legend"])
+            let futureCard = GoalShareCards.card(goal: future, analysis: early.analysis, result: early, calendar: calendar, now: now)
+            check("a goal that hasn't started says when it does", futureCard?.native?.caption.hasPrefix("Starts ") == true && futureCard?.native?.caption.contains("10 loved tracks to hear by") == true,
+                  "\(futureCard?.native?.caption ?? "nil")")
+            let doneCard = GoalShareCards.card(goal: goal, analysis: GoalCompute.analysis(goal: goal, loves: loves, plays: allHeard.sorted { $0.playedAt < $1.playedAt }, now: now, calendar: calendar), result: nil, calendar: calendar, now: now)
+            check("an achieved goal says so, with how early", doneCard?.native?.caption.hasPrefix("Achieved: all 10 loved tracks heard by") == true && doneCard?.native?.caption.contains("days early") == true,
+                  "\(doneCard?.native?.caption ?? "nil")")
+            check("a goal with no tracks makes no card", GoalShareCards.card(goal: goal, analysis: GoalCompute.analysis(goal: goal, loves: [], plays: plays, now: now, calendar: calendar), result: nil, calendar: calendar) == nil)
+            if let shared {
+                for size in ShareSize.allCases {
+                    var o = shared.defaultOptions; o.size = size
+                    let png = ShareRenderer.png(card: shared, options: o, identity: .anonymous, images: [:], scale: 1)
+                    let rep = png.flatMap { NSBitmapImageRep(data: $0) }
+                    check("the goal card renders as a PNG at the \(size.label.lowercased()) size", rep?.pixelsWide == Int(size.points.width) && rep?.pixelsHigh == Int(size.points.height))
+                }
+                var withForecasts = shared.defaultOptions; withForecasts.flags["forecasts"] = true
+                var without = shared.defaultOptions; without.flags["forecasts"] = false
+                let a = ShareRenderer.png(card: shared, options: withForecasts, identity: .anonymous, images: [:], scale: 1)
+                let b = ShareRenderer.png(card: shared, options: without, identity: .anonymous, images: [:], scale: 1)
+                check("leaving the forecasts out changes the picture", a != nil && b != nil && a != b)
+            }
 
             // MARK: The "Still to hear" list: history, filters, sorts
             // Still to hear here: Songs 6, 7, 8 (heard before the goal or never). Song 6 has one play, on day -3.

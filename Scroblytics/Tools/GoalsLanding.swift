@@ -101,6 +101,8 @@ struct GoalCard: View {
 
     let goal: ListeningGoal
     let analysis: GoalAnalysis?
+    /// The goal as a card to share (its burn-down and plan; the forecasts belong to the goal's own page).
+    let shareCard: () -> ShareCard?
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -131,17 +133,21 @@ struct GoalCard: View {
             }
             .buttonStyle(.plain)
             .drillDownHighlight()
-            Menu {
-                Button("Open", action: onOpen)
-                Button("Edit…", action: onEdit)
-                Divider()
-                Button("Delete…", role: .destructive, action: onDelete)
-            } label: {
-                Image(systemName: "ellipsis.circle").imageScale(.large).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                ShareButton(title: goal.title, iconOnly: true, card: shareCard, isEnabled: analysis != nil)
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).imageScale(.large)
+                Menu {
+                    Button("Open", action: onOpen)
+                    Button("Edit…", action: onEdit)
+                    Divider()
+                    Button("Delete…", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis.circle").imageScale(.large).foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Open, edit or delete this goal")
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .padding(12)
-            .help("Open, edit or delete this goal")
         }
         .frame(height: Self.height)
         .background(.regularMaterial, in: shape)
@@ -178,7 +184,7 @@ struct GoalCard: View {
                 .font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
             Text(goal.criteria.summary).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
         }
-        .padding(.trailing, 34)
+        .padding(.trailing, 70)
     }
 
     private func progress(_ a: GoalAnalysis, _ status: GoalCardStatus) -> some View {
@@ -269,6 +275,8 @@ struct GoalProgressBar: View {
     let heard: Double
     let plan: Double
     let color: Color
+    /// The plan's tick, in points (drawn larger on a share card).
+    var tickWidth: CGFloat = 2
 
     var body: some View {
         GeometryReader { proxy in
@@ -279,8 +287,8 @@ struct GoalProgressBar: View {
                     .frame(width: max(heard > 0 ? proxy.size.height : 0, width * min(max(heard, 0), 1)))
                 if plan > 0 && plan < 1 {
                     Rectangle().fill(.primary.opacity(0.75))
-                        .frame(width: 2, height: proxy.size.height + 6)
-                        .offset(x: width * plan - 1, y: 0)
+                        .frame(width: tickWidth, height: proxy.size.height + tickWidth * 3)
+                        .offset(x: width * plan - tickWidth / 2, y: 0)
                         .help("Where a steady pace to the deadline would have you today")
                 }
             }

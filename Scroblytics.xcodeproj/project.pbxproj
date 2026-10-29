@@ -113,6 +113,7 @@
 		53D6DF6ECD6EE5BCBFC57CB0 /* AppleMusicFavoritesWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86E59DC451FDBD041D9D82F /* AppleMusicFavoritesWriter.swift */; };
 		579ADA1F53BE13E1D5AEEE57 /* ReverbEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD5A66A015FD2BF9EE1A15F /* ReverbEngine.swift */; };
 		57A57EEA6553DD6F75613305 /* HelpContentSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42EBF1FB477869E29C6CBB81 /* HelpContentSync.swift */; };
+		57C55E0B10B1FBF9C2328D75 /* GoalShareCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85654E37A9BE7E17EE566030 /* GoalShareCards.swift */; };
 		58EA24976C1B367258181B9C /* TrackPlaysList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927AEA0BDBF6CEF88AAD3B6E /* TrackPlaysList.swift */; };
 		59F5E7EDBEFE773A99E63453 /* ReportProblemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF7CFB9EAABD5979F3C0E16 /* ReportProblemView.swift */; };
 		59F908C50C6DAD3AB68B8965 /* EntityTagsSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46BCAC3039EC0C789D327F59 /* EntityTagsSectionView.swift */; };
@@ -528,6 +529,7 @@
 		8155E01BF993AFE2BB92CFAB /* QueryCellText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryCellText.swift; sourceTree = "<group>"; };
 		8217C4F0AD0040BADA2E5215 /* AskPrompt.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskPrompt.swift; sourceTree = "<group>"; };
 		83C10C75452264A3896BC75C /* AlbumMatchFixView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumMatchFixView.swift; sourceTree = "<group>"; };
+		85654E37A9BE7E17EE566030 /* GoalShareCards.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GoalShareCards.swift; sourceTree = "<group>"; };
 		85F7A298126670E3EE7BE3F1 /* ShareCardViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareCardViews.swift; sourceTree = "<group>"; };
 		86BE5C0DC594B2F36A0D0776 /* TheClimbView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TheClimbView.swift; sourceTree = "<group>"; };
 		873DD35C26543A696D6F0080 /* QueryCoreFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryCoreFields.swift; sourceTree = "<group>"; };
@@ -1154,6 +1156,7 @@
 				254E0749D2363433CFAF15B4 /* ShareChartCardView.swift */,
 				CA81FD3AF7F89F425D7C75B8 /* ShareAvatar.swift */,
 				6A3B61A79908B20DB4FE1A58 /* ShareNativeChart.swift */,
+				85654E37A9BE7E17EE566030 /* GoalShareCards.swift */,
 			);
 			name = Sharing;
 			path = Sharing;
@@ -1735,6 +1738,7 @@
 				1A4817A8707C67A174FF7DA5 /* GoalsView.swift in Sources */,
 				FC2C21E12C3416B10A2822E9 /* GoalsLanding.swift in Sources */,
 				ED55872518F0F9463DFD4BD4 /* GoalCriteria.swift in Sources */,
+				57C55E0B10B1FBF9C2328D75 /* GoalShareCards.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

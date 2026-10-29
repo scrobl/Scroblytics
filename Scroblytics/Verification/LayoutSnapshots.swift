@@ -209,6 +209,17 @@ enum LayoutSnapshots {
                     }
                 }
             }
+            // The cards a goal's Share button makes (the detail page's, with forecasts, and the landing page's, without).
+            for (name, g, r) in [("busy", goal, busy), ("done", done, finished), ("future", later, upcoming)] as [(String, ListeningGoal, GoalResult)] {
+                guard let card = GoalShareCards.card(goal: g, analysis: r.analysis, result: r, calendar: calendar, now: now) else { continue }
+                for size in [ShareSize.wide, .square] {
+                    var o = card.defaultOptions; o.size = size
+                    if name == "busy" { o.flags["bands"] = true }
+                    if let png = ShareRenderer.png(card: card, options: o, identity: .anonymous, images: [:], scale: 1) {
+                        try? png.write(to: URL(fileURLWithPath: folder).appending(path: "goals-share-\(name)-\(size.rawValue).png"))
+                    }
+                }
+            }
             // The landing page with every goal: in progress, finished and not started yet, at a few widths.
             let behind = ListeningGoal(title: "Hear the lot by spring", start: at(-120), deadline: at(30), lookbackDays: 90)
             let missed = ListeningGoal(title: "Last quarter's goal", start: at(-200), deadline: at(-5), lookbackDays: 90)

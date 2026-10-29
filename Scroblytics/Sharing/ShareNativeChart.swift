@@ -47,12 +47,21 @@ final class ShareNativeChart: @unchecked Sendable, Equatable {
     /// How much larger than on screen the chart is drawn on a card of each shape.
     let zoomForShape: @Sendable (ShareSize) -> CGFloat
     let make: @MainActor @Sendable (ShareNativeLayout, ShareOptions, [String: NSImage]) -> AnyView
+    /// A card that draws the whole card itself (its own header, figures and chart) instead of the common frame around `make`'s chart. It
+    /// still has the caption, controls and text of any chart card; it is handed the card, the options, who is on it and the pictures.
+    let fullCard: (@MainActor @Sendable (ShareCard, ShareOptions, ShareIdentity, [String: NSImage]) -> AnyView)?
+    /// Switches a full card starts with in another state than the usual ("caption" is on, "footnote" off, for every chart card).
+    let defaultFlags: [String: Bool]
 
     init(
         id: String, caption: String, comparisonCaption: String? = nil, footnote: String? = nil, preferredSize: ShareSize = .wide, controls: [ShareNativeControl] = [],
         imageURLs: [String?] = [], textLines: [String] = [], zoomForShape: @escaping @Sendable (ShareSize) -> CGFloat = ShareNativeChart.defaultZoom,
+        defaultFlags: [String: Bool] = [:],
+        fullCard: (@MainActor @Sendable (ShareCard, ShareOptions, ShareIdentity, [String: NSImage]) -> AnyView)? = nil,
         make: @escaping @MainActor @Sendable (ShareNativeLayout, ShareOptions, [String: NSImage]) -> AnyView
     ) {
+        self.fullCard = fullCard
+        self.defaultFlags = defaultFlags
         self.id = id
         self.caption = caption
         self.comparisonCaption = comparisonCaption
@@ -106,6 +115,14 @@ struct ShareNativeChartCardView: View {
     private let panelInset: CGFloat = 22
 
     var body: some View {
+        if let full = native.fullCard {
+            full(card, options, identity, images)
+        } else {
+            framed
+        }
+    }
+
+    private var framed: some View {
         ZStack {
             ShareCardBackground(size: size, imageURL: nil, images: [:])
             VStack(alignment: .leading, spacing: 0) {

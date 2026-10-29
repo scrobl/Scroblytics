@@ -134,6 +134,7 @@ struct GoalsView: View {
         if isLoading { ProgressView().controlSize(.small) }
         if let goal = selectedGoal {
             Spacer(minLength: 0)
+            ShareButton(card: { shareCard(for: goal) }, isEnabled: result != nil && resultGoalID == goal.id)
             Button { scheduleReload() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                 .help("Work the numbers out again from your latest history and loved tracks")
                 .disabled(isLoading)
@@ -186,6 +187,7 @@ struct GoalsView: View {
                     ForEach(goals) { goal in
                         GoalCard(
                             goal: goal, analysis: summaries[goal.id],
+                            shareCard: { summaries[goal.id].flatMap { GoalShareCards.card(goal: goal, analysis: $0, result: nil) } },
                             onOpen: { openGoalID = goal.id }, onEdit: { editor = .edit(goal) }, onDelete: { deleting = goal }
                         )
                     }
@@ -672,6 +674,14 @@ struct GoalsView: View {
         let plays = info.plays == 1 ? "1 play" : "\(info.plays.formatted()) plays"
         guard let last = info.lastPlayed else { return plays }
         return "\(plays) · last \(dayLabel(last))"
+    }
+
+    // MARK: - Share
+
+    /// The open goal as a card: the chart as the page has it, with its forecasts.
+    private func shareCard(for goal: ListeningGoal) -> ShareCard? {
+        guard let result, resultGoalID == goal.id else { return nil }
+        return GoalShareCards.card(goal: goal, analysis: result.analysis, result: result)
     }
 
     // MARK: - Set aside

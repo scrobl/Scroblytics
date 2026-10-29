@@ -202,6 +202,31 @@ enum GoalsChecks {
             check("a goal past its deadline with tracks left is missed",
                   status(goal, now: at(60)).0.kind == .missed && status(goal, now: at(60)).0.headline == "Deadline passed", "\(status(goal, now: at(60)).0)")
             check("with no loved tracks the card says so", GoalCardStatus(GoalCompute.analysis(goal: goal, loves: [], plays: plays, now: now, calendar: calendar)).kind == .empty)
+            // The one-line outlook on the cards: the same middle run of "Your habits" the goal's own page shows.
+            let pageForecast = GoalCompute.run(goal: goal, loves: loves, plays: plays, now: now, calendar: calendar).forecasts[.habits]
+            let outlook = GoalOutlook.make(goal: goal, analysis: activeAnalysis, now: now, calendar: calendar)
+            let expectedFinish = pageForecast?.finishMedian.flatMap { $0 <= activeAnalysis.daysLeft ? $0 : nil }
+            check("the card's outlook matches the goal page's habits forecast",
+                  outlook != nil && pageForecast != nil
+                    && (expectedFinish.map { days in outlook?.finishDate == calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now)) && outlook?.shortfall == 0 }
+                        ?? (outlook?.shortfall == max(Int((pageForecast?.median.last ?? 0).rounded()), 1) && outlook?.finishDate == nil)),
+                  "\(String(describing: outlook)) \(String(describing: pageForecast?.finishMedian)) \(String(describing: pageForecast?.median.last))")
+            check("a goal not started, achieved or past its deadline has no outlook",
+                  GoalOutlook.make(goal: future, analysis: futureAnalysis, now: now, calendar: calendar) == nil
+                    && GoalOutlook.make(goal: goal, analysis: status(goal, plays: allHeard.sorted { $0.playedAt < $1.playedAt }).1, now: now, calendar: calendar) == nil
+                    && GoalOutlook.make(goal: goal, analysis: status(goal, now: at(60)).1, now: at(60), calendar: calendar) == nil)
+            var short = activeAnalysis
+            short.outlook = GoalOutlook(shortfall: 500, finishDate: nil)
+            let shortStatus = GoalCardStatus(short)
+            check("a forecast that falls short reads \"About 500 short at your pace\" and turns an ahead-of-plan card orange",
+                  shortStatus.outlook == "About 500 short at your pace" && shortStatus.fallsShort
+                    && ([GoalCardStatus.Kind.ahead, .onPlan].contains(shortStatus.kind) ? shortStatus.color == .orange : true) && shortStatus.headline == activeStatus.headline)
+            var onPace = activeAnalysis
+            onPace.outlook = GoalOutlook(shortfall: 0, finishDate: at(25))
+            let onPaceStatus = GoalCardStatus(onPace)
+            check("a forecast that finishes in time says when and keeps the card's colour",
+                  onPaceStatus.outlook?.hasPrefix("On pace to finish ") == true && !onPaceStatus.fallsShort && onPaceStatus.color == activeStatus.color)
+            check("a shared card leaves the outlook out", GoalCardStatus(short, includingOutlook: false).outlook == nil && GoalCardStatus(short, includingOutlook: false).color == activeStatus.color)
             let nearly = GoalCompute.analysis(goal: goal, loves: loves, plays: plays, now: now, calendar: calendar)
             check("the percent heard is never 100 while a track is left, and is 100 when none is",
                   GoalCardStatus.percent(nearly) < 100 && GoalCardStatus.percent(GoalCompute.analysis(goal: goal, loves: loves, plays: allHeard.sorted { $0.playedAt < $1.playedAt }, now: now, calendar: calendar)) == 100)
@@ -696,7 +721,8 @@ enum GoalsChecks {
             ]
             let loaderBegan = Date()
             let sums = (try? await GoalSummaryLoader.load(goals: threeGoals, context: context, container: container, calendar: calendar)) ?? [:]
-            print(String(format: "  Overview row of three goals (loaded from the store, burn-down only): %.2f s for %d goals", Date().timeIntervalSince(loaderBegan), sums.count))
+            print(String(format: "  Overview row of three goals (loaded from the store, with the habits outlook): %.2f s for %d goals", Date().timeIntervalSince(loaderBegan), sums.count))
+            for goal in threeGoals { print("    outlook for \(goal.criteria.summary): \(sums[goal.id]?.outlook.map { GoalCardStatus.describe($0) } ?? "none")") }
             let again = Date()
             _ = try? await GoalSummaryLoader.load(goals: threeGoals, context: context, container: container, calendar: calendar)
             print(String(format: "  the same again (history already in memory): %.2f s", Date().timeIntervalSince(again)))

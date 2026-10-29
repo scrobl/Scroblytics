@@ -11,8 +11,13 @@ struct GoalCardStatus: Equatable {
     /// The share of the goal's loved tracks that has been heard, and the share the straight-line plan would have had heard by today.
     var heardShare: Double
     var planShare: Double
+    /// Where "Your habits" has it ending up: "About 500 short at your pace" or "On pace to finish Nov 20"; nil when there is no forecast.
+    var outlook: String?
+    /// The habits forecast leaves tracks to hear at the deadline, however the goal stands against the plan today.
+    var fallsShort = false
 
-    init(_ a: GoalAnalysis) {
+    /// `includingOutlook: false` leaves the forecast out (a shared card shows the standing, with the forecasts as its own option).
+    init(_ a: GoalAnalysis, includingOutlook: Bool = true) {
         heardShare = a.membersNow > 0 ? Double(a.heardNow) / Double(a.membersNow) : 0
         let planToday = a.plan.isEmpty ? 0 : a.plan[min(max(a.todayIndex, 0), a.plan.count - 1)]
         planShare = a.membersNow > 0 && a.remainingNow > 0 && a.daysUntilStart == 0 ? min(max(1 - planToday / Double(a.membersNow), 0), 1) : 0
@@ -40,7 +45,15 @@ struct GoalCardStatus: Equatable {
                 kind = .onPlan
                 headline = "On plan"
             }
+            if includingOutlook, let o = a.outlook {
+                fallsShort = o.fallsShort
+                outlook = Self.describe(o)
+            }
         }
+    }
+
+    static func describe(_ o: GoalOutlook) -> String {
+        o.finishDate.map { "On pace to finish \(GoalsView.dayLabel($0))" } ?? "About \(o.shortfall.formatted()) short at your pace"
     }
 
     /// The whole percent heard; never 100 while something is left, so "5 to hear" doesn't sit beside "100%".
@@ -57,7 +70,9 @@ struct GoalCardStatus: Equatable {
     static let gold = Color(red: 0.96, green: 0.74, blue: 0.22)
 
     var color: Color {
-        switch kind {
+        // Ahead of the plan so far, but not on course to finish: the colour follows the forecast.
+        if fallsShort && (kind == .ahead || kind == .onPlan) { return .orange }
+        return switch kind {
         case .complete: Self.gold
         case .ahead: .green
         case .behind: .orange
@@ -112,10 +127,9 @@ struct GoalCard: View {
     var onToggleOverview: (() -> Void)? = nil
     /// The "…" menu (open, edit, delete): left off where the card is only a summary (the Overview).
     var showsMenu = true
-
     @State private var hovering = false
 
-    private var status: GoalCardStatus? { analysis.map(GoalCardStatus.init) }
+    private var status: GoalCardStatus? { analysis.map { GoalCardStatus($0) } }
     private var achieved: Bool { status?.kind == .complete }
     private var tint: Color { status?.color ?? .secondary }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -228,6 +242,13 @@ struct GoalCard: View {
             }
             GoalProgressBar(heard: status.heardShare, plan: status.planShare, color: status.color)
                 .frame(height: 10)
+            if let outlook = status.outlook {
+                Label(outlook, systemImage: status.fallsShort ? "chart.line.downtrend.xyaxis" : "chart.line.uptrend.xyaxis")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(status.fallsShort ? Color.orange : Color.secondary)
+                    .lineLimit(1)
+                    .help("Where \"Your habits\" ends up if you keep listening as you have lately (the middle estimate)")
+            }
         }
     }
 

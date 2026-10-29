@@ -285,11 +285,37 @@ struct GoalAnalysis: Sendable {
     /// Loves dated on a day with `GoalEngine.bulkLoveDayThreshold` or more of them, and those days.
     let bulkLoves: Int
     let bulkLoveDays: [Date]
+    /// Where "Your habits" has the goal ending up; only worked out for the cards (`GoalSummaryLoader`), nil elsewhere.
+    var outlook: GoalOutlook?
 
     /// Tracks a day from now on that finish the goal in a straight line, today included.
     var requiredPerDay: Double {
         let days = max(daysLeft + 1, 1)
         return Double(remainingNow) / Double(days)
+    }
+}
+
+/// The short answer the cards give about the future: the middle run of "Your habits" either finishes by the deadline, on some day, or
+/// leaves some tracks still to hear on it. Worked out exactly as the goal's own page does, so the two always agree.
+struct GoalOutlook: Sendable, Equatable {
+    /// Tracks still to hear on the deadline day in the middle run; 0 when it finishes in time.
+    let shortfall: Int
+    /// The day the middle run finishes, when that is by the deadline.
+    let finishDate: Date?
+
+    var fallsShort: Bool { shortfall > 0 }
+
+    /// nil for a goal that has not started, is finished, or whose deadline day is today or past (nothing is left to forecast).
+    static func make(goal: ListeningGoal, analysis: GoalAnalysis, now: Date, calendar: Calendar) -> GoalOutlook? {
+        guard analysis.daysUntilStart == 0, analysis.remainingNow > 0, analysis.daysLeft > 0 else { return nil }
+        let setup = GoalSimulator.setup(from: analysis, goal: goal)
+        let seed = GoalSimulator.seed(for: goal, remaining: analysis.remainingNow)
+        let dedicated = goal.dedicatedShare.map { $0 * setup.playsPerDay } ?? 0
+        let forecast = GoalSimulator.forecast(.habits, setup: setup, dedicatedPlaysPerDay: dedicated, seed: seed)
+        if let days = forecast.finishMedian, days <= analysis.daysLeft {
+            return GoalOutlook(shortfall: 0, finishDate: calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now)))
+        }
+        return GoalOutlook(shortfall: max(Int((forecast.median.last ?? 0).rounded()), 1), finishDate: nil)
     }
 }
 
@@ -880,7 +906,7 @@ final class GoalsOpenRequest {
     var goalID: UUID?
 }
 
-/// The numbers behind goals' cards (the burn-down without the forecasts), for the Goals page and the Overview.
+/// The numbers behind goals' cards (the burn-down, and the one-line outlook from "Your habits"), for the Goals page and the Overview.
 @MainActor
 enum GoalSummaryLoader {
     static func load(goals: [ListeningGoal], context: ModelContext, container: ModelContainer, calendar: Calendar) async throws -> [UUID: GoalAnalysis] {
@@ -892,8 +918,11 @@ enum GoalSummaryLoader {
         let tags = goals.contains { !$0.criteria.tags.isEmpty } ? EntityTagsEngine.loadSnapshot(context: context) : EntityTagsSnapshot.empty
         return await Task.detached(priority: .userInitiated) {
             let members = GoalMembership.members(for: goals, loved: loves, plays: plays, tags: tags)
+            let now = Date.now
             return Dictionary(uniqueKeysWithValues: goals.map { goal in
-                (goal.id, GoalCompute.analysis(goal: goal, members: members[goal.id] ?? GoalMembers(loves: []), plays: plays, presence: presence, now: .now, calendar: calendar))
+                var analysis = GoalCompute.analysis(goal: goal, members: members[goal.id] ?? GoalMembers(loves: []), plays: plays, presence: presence, now: now, calendar: calendar)
+                analysis.outlook = GoalOutlook.make(goal: goal, analysis: analysis, now: now, calendar: calendar)
+                return (goal.id, analysis)
             })
         }.value
     }

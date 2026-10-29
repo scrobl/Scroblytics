@@ -11,7 +11,7 @@ enum GoalShareCards {
         goal: ListeningGoal, analysis a: GoalAnalysis, result: GoalResult?, calendar: Calendar = AppCalendars.listening, now: Date = Date()
     ) -> ShareCard? {
         guard a.membersNow > 0 else { return nil }
-        let status = GoalCardStatus(a)
+        let status = GoalCardStatus(a, includingOutlook: false)
         let forecasts = result?.forecasts ?? [:]
         let kinds = GoalScenarioKind.allCases.filter { forecasts[$0] != nil }
         var controls = [ShareNativeControl(id: "plan", label: "Show the on-target line", kind: .toggle(defaultValue: true))]

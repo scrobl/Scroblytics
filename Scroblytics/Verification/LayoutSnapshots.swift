@@ -225,7 +225,9 @@ enum LayoutSnapshots {
             let missed = ListeningGoal(title: "Last quarter's goal", start: at(-200), deadline: at(-5), lookbackDays: 90)
             let landingGoals = [goal, done, later, behind, missed]
             let landingAnalyses = landingGoals.map { g in
-                (g, GoalCompute.analysis(goal: g, loves: loves, plays: g.id == done.id ? finishedPlays : plays, now: now, calendar: calendar))
+                var a = GoalCompute.analysis(goal: g, loves: loves, plays: g.id == done.id ? finishedPlays : plays, now: now, calendar: calendar)
+                a.outlook = GoalOutlook.make(goal: g, analysis: a, now: now, calendar: calendar)
+                return (g, a)
             }
             for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 for width in [1200, 700, 420] as [CGFloat] {

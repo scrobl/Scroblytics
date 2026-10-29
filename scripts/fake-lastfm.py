@@ -57,11 +57,12 @@ SCENARIOS = {
     "rate-limited-forever": "Every history request is rate-limited (error 29), always",
     "timing": "10,000 scrobbles, no limits; with --latency-ms, every history page takes that long (to time an import)",
     "late-plays": "3,000 scrobbles an hour apart; /__inject adds new, late or deleted plays between syncs",
+    "loved-dates": "50 scrobbles and 450 loved tracks, each with the date it was loved; /__love adds or removes loves between syncs",
 }
 PAGE_SIZE = 200
 NOW = int(time.time())
 SIZES = {"empty-account": 0, "small": 50, "medium": 2000, "large": 40000, "slow-import": 4000,
-         "rate-limited-long": 2000, "strict-rate": 6000, "rate-limited-forever": 2000, "timing": 10000, "late-plays": 3000}
+         "rate-limited-long": 2000, "strict-rate": 6000, "rate-limited-forever": 2000, "timing": 10000, "late-plays": 3000, "loved-dates": 50}
 RATE_LIMIT_ERROR = (29, "Rate Limit Exceeded - Your IP has made too many requests in a short period", 429)
 STRICT_PER_SECOND = 5
 LONG_WINDOW_SECONDS = 90.0
@@ -97,6 +98,10 @@ class State:
         if scenario in ("rate-limited", "drops-mid-sync", "flaky-key"):
             self.total = SIZES["medium"]
         self.rows = make_scrobbles(self.total, 3600 if scenario == "late-plays" else 240)
+        # Loved tracks, newest first (the order Last.fm lists them in), only for the loved-dates scenario.
+        self.loves = []
+        if scenario == "loved-dates":
+            self.loves = [{"uts": NOW - 21600 * i, "artist": f"Artist {i % 20 + 1}", "track": f"Loved Track {i + 1}"} for i in range(450)]
         self.lock = threading.Lock()
         self.history_requests = 0
         self.drops_left = 3
@@ -123,9 +128,21 @@ class State:
         self.rows = [r for r in self.rows if id(r) not in gone]
         self.rows.sort(key=lambda r: -r["uts"])
 
+    def change_loves(self, add=0, remove=0):
+        """Loves added now (at the front) or removed (from the oldest end), between syncs."""
+        self.love_counter = getattr(self, "love_counter", 0)
+        for _ in range(add):
+            self.love_counter += 1
+            self.loves.insert(0, {"uts": int(time.time()), "artist": "New Loved Artist", "track": f"New Love {self.love_counter}"})
+        if remove:
+            self.loves = self.loves[: max(len(self.loves) - remove, 0)]
+
     def stats(self):
         return {
             "scenario": self.scenario,
+            "loved_total": len(self.loves),
+            "loved_newest_uts": self.loves[0]["uts"] if self.loves else None,
+            "loved_oldest_uts": self.loves[-1]["uts"] if self.loves else None,
             "total_scrobbles": len(self.rows),
             "first_uts": self.rows[-1]["uts"] if self.rows else None,
             "last_uts": self.rows[0]["uts"] if self.rows else None,
@@ -177,6 +194,12 @@ def build_handler(state):
                 q = {k: int(v[0]) for k, v in parse_qs(url.query).items()}
                 with state.lock:
                     state.inject(new=q.get("new", 0), late=q.get("late", 0), delete_recent=q.get("delete_recent", 0), delete_old=q.get("delete_old", 0))
+                self._send(200, state.stats())
+                return
+            if url.path == "/__love":
+                q = {k: int(v[0]) for k, v in parse_qs(url.query).items()}
+                with state.lock:
+                    state.change_loves(add=q.get("add", 0), remove=q.get("remove", 0))
                 self._send(200, state.stats())
                 return
             if url.path.startswith("/repos/scrobl/Scroblytics/releases"):
@@ -232,8 +255,14 @@ def build_handler(state):
             elif method == "user.getRecentTracks":
                 self._recent(q)
             elif method == "user.getLovedTracks":
-                self._send(200, {"lovedtracks": {"track": [], "@attr": {
-                    "user": q.get("user", ""), "totalPages": "0", "page": "1", "perPage": str(PAGE_SIZE), "total": "0"}}})
+                limit = int(q.get("limit", PAGE_SIZE))
+                page = int(q.get("page", "1"))
+                loves = state.loves
+                pages = (len(loves) + limit - 1) // limit
+                chunk = loves[(page - 1) * limit: page * limit]
+                tracks = [{"name": l["track"], "artist": {"name": l["artist"]}, "date": {"uts": str(l["uts"]), "#text": ""}} for l in chunk]
+                self._send(200, {"lovedtracks": {"track": tracks, "@attr": {
+                    "user": q.get("user", ""), "totalPages": str(pages), "page": str(page), "perPage": str(limit), "total": str(len(loves))}}})
             else:
                 # Tags, popularity, similar music, tracklists: this stand-in has none of it.
                 self._error(6, "not found", 404)

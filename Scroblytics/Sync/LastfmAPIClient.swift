@@ -410,6 +410,8 @@ actor LastfmAPIClient {
 
     struct LovedTracksPage {
         let tracks: [(artist: String, track: String)]
+        /// When each track in `tracks` was loved, in the same order (nil where Last.fm gave none).
+        let dates: [Date?]
         let totalPages: Int
         /// `@attr.total` — how many loves the account has, as Last.fm counts them.
         let total: Int?
@@ -428,12 +430,24 @@ actor LastfmAPIClient {
             .init(name: "page", value: String(page)),
         ]
         let response: LovedTracksResponse = try await request(queryItems: items, foreground: true)
+        return try Self.lovedPage(from: response)
+    }
+
+    /// Reads a `user.getLovedTracks` answer (kept apart from the request so a check can feed it a canned one).
+    static func lovedPage(fromJSON data: Data) throws -> LovedTracksPage {
+        try lovedPage(from: JSONDecoder().decode(LovedTracksResponse.self, from: data))
+    }
+
+    private static func lovedPage(from response: LovedTracksResponse) throws -> LovedTracksPage {
         guard let totalPagesString = response.lovedtracks.attr?.totalPages,
               let totalPages = Int(totalPagesString) else {
             throw LastfmAPIError.malformedField("lovedtracks.@attr.totalPages missing or non-numeric")
         }
         let tracks = response.lovedtracks.track.map { (artist: $0.artist.name, track: $0.name) }
-        return LovedTracksPage(tracks: tracks, totalPages: totalPages, total: response.lovedtracks.attr?.total.flatMap(Int.init))
+        let dates: [Date?] = response.lovedtracks.track.map { raw in
+            raw.date.flatMap { Double($0.uts) }.map { Date(timeIntervalSince1970: $0) }
+        }
+        return LovedTracksPage(tracks: tracks, dates: dates, totalPages: totalPages, total: response.lovedtracks.attr?.total.flatMap(Int.init))
     }
 
     /// Community tags for an artist (`artist.getTopTags`), weight-sorted,
@@ -948,9 +962,11 @@ private struct LovedTracksResponse: Decodable {
     /// confirmed against the real API response shape, not assumed identical
     /// to the sibling endpoint.
     struct LovedTrackArtist: Decodable { let name: String }
+    struct LovedTrackDate: Decodable { let uts: String }
     struct LovedTrackRaw: Decodable {
         let name: String
         let artist: LovedTrackArtist
+        let date: LovedTrackDate?
     }
     struct LovedTracks: Decodable {
         let track: [LovedTrackRaw]

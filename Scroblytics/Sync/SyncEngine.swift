@@ -643,18 +643,27 @@ actor SyncEngine {
         progress(1, 1)
         do {
             var fetched: [(artist: String, track: String)] = []
+            var lovedDates: [String: Date] = [:]
+            func remember(_ page: LastfmAPIClient.LovedTracksPage) {
+                for (track, date) in zip(page.tracks, page.dates) {
+                    guard let date else { continue }
+                    let key = TextNormalization.lovedKey(artist: track.artist, track: track.track)
+                    if lovedDates[key] == nil { lovedDates[key] = date }
+                }
+            }
             let first = try await client.fetchLovedTracksPage(page: 1)
+            remember(first)
 
             let local = try modelContext.fetch(FetchDescriptor<LovedTrackEntry>())
-            if LovedSyncPlan.fullWalkIsRecent(), case .additions(let added) = LovedSyncPlan.plan(
+            // Loves saved before dates were kept get theirs from one full walk (the quick path only sees page 1).
+            let needsDates = LovedSyncPlan.datesNeedBackfill && local.contains { $0.lovedAt == nil }
+            if !needsDates, LovedSyncPlan.fullWalkIsRecent(), case .additions(let added) = LovedSyncPlan.plan(
                 firstPage: first.tracks, total: first.total, pageSize: LastfmAPIClient.pageSize,
                 localKeys: Set(local.map(\.cacheKey)), localCount: local.count
             ) {
                 for track in added {
-                    modelContext.insert(LovedTrackEntry(
-                        cacheKey: TextNormalization.lovedKey(artist: track.artist, track: track.track),
-                        artist: track.artist, track: track.track
-                    ))
+                    let key = TextNormalization.lovedKey(artist: track.artist, track: track.track)
+                    modelContext.insert(LovedTrackEntry(cacheKey: key, artist: track.artist, track: track.track, lovedAt: lovedDates[key]))
                 }
                 if !added.isEmpty { try modelContext.save() }
                 return !added.isEmpty
@@ -668,6 +677,7 @@ actor SyncEngine {
                 for page in 2...totalPages {
                     do {
                         let result = try await client.fetchLovedTracksPage(page: page)
+                        remember(result)
                         fetched.append(contentsOf: result.tracks)
                         progress(max(1, totalPages - page), totalPages)
                     } catch {
@@ -683,6 +693,10 @@ actor SyncEngine {
 
             if complete {
                 LovedSyncPlan.recordFullWalk()
+                LovedSyncPlan.datesBackfilled = true
+                for entry in existing where entry.lovedAt == nil {
+                    if let date = lovedDates[entry.cacheKey] { entry.lovedAt = date; changed = true }
+                }
                 let fetchedKeys = Set(fetched.map {
                     TextNormalization.lovedKey(artist: $0.artist, track: $0.track)
                 })
@@ -696,7 +710,7 @@ actor SyncEngine {
                     let key = TextNormalization.lovedKey(artist: track.artist, track: track.track)
                     guard !existingKeys.contains(key) else { continue }
                     existingKeys.insert(key)
-                    modelContext.insert(LovedTrackEntry(cacheKey: key, artist: track.artist, track: track.track))
+                    modelContext.insert(LovedTrackEntry(cacheKey: key, artist: track.artist, track: track.track, lovedAt: lovedDates[key]))
                     changed = true
                 }
             } else {
@@ -704,7 +718,7 @@ actor SyncEngine {
                     let key = TextNormalization.lovedKey(artist: track.artist, track: track.track)
                     guard !existingKeys.contains(key) else { continue }
                     existingKeys.insert(key)
-                    modelContext.insert(LovedTrackEntry(cacheKey: key, artist: track.artist, track: track.track))
+                    modelContext.insert(LovedTrackEntry(cacheKey: key, artist: track.artist, track: track.track, lovedAt: lovedDates[key]))
                     changed = true
                 }
             }

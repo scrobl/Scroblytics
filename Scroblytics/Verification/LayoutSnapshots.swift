@@ -17,6 +17,10 @@ enum LayoutSnapshots {
             snapshotUpdates(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_GOALS"] {
+            snapshotGoals(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_NEWMUSIC"] {
             snapshotNewMusicTable(into: folder)
             return
@@ -136,6 +140,132 @@ enum LayoutSnapshots {
                     await render(UpdateStripLine(current: AppVersion("0.9.0")!, release: release, onView: {}, onSkip: {}, onDismiss: {}), width: width, scheme: scheme, name: "strip")
                 }
                 await render(Form { UpdateSettingsSection() }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings")
+            }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_GOALS=<folder>`: the Goals page for a made-up goal (about half done, some loves added along the way),
+    /// light and dark at a few widths, and a goal that is already complete.
+    @MainActor
+    private static func snapshotGoals(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = .current
+            let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: 12))!
+            func at(_ day: Int) -> Date { calendar.date(byAdding: .day, value: day, to: calendar.startOfDay(for: now))! }
+            var generator = SeededRandom(seed: 99)
+            // 220 loved tracks: each has its own appetite, so a few are played often and many hardly ever.
+            var loves: [GoalLove] = []
+            var appetite: [Double] = []
+            for i in 0..<220 {
+                let artist = "Artist \(i % 40)", track = "Loved Song Number \(i)"
+                loves.append(GoalLove(key: TextNormalization.lovedKey(artist: artist, track: track), artist: artist, track: track, lovedAt: i % 6 == 0 ? at(-Int.random(in: 1..<250, using: &generator)) : nil))
+                appetite.append(pow(Double.random(in: 0..<1, using: &generator), 3) * 0.12)
+            }
+            var plays: [ScrobbleSnapshot] = []
+            for day in stride(from: -300, through: -1, by: 1) {
+                for (i, love) in loves.enumerated() where Double.random(in: 0..<1, using: &generator) < appetite[i] {
+                    plays.append(ScrobbleSnapshot(artistName: love.artist, albumName: "", trackName: love.track, imageURL: nil, playedAt: at(day).addingTimeInterval(36_000)))
+                }
+                for _ in 0..<24 {
+                    plays.append(ScrobbleSnapshot(artistName: "Elsewhere", albumName: "", trackName: "Other \(Int.random(in: 0..<500, using: &generator))", imageURL: nil, playedAt: at(day).addingTimeInterval(40_000)))
+                }
+            }
+            plays.sort { $0.playedAt < $1.playedAt }
+            var goal = ListeningGoal(title: "Hear all my loved tracks", start: at(-300), deadline: at(63), lookbackDays: 90)
+            goal.dedicatedShare = 0.15
+            goal.setAside = [loves[3], loves[9]].map { GoalSetAside(key: $0.key, artist: $0.artist, track: $0.track) }
+            let done = ListeningGoal(title: "Already done", start: at(-300), deadline: at(63), lookbackDays: 90)
+            let busy = GoalCompute.run(goal: goal, loves: loves, plays: plays, now: now, calendar: calendar)
+            // The finished goal: every loved track played once.
+            let finishedPlays = (plays + loves.map { ScrobbleSnapshot(artistName: $0.artist, albumName: "", trackName: $0.track, imageURL: nil, playedAt: at(-2)) }).sorted { $0.playedAt < $1.playedAt }
+            let finished = GoalCompute.run(goal: done, loves: loves, plays: finishedPlays, now: now, calendar: calendar)
+            // A goal for next year: it hasn't started, so nothing is heard and the expected loves before it begins are counted.
+            let later = ListeningGoal(title: "Next year", start: at(63), deadline: at(63 + 364), lookbackDays: 90)
+            let upcoming = GoalCompute.run(goal: later, loves: loves, plays: plays, now: now, calendar: calendar)
+            print("goals snapshot: remaining \(busy.analysis.remainingNow) of \(busy.analysis.membersNow), needed \(String(describing: busy.neededPerDay))")
+            for (name, preview) in [("busy", (goal, busy)), ("done", (done, finished)), ("future", (later, upcoming))] {
+                for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                    for width in [1200, 700] as [CGFloat] {
+                        let view = NavigationStack {
+                            GoalsView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), preview: preview)
+                        }
+                        .environment(LovedTracksStore())
+                        .environment(FlaggedTracksStore())
+                        .modelContainer(container)
+                        .environment(\.colorScheme, scheme == "dark" ? .dark : .light)
+                        let host = NSHostingView(rootView: view.frame(width: width, height: 1700))
+                        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 1700), styleMask: [.titled], backing: .buffered, defer: false)
+                        window.appearance = NSAppearance(named: appearance)
+                        window.contentView = host
+                        window.setContentSize(NSSize(width: width, height: 1700))
+                        for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                            host.cacheDisplay(in: host.bounds, to: rep)
+                            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "goals-\(name)-\(scheme)-\(Int(width)).png"))
+                        }
+                    }
+                }
+            }
+            // The landing page with every goal: in progress, finished and not started yet, at a few widths.
+            let behind = ListeningGoal(title: "Hear the lot by spring", start: at(-120), deadline: at(30), lookbackDays: 90)
+            let missed = ListeningGoal(title: "Last quarter's goal", start: at(-200), deadline: at(-5), lookbackDays: 90)
+            let landingGoals = [goal, done, later, behind, missed]
+            let landingAnalyses = landingGoals.map { g in
+                (g, GoalCompute.analysis(goal: g, loves: loves, plays: g.id == done.id ? finishedPlays : plays, now: now, calendar: calendar))
+            }
+            for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                for width in [1200, 700, 420] as [CGFloat] {
+                    let view = NavigationStack {
+                        GoalsView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), landingPreview: landingAnalyses.map { (goal: $0.0, analysis: $0.1) })
+                    }
+                    .environment(LovedTracksStore()).environment(FlaggedTracksStore()).modelContainer(container)
+                    .environment(\.colorScheme, scheme == "dark" ? .dark : .light)
+                    let host = NSHostingView(rootView: view.frame(width: width, height: 1100))
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 1100), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: appearance)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: width, height: 1100))
+                    for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "goals-landing-\(scheme)-\(Int(width)).png"))
+                    }
+                }
+            }
+            // The chart's zoom (the choice is a stored preference, put back afterwards) and the goal editor.
+            let savedRange = UserDefaults.standard.object(forKey: "goals.chart.range")
+            for range in [GoalChartRange.back90, .back7, .ahead] {
+                UserDefaults.standard.set(range.rawValue, forKey: "goals.chart.range")
+                let view = NavigationStack { GoalsView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), preview: (goal, busy)) }
+                    .environment(LovedTracksStore()).environment(FlaggedTracksStore()).modelContainer(container)
+                    .environment(\.colorScheme, .light)
+                let host = NSHostingView(rootView: view.frame(width: 1200, height: 900))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: .aqua)
+                window.contentView = host
+                window.setContentSize(NSSize(width: 1200, height: 900))
+                for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "goals-zoom-\(range.rawValue).png"))
+                }
+            }
+            if let savedRange { UserDefaults.standard.set(savedRange, forKey: "goals.chart.range") } else { UserDefaults.standard.removeObject(forKey: "goals.chart.range") }
+            do {
+                let editor = GoalEditor(request: .new, calendar: calendar, onSave: { _ in }).environment(\.colorScheme, .light)
+                let host = NSHostingView(rootView: editor)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 380), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: .aqua)
+                window.contentView = host
+                window.setContentSize(NSSize(width: 520, height: 380))
+                for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "goals-editor.png"))
+                }
             }
             exit(0)
         }

@@ -23,6 +23,15 @@ enum LovedSyncPlan {
         return now.timeIntervalSince(last) < fullWalkInterval && last <= now
     }
 
+    private static let datesBackfilledKey = "lovedTracksDatesBackfilled"
+    /// Set once a complete walk has given every love its date. Until then a sync that finds loves without one does a full walk
+    /// instead of the quick path; after it, a love Last.fm gave no date for no longer forces walks.
+    static var datesBackfilled: Bool {
+        get { UserDefaults.standard.bool(forKey: datesBackfilledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: datesBackfilledKey) }
+    }
+    static var datesNeedBackfill: Bool { !datesBackfilled }
+
     static func recordFullWalk(now: Date = .now, defaults: UserDefaults = .standard) {
         defaults.set(now, forKey: lastFullWalkKey)
     }

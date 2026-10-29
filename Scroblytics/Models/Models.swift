@@ -515,11 +515,15 @@ final class LovedTrackEntry {
     @Attribute(.unique) var cacheKey: String
     var artist: String
     var track: String
+    /// When the track was loved, as Last.fm records it. nil until a full walk of the loved list has seen the track (loves
+    /// saved before this existed), or when Last.fm gave no date.
+    var lovedAt: Date?
 
-    init(cacheKey: String, artist: String, track: String) {
+    init(cacheKey: String, artist: String, track: String, lovedAt: Date? = nil) {
         self.cacheKey = cacheKey
         self.artist = artist
         self.track = track
+        self.lovedAt = lovedAt
     }
 }
 

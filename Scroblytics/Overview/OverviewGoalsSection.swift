@@ -59,7 +59,7 @@ struct OverviewGoalsSection: View {
         GoalCard(
             goal: goal, analysis: summaries[goal.id],
             shareCard: { summaries[goal.id].flatMap { GoalShareCards.card(goal: goal, analysis: $0, result: nil) } },
-            onOpen: { openGoal(goal.id) }, onEdit: {}, onDelete: {}, showsMenu: false
+            onOpen: { openGoal(goal.id) }, onEdit: {}, onDelete: {}, showsMenu: false, overviewChrome: true
         )
     }
 

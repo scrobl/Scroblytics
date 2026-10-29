@@ -127,6 +127,10 @@ struct GoalCard: View {
     var onToggleOverview: (() -> Void)? = nil
     /// The "…" menu (open, edit, delete): left off where the card is only a summary (the Overview).
     var showsMenu = true
+    /// Drawn like the Overview's other cards (their fill, a header with an arrow that opens it, and the usual highlight on hover)
+    /// instead of the Goals page's own.
+    var overviewChrome = false
+
     @State private var hovering = false
 
     private var status: GoalCardStatus? { analysis.map { GoalCardStatus($0) } }
@@ -135,6 +139,63 @@ struct GoalCard: View {
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
     var body: some View {
+        if overviewChrome { overviewBody } else { pageBody }
+    }
+
+    /// The card as one of the Overview's cards: the same fill and corner, the goal's name as the header (its arrow opens the goal),
+    /// and the goal's figures as one row that highlights on hover like the rows of the others.
+    private var overviewBody: some View {
+        let cornerShape = RoundedRectangle(cornerRadius: 10)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button(action: onOpen) {
+                    Label(goal.title, systemImage: "target")
+                        .font(AppTypography.sectionTitle).lineLimit(1).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open \(goal.title)")
+                Spacer(minLength: 4)
+                ShareButton(title: goal.title, iconOnly: true, card: shareCard, isEnabled: analysis != nil)
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                Button(action: onOpen) {
+                    Image(systemName: "arrow.up.right").font(AppTypography.compactMetadata).foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Open \(goal.title)")
+            }
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(GoalsView.dayLabel(goal.start)) – \(GoalsView.dayLabel(goal.deadline))").lineLimit(1)
+                        Text(goal.criteria.summary).lineLimit(1)
+                    }
+                    .font(AppTypography.metadata).foregroundStyle(.secondary)
+                    if let analysis, let status {
+                        progress(analysis, status)
+                        figures(analysis, status)
+                        sparkline(analysis, status)
+                    } else {
+                        ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .contentShape(Rectangle())
+            }
+            .drillDownHighlight()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: Self.height)
+        .background(.quaternary.opacity(0.3), in: cornerShape)
+        .overlay {
+            // An achieved goal keeps its gold, as a thin rim.
+            if achieved { cornerShape.strokeBorder(GoalCardStatus.gold.opacity(0.7), lineWidth: 1.5) }
+        }
+        .contextMenu { Button("Open", action: onOpen) }
+    }
+
+    private var pageBody: some View {
         ZStack(alignment: .topTrailing) {
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: 12) {

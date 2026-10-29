@@ -17,6 +17,10 @@ enum LayoutSnapshots {
             snapshotUpdates(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_NEWMUSIC"] {
+            snapshotNewMusicTable(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_RABBITHOLE"] {
             snapshotRabbitHole(into: folder, container: container)
             return
@@ -137,6 +141,47 @@ enum LayoutSnapshots {
         }
     }
 
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_NEWMUSIC=<folder>`: the Similar Sounds table with new tracks among the library's, light and dark.
+    private static func snapshotNewMusicTable(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+            let library = [("Dreaming of a Rather Long Track Title Here", "Artist A", 90), ("Second Song", "Artist B", 70), ("Third", "Artist C", 50)]
+            let candidates = library.map { RecommendedCandidate(track: $0.0, artist: $0.1, album: "Album", totalPlaycount: 5, lastPlayed: t0, matchScore: $0.2, sources: ["Seed Song — Artist Z"], topSource: "Seed Song — Artist Z", imageURL: nil) }
+            let scrobbles = library.map { ScrobbleSnapshot(artistName: $0.1, albumName: "Album", trackName: $0.0, imageURL: nil, playedAt: t0) }
+            let fresh = [
+                NewMusicCandidate(artist: "A Band You Have Never Played", track: "Fresh Idea", matchScore: 80, sources: ["Seed Song — Artist Z"], topSource: "Seed Song — Artist Z"),
+                NewMusicCandidate(artist: "Another", track: "A New Track With A Very Long Title That Must Truncate Cleanly", matchScore: 40, sources: ["Seed Song — Artist Z"], topSource: "Seed Song — Artist Z"),
+            ]
+            let pool = SimilarSoundsTool.pool(candidates: candidates, seedResults: [], newMusic: fresh, searchedNewMusic: true)
+            guard let result = try? SimilarSoundsTool.evaluate(pool: pool, groups: [], columns: SimilarSoundsTool.defaultColumns, scrobbles: scrobbles, snapshots: QuerySnapshots(), now: t0.addingTimeInterval(86400)) else { exit(1) }
+            let rows = SimilarSoundsBlend.blend(
+                library: QueryDisplayRow.make(from: result, imageLookup: [:]), result: result, newMusic: fresh, scores: pool.snapshot,
+                hasConditions: false, arrangement: SimilarSoundsArrangement(), imageLookup: [:]
+            ).rows
+            for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                let view = QueryResultsTable(rows: rows, columns: result.columns, identityTitle: "Track", onMoveColumn: { _, _ in }, onOpen: { _ in })
+                    .environment(LovedTracksStore())
+                    .environment(FlaggedTracksStore())
+                    .environment(PopularityStore())
+                    .environment(TagStore())
+                    .environment(LibraryGapBadgeStore())
+                    .environment(\.colorScheme, scheme == "dark" ? .dark : .light)
+                let host = NSHostingView(rootView: view.frame(width: 1100, height: 330))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 330), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: 1100, height: 330))
+                for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "newmusic-table-\(scheme).png"))
+                }
+            }
+            exit(0)
+        }
+    }
+
     /// `SCROBLYTICS_LAYOUT_SNAPSHOT_RABBITHOLE=<folder>`: the Rabbit Hole page with a made-up path, its suggestions and their reasons,
     /// the new controls and the "why these three" list, at a few widths (scratch store only).
     @MainActor
@@ -150,9 +195,14 @@ enum LayoutSnapshots {
             let suggestions = [
                 track("Apocalypse", "Cigarettes After Sex", score: 61, reasons: [RabbitHoleReason(kind: .playedNext, text: "You often play it right after Seed Song (4 times)"), RabbitHoleReason(kind: .sharedTags, text: "Shares tags: dream pop, slowcore"), RabbitHoleReason(kind: .loved, text: "One of your loved tracks")]),
                 track("Alison", "Slowdive", score: 70, reasons: [RabbitHoleReason(kind: .similar, text: "Last.fm: similar to Second Song"), RabbitHoleReason(kind: .forgotten, text: "A favourite you haven't played for 2 years")]),
-                track("Nothing Sweet", "The Sundays", score: 55, reasons: [RabbitHoleReason(kind: .similarArtist, text: "By The Sundays, who Last.fm calls similar to Artist B")]),
+                {
+                    var fresh = track("Nothing Sweet", "The Sundays", score: 55, reasons: [RabbitHoleReason(kind: .similar, text: "Last.fm: similar to Second Song"), RabbitHoleReason(kind: .newToYou, text: "New to you: you haven't played it")])
+                    fresh.isNew = true
+                    return fresh
+                }(),
             ]
             var options = RabbitHoleView.Options()
+            options.showStyle = true
             options.tree = RabbitHoleTree(
                 rootID: rootID,
                 nodes: [

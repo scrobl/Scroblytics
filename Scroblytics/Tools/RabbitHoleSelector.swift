@@ -9,6 +9,11 @@ struct RabbitHoleKnobs: Codable, Equatable, Sendable {
     var wander = 1
     /// Lower the chance of offering a track again that was shown or chosen in the last week.
     var avoidRepeats = true
+    /// How much new music (tracks you haven't played) is mixed in: 0 none, 1 a little, 2 about half.
+    var newMusic = 0
+
+    /// The share of the picks that new tracks should make up, as a chance of any one pick being new.
+    var newShare: Double { [0, 0.25, 0.5][min(2, max(0, newMusic))] }
 
     init() {}
 
@@ -17,6 +22,7 @@ struct RabbitHoleKnobs: Codable, Equatable, Sendable {
         familiarity = min(2, max(-2, try c.decodeIfPresent(Int.self, forKey: .familiarity) ?? 0))
         wander = min(2, max(0, try c.decodeIfPresent(Int.self, forKey: .wander) ?? 1))
         avoidRepeats = try c.decodeIfPresent(Bool.self, forKey: .avoidRepeats) ?? true
+        newMusic = min(2, max(0, try c.decodeIfPresent(Int.self, forKey: .newMusic) ?? 0))
     }
 }
 
@@ -84,6 +90,8 @@ enum RabbitHoleSelector {
         let plays: Int
         let lastPlayed: Date
         let loved: Bool
+        /// A track from outside your library.
+        var isOutside = false
     }
 
     /// How likely this item is to be picked, before spreading the three picks apart.
@@ -107,7 +115,7 @@ enum RabbitHoleSelector {
     static func pick(
         _ items: [Item], count: Int, knobs: RabbitHoleKnobs, memory: RabbitHoleMemory,
         pathArtistCounts: [String: Int], pathAlbumCounts: [String: Int], perArtist: Int, perAlbum: Int,
-        now: Date = Date(), using rng: inout some RandomNumberGenerator
+        newShare: Double = 0, now: Date = Date(), using rng: inout some RandomNumberGenerator
     ) -> [Item] {
         var remaining = items
         var picked: [Item] = []
@@ -119,13 +127,23 @@ enum RabbitHoleSelector {
                     || (perAlbum > 0 && albumCounts[item.albumKey, default: 0] >= perAlbum)
             }
             guard !remaining.isEmpty else { break }
-            let weights: [Double] = remaining.map { item in
+            var weights: [Double] = remaining.map { item in
                 var w = weight(item, knobs: knobs, memory: memory, now: now)
                 for earlier in picked {
                     if earlier.artistKey == item.artistKey { w *= 0.3 }
                     else if let tag = item.topTag, tag == earlier.topTag { w *= 0.6 }
                 }
                 return w
+            }
+            // New tracks and your own are weighed against each other so that a pick is new with about the chance asked for, whatever
+            // their match scores; within each kind the weights still decide.
+            if newShare > 0, newShare < 1 {
+                let outside = zip(remaining, weights).filter { $0.0.isOutside }.reduce(0) { $0 + $1.1 }
+                let inside = zip(remaining, weights).filter { !$0.0.isOutside }.reduce(0) { $0 + $1.1 }
+                if outside > 0, inside > 0 {
+                    let factor = newShare * inside / ((1 - newShare) * outside)
+                    for i in weights.indices where remaining[i].isOutside { weights[i] *= factor }
+                }
             }
             let total = weights.reduce(0, +)
             guard total > 0 else { break }

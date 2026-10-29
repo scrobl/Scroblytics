@@ -23,6 +23,8 @@ struct RecommendationSeedResult {
     let similarFound: Int
     /// How many of those resolved to a track actually in the library.
     let inLibrary: Int
+    /// With new music on: how many tracks you haven't played this seed turned up.
+    var newFound: Int = 0
 }
 
 /// A library track surfaced as similar to one or more seeds.
@@ -45,6 +47,15 @@ struct RecommendedCandidate {
     let imageURL: String?
 }
 
+/// The three Last.fm questions the Similar Sounds engine asks. The real client answers them; a check supplies a stand-in.
+protocol SimilaritySourcing: Sendable {
+    func fetchSimilarTracks(artist: String, track: String, limit: Int) async -> [SimilarTrack]
+    func fetchSimilarArtists(artist: String, limit: Int) async -> [SimilarArtist]
+    func fetchTopTracks(artist: String, limit: Int) async -> [String]
+}
+
+extension LastfmAPIClient: SimilaritySourcing {}
+
 /// The Similar Sounds engine — seeds one or more of the user's own
 /// artists/albums/tracks, asks Last.fm for similar artists/tracks
 /// (`artist.getSimilar`/`track.getSimilar`), then keeps only the candidates
@@ -58,11 +69,25 @@ struct RecommendedCandidate {
 /// just the locally-known Scrobble.imageURL every other card already reads.
 @MainActor
 enum SimilarSoundsEngine {
+    private struct Merged {
+        var tracks: [ScrobbleSnapshot]
+        var score: Double
+        var sources: Set<String>
+        /// Seed label that produced this candidate's current best (max) match.
+        var topSource: String
+    }
+    private struct NewFound {
+        var artist: String
+        var track: String
+        var score: Double
+        var sources: [String]
+        var topSource: String
+    }
     /// Safety cap on external calls per request.
     static let seedCap = 15
 
     static func run(
-        seeds: [RecommendationSeed], context: ModelContext, client: LastfmAPIClient
+        seeds: [RecommendationSeed], context: ModelContext, client: some SimilaritySourcing
     ) async throws -> (candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult]) {
         let container = context.container
         let allScrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
@@ -73,10 +98,26 @@ enum SimilarSoundsEngine {
     /// are awaited; everything else is plain value work, so the caller can hand it a library it
     /// has already read for another purpose.
     static func run(
-        seeds: [RecommendationSeed], scrobbles allScrobbles: [ScrobbleSnapshot], client: LastfmAPIClient
+        seeds: [RecommendationSeed], scrobbles allScrobbles: [ScrobbleSnapshot], client: some SimilaritySourcing
     ) async throws -> (candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult]) {
+        let result = try await run(seeds: seeds, scrobbles: allScrobbles, client: client, includeNewMusic: false)
+        return (result.candidates, result.seedResults)
+    }
+
+    /// Fewer similar artists than this are looked at for new tracks, and fewer tracks of each.
+    static let newMusicArtistsUsed = 6
+    static let newMusicTracksPerArtist = 2
+    /// A top track is a safer guess than a track Last.fm names as similar, so an artist's match counts a little less.
+    static let newMusicArtistDiscount = 0.85
+    static let newMusicCap = 200
+
+    /// As above; with `includeNewMusic`, also the tracks Last.fm named that you have never played (a track seed's similar tracks; for an
+    /// artist or album seed, the most-played tracks of its closest similar artists).
+    static func run(
+        seeds: [RecommendationSeed], scrobbles allScrobbles: [ScrobbleSnapshot], client: some SimilaritySourcing, includeNewMusic: Bool
+    ) async throws -> (candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult], newMusic: [NewMusicCandidate]) {
         let cappedSeeds = Array(seeds.prefix(seedCap))
-        guard !cappedSeeds.isEmpty else { return ([], []) }
+        guard !cappedSeeds.isEmpty else { return ([], [], []) }
 
         func seedLabel(_ s: RecommendationSeed) -> String {
             switch s.kind {
@@ -87,7 +128,7 @@ enum SimilarSoundsEngine {
         }
 
         // The library indexes: one pass over every scrobble, off the main thread.
-        let (artistByLower, tracksByArtistTrackLower, trackNamesByArtist) = await offMain {
+        let (artistByLower, tracksByArtistTrackLower, trackNamesByArtist, playedKeys) = await offMain {
             // Lowercased artist -> first-seen real casing, so a Last.fm-cased
             // similar-artist name resolves back to how the library spells it.
             var artistByLower: [String: String] = [:]
@@ -96,6 +137,7 @@ enum SimilarSoundsEngine {
             // re-scanning the whole library for every similar artist Last.fm returns.
             var trackNamesByArtist: [String: [String]] = [:]
             var seenTrackByArtist: [String: Set<String>] = [:]
+            var playedKeys = Set<String>()
             for s in allScrobbles {
                 let lowerArtist = s.artistName.lowercased()
                 if artistByLower[lowerArtist] == nil { artistByLower[lowerArtist] = s.artistName }
@@ -103,18 +145,12 @@ enum SimilarSoundsEngine {
                 tracksByArtistTrackLower[key, default: []].append(s)
                 if seenTrackByArtist[s.artistName, default: []].insert(s.trackName).inserted {
                     trackNamesByArtist[s.artistName, default: []].append(s.trackName)
+                    if includeNewMusic { playedKeys.insert(NewMusic.key(artist: s.artistName, track: s.trackName)) }
                 }
             }
-            return (artistByLower, tracksByArtistTrackLower, trackNamesByArtist)
+            return (artistByLower, tracksByArtistTrackLower, trackNamesByArtist, playedKeys)
         }
 
-        struct Merged {
-            var tracks: [ScrobbleSnapshot]
-            var score: Double
-            var sources: Set<String>
-            /// Seed label that produced this candidate's current best (max) match.
-            var topSource: String
-        }
         var merged: [String: Merged] = [:]
         // JS Map insertion order matters here (first-inserted key iterates
         // first below) — Swift's Dictionary doesn't provide that, so this is
@@ -144,6 +180,23 @@ enum SimilarSoundsEngine {
             return true
         }
 
+        // Tracks you haven't played, merged by track like the library ones: the best match wins and every seed that found it is kept.
+        var newFound: [String: NewFound] = [:]
+        @discardableResult
+        func addNew(artist: String, track: String, match: Double, source: String) -> Bool {
+            let key = NewMusic.key(artist: artist, track: track)
+            guard !playedKeys.contains(key) else { return false }
+            let spelled = artistByLower[artist.lowercased()] ?? artist
+            if var existing = newFound[key] {
+                if match > existing.score { existing.score = match; existing.topSource = source }
+                if !existing.sources.contains(source) { existing.sources.append(source) }
+                newFound[key] = existing
+            } else {
+                newFound[key] = NewFound(artist: spelled, track: track, score: match, sources: [source], topSource: source)
+            }
+            return true
+        }
+
         // Exact seed identities to exclude from the results — recommending
         // the seed back to itself isn't a recommendation.
         let excludeTrackKeys = Set(cappedSeeds.filter { $0.kind == .track }
@@ -156,11 +209,15 @@ enum SimilarSoundsEngine {
             let label = seedLabel(seed)
             var matches: [(artist: String, track: String, match: Double)] = []
             let similarFound: Int
+            var newForSeed = 0
 
             if seed.kind == .track {
                 let similar = await client.fetchSimilarTracks(artist: seed.artist, track: seed.track ?? "", limit: 100)
                 similarFound = similar.count
                 matches = similar.map { (artist: $0.artist, track: $0.name, match: $0.match) }
+                if includeNewMusic {
+                    for s in similar where addNew(artist: s.artist, track: s.name, match: s.match, source: label) { newForSeed += 1 }
+                }
             } else {
                 // Artist and album seeds both key off the artist — there's no
                 // album-level similarity endpoint.
@@ -172,13 +229,22 @@ enum SimilarSoundsEngine {
                         matches.append((artist: realArtist, track: trackName, match: sa.match))
                     }
                 }
+                if includeNewMusic {
+                    // The closest similar artists' best-known tracks that you haven't played (an artist you've never heard included).
+                    for sa in similarArtists.sorted(by: { $0.match > $1.match }).prefix(newMusicArtistsUsed) {
+                        var taken = 0
+                        for name in await client.fetchTopTracks(artist: sa.name, limit: 8) where taken < newMusicTracksPerArtist {
+                            if addNew(artist: sa.name, track: name, match: sa.match * newMusicArtistDiscount, source: label) { taken += 1; newForSeed += 1 }
+                        }
+                    }
+                }
             }
 
             var inLibrary = 0
             for m in matches where addCandidate(artist: m.artist, track: m.track, match: m.match, source: label) {
                 inLibrary += 1
             }
-            seedResults.append(RecommendationSeedResult(label: label, similarFound: similarFound, inLibrary: inLibrary))
+            seedResults.append(RecommendationSeedResult(label: label, similarFound: similarFound, inLibrary: inLibrary, newFound: newForSeed))
         }
 
         var candidates: [RecommendedCandidate] = []
@@ -222,6 +288,18 @@ enum SimilarSoundsEngine {
             a.matchScore != b.matchScore ? a.matchScore > b.matchScore : a.totalPlaycount > b.totalPlaycount
         }
 
-        return (candidates, seedResults)
+        // A seed is never offered back to itself.
+        let newMusic: [NewMusicCandidate] = newFound.values
+            .filter { !excludeTrackKeys.contains("\($0.artist.lowercased())\u{0}\($0.track.lowercased())") }
+            .sorted { $0.score != $1.score ? $0.score > $1.score : ($0.artist, $0.track) < ($1.artist, $1.track) }
+            .prefix(newMusicCap)
+            .map { found in
+                let rest = found.sources.filter { $0 != found.topSource }.sorted()
+                return NewMusicCandidate(
+                    artist: found.artist, track: found.track, matchScore: Int((found.score * 100).rounded()),
+                    sources: [found.topSource] + rest, topSource: found.topSource
+                )
+            }
+        return (candidates, seedResults, newMusic)
     }
 }

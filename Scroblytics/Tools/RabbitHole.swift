@@ -11,6 +11,8 @@ struct RabbitHoleTrack: Codable, Hashable, Identifiable, Sendable {
     let source: String
     /// Why it is offered, for the "why this track?" lines. Absent in paths saved before they existed.
     var reasons: [RabbitHoleReason]? = nil
+    /// A track you hadn't played when it was offered. Absent (not new) in paths saved before this existed.
+    var isNew: Bool? = nil
 
     var id: String {
         TextNormalization.lovedKey(artist: artist, track: track)
@@ -138,12 +140,41 @@ enum RabbitHoleEngine {
 
         let pathArtistCounts = Dictionary(grouping: path, by: { normalized($0.track.artist) }).mapValues(\.count)
         let pathAlbumCounts = Dictionary(grouping: path, by: { albumKey(artist: $0.track.artist, album: $0.track.album) }).mapValues(\.count)
+        // Tracks you haven't played. The conditions describe your own listening, which they don't have, so any condition leaves them out.
+        var newByKey: [String: RabbitHoleNewCandidate] = [:]
+        if knobs.newMusic > 0, groups.isEmpty {
+            let onPath = Set(path.map { NewMusic.key(artist: $0.track.artist, track: $0.track.track) })
+            for fresh in await RabbitHoleCandidates.newMusic(seeds: seeds, excludingKeys: onPath, library: library, provider: provider) {
+                let key = TextNormalization.lovedKey(artist: fresh.artist, track: fresh.track)
+                guard byKey[key] == nil, newByKey[key] == nil, !pathKeys.contains(key) else { continue }
+                newByKey[key] = fresh
+                items.append(RabbitHoleSelector.Item(
+                    key: key, artistKey: normalized(fresh.artist), albumKey: "\u{0}new\u{0}\(key)",
+                    topTag: snapshots.entityTags.tags(forArtist: fresh.artist)?.first?.lowercased(),
+                    score: fresh.score, plays: 0, lastPlayed: .distantPast, loved: false, isOutside: true
+                ))
+            }
+        }
+
         let picked = RabbitHoleSelector.pick(
             items, count: candidatesPerStep, knobs: knobs, memory: memory, pathArtistCounts: pathArtistCounts,
-            pathAlbumCounts: pathAlbumCounts, perArtist: perArtist, perAlbum: perAlbum, now: now, using: &rng
+            pathAlbumCounts: pathAlbumCounts, perArtist: perArtist, perAlbum: perAlbum, newShare: knobs.newShare, now: now, using: &rng
         )
 
         let candidates: [RabbitHoleTrack] = picked.compactMap { item in
+            if let fresh = newByKey[item.key] {
+                let target = ImageTarget(kind: .track, artist: fresh.artist, album: nil, track: fresh.track)
+                return RabbitHoleTrack(
+                    artist: fresh.artist, track: fresh.track, album: nil,
+                    imageURL: ImageResolutionEngine.effectiveImageURL(for: target, lookup: snapshots.images.lookup, fallbackURL: nil),
+                    playCount: 0, lastPlayed: nil, matchScore: Int(fresh.score.rounded()), source: "Last.fm similar",
+                    reasons: [
+                        RabbitHoleReason(kind: .similar, text: fresh.reason),
+                        RabbitHoleReason(kind: .newToYou, text: "New to you: you haven't played it"),
+                    ],
+                    isNew: true
+                )
+            }
             guard let candidate = byKey[item.key] else { return nil }
             let track = library.tracks[candidate.trackIndex]
             return RabbitHoleTrack(
@@ -152,12 +183,12 @@ enum RabbitHoleEngine {
                 reasons: Self.topReasons(candidate.reasons)
             )
         }
-        return RabbitHoleGeneration(candidates: candidates, totalBeforeConditions: scored.count, poolSize: items.count)
+        return RabbitHoleGeneration(candidates: candidates, totalBeforeConditions: scored.count + newByKey.count, poolSize: items.count)
     }
 
     /// The reasons worth showing, most telling first, at most three.
     static func topReasons(_ reasons: [RabbitHoleReason]) -> [RabbitHoleReason] {
-        let order: [RabbitHoleReason.Kind] = [.playedNext, .similar, .viaStep, .similarArtist, .sharedTags, .forgotten, .loved, .tempo]
+        let order: [RabbitHoleReason.Kind] = [.playedNext, .similar, .viaStep, .similarArtist, .sharedTags, .forgotten, .loved, .tempo, .newToYou]
         let ranked = reasons.sorted { (order.firstIndex(of: $0.kind) ?? 99) < (order.firstIndex(of: $1.kind) ?? 99) }
         return Array(ranked.prefix(3))
     }
@@ -172,6 +203,7 @@ enum RabbitHoleEngine {
         case .tempo: "Close tempo"
         case .loved: "Loved"
         case .forgotten: "Forgotten favourite"
+        case .newToYou: "New to you"
         }
     }
 

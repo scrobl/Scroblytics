@@ -21,6 +21,8 @@ struct QueryDisplayRow: Identifiable, Sendable {
     var title: String? = nil
     /// The artwork to show and its menu to offer, when the row is not itself an artist, album or track (a session shows its most played artist).
     var artworkTarget: ImageTarget? = nil
+    /// A track from outside the listener's library (Similar Sounds and Rabbit Hole offer these); the table marks it. Never set by the Query tab.
+    var isNewMusic = false
     var id: QueryRowKey { QueryRowKey(entity: row.id, period: row.period) }
     /// The entity's own id (what the result's per-entity info is keyed by).
     var entityID: QueryEntityID { row.id }

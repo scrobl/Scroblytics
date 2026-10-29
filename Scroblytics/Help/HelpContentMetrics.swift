@@ -166,6 +166,7 @@ extension HelpContent {
                     "Only music already in your library is kept, matched by artist and title.",
                     "The **match score** is 0–100 (Last.fm’s match × 100, rounded); when several seeds surface a track, the best score wins, and it is attributed to that seed (“Because you like…”).",
                     "The seed track itself is left out. Results sort by score, then plays.",
+                    "With **Include new music**, the tracks Last.fm names that you have never played are scored the same way (an artist seed’s best-known tracks count 15% less than their artist’s match) and placed among the results by that score.",
                 ]),
                 .heading("The Overview Similar Sounds card (Reverb)"),
                 .steps([

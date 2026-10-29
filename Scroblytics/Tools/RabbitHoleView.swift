@@ -257,7 +257,12 @@ struct RabbitHoleView: View {
                     HStack(spacing: 16) { knobControls }
                     VStack(alignment: .leading, spacing: 8) { knobControls }
                 }
-                .padding(.bottom, 4)
+                .padding(.bottom, options.knobs.newMusic > 0 && options.groups.contains { !$0.isEmpty } ? 0 : 4)
+                if options.knobs.newMusic > 0, options.groups.contains(where: { !$0.isEmpty }) {
+                    Text("New music is paused while Filters has conditions: they describe your own listening, which new tracks don't have.")
+                        .font(AppTypography.compactMetadata).foregroundStyle(.orange)
+                        .padding(.bottom, 4)
+                }
             }
         }
         .padding(14)
@@ -304,6 +309,7 @@ struct RabbitHoleView: View {
         default: break
         }
         if !options.knobs.avoidRepeats { parts.append("repeats allowed") }
+        if options.knobs.newMusic > 0 { parts.append(options.knobs.newMusic == 1 ? "a little new music" : "half new music") }
         return parts.joined(separator: " · ")
     }
 
@@ -346,6 +352,15 @@ struct RabbitHoleView: View {
         .help("Stay close favours the best matches; wander gives weaker matches a real chance. Steps taken for you follow it too.")
         Toggle("Avoid recent repeats", isOn: $options.knobs.avoidRepeats)
             .help("Makes tracks you were shown or chose in the last week less likely to come up again.")
+        Picker("New music", selection: $options.knobs.newMusic) {
+            Text("None").tag(0)
+            Text("A little").tag(1)
+            Text("Half").tag(2)
+        }
+        .fixedSize()
+        .help(options.groups.contains { !$0.isEmpty }
+              ? "Mixes in tracks Last.fm calls similar that you haven't played, marked New. Your conditions describe your own listening, so while any are set, new tracks are left out."
+              : "Mixes in tracks Last.fm calls similar that you haven't played, marked New. A little is about one pick in four; half is about one in two.")
     }
 
     private var currentStep: some View {
@@ -920,6 +935,8 @@ struct RabbitHoleView: View {
     }
 
     private func open(_ track: RabbitHoleTrack) {
+        // A track you haven't played has no page here; its Last.fm page is the place to hear what it is.
+        if track.isNew == true { NewMusic.openInLastfm(artist: track.artist, track: track.track); return }
         navigation.goToTrack(TrackIdentity(
             artist: track.artist,
             name: track.track,
@@ -942,6 +959,7 @@ private struct RabbitHoleTreeCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(track.track).font(AppTypography.contentTitle).lineLimit(1)
+                    if track.isNew == true { NewMusicBadge() }
                     TrackLovedIndicator(
                         artist: track.artist,
                         track: track.track,

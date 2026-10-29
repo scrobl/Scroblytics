@@ -688,6 +688,25 @@ actor LastfmAPIClient {
         }
     }
 
+    /// An artist's most-played tracks on Last.fm (`artist.getTopTracks`), most played first. A failure reads as "none", like
+    /// `fetchSimilarArtists`: it only widens a list that is useful without it.
+    func fetchTopTracks(artist: String, limit: Int = 10) async -> [String] {
+        let items: [URLQueryItem] = [
+            .init(name: "method", value: "artist.getTopTracks"),
+            .init(name: "artist", value: artist),
+            .init(name: "api_key", value: apiKey),
+            .init(name: "format", value: "json"),
+            .init(name: "limit", value: String(limit)),
+            .init(name: "autocorrect", value: "1"),
+        ]
+        do {
+            let response: TopTracksResponse = try await request(queryItems: items)
+            return response.toptracks.track.map { $0.name.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        } catch {
+            return []
+        }
+    }
+
     /// Like `fetchSimilarArtists`, but a failure (offline, rate limit, network) is thrown instead of looking like "nothing similar", so a
     /// caller that remembers answers never remembers a failure. Last.fm's "artist not found" (error 6) is a real, empty answer.
     func fetchSimilarArtistsChecked(artist: String, limit: Int = 30) async throws -> [SimilarArtist] {
@@ -1281,6 +1300,29 @@ private struct SimilarArtistsResponse: Decodable {
         }
     }
     let similarartists: Payload
+}
+
+private struct LastfmTopTrackRaw: Decodable {
+    let name: String
+}
+
+/// `toptracks.track` is an array, or a bare object when the artist has exactly one.
+private struct TopTracksResponse: Decodable {
+    struct Payload: Decodable {
+        let track: [LastfmTopTrackRaw]
+        enum CodingKeys: String, CodingKey { case track }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            if let array = try? c.decode([LastfmTopTrackRaw].self, forKey: .track) {
+                self.track = array
+            } else if let single = try? c.decode(LastfmTopTrackRaw.self, forKey: .track) {
+                self.track = [single]
+            } else {
+                self.track = []
+            }
+        }
+    }
+    let toptracks: Payload
 }
 
 private struct LastfmSimilarTrackArtist: Decodable {

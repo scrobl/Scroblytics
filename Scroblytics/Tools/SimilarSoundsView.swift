@@ -16,16 +16,19 @@ struct SimilarSoundsView: View {
         var songLimit: Int
         var perArtist: Int
         var perAlbum: Int
+        /// Also look for tracks Last.fm calls similar that you haven't played.
+        var includeNew: Bool
 
-        init(seeds: [SimilarSeed] = [], sort: SimilarSoundsSort = .matchScore, songLimit: Int = 50, perArtist: Int = 0, perAlbum: Int = 0) {
+        init(seeds: [SimilarSeed] = [], sort: SimilarSoundsSort = .matchScore, songLimit: Int = 50, perArtist: Int = 0, perAlbum: Int = 0, includeNew: Bool = false) {
             self.seeds = seeds
             self.sort = sort
             self.songLimit = songLimit
             self.perArtist = perArtist
             self.perAlbum = perAlbum
+            self.includeNew = includeNew
         }
 
-        private enum CodingKeys: String, CodingKey { case seeds, sort, songLimit, perArtist, perAlbum }
+        private enum CodingKeys: String, CodingKey { case seeds, sort, songLimit, perArtist, perAlbum, includeNew }
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,6 +37,7 @@ struct SimilarSoundsView: View {
             songLimit = try values.decodeIfPresent(Int.self, forKey: .songLimit) ?? 50
             perArtist = try values.decodeIfPresent(Int.self, forKey: .perArtist) ?? 0
             perAlbum = try values.decodeIfPresent(Int.self, forKey: .perAlbum) ?? 0
+            includeNew = try values.decodeIfPresent(Bool.self, forKey: .includeNew) ?? false
         }
     }
     private static let baseSongLimitChoices = [10, 25, 50, 100, 250, 500]
@@ -50,6 +54,10 @@ struct SimilarSoundsView: View {
     @State private var songLimit = 50
     @State private var perArtist = 0
     @State private var perAlbum = 0
+    @State private var includeNew = false
+    /// How many of the rows shown are new music, and how many were left out because conditions are set.
+    @State private var newShown = 0
+    @State private var newHidden = 0
     @State private var shuffleSeed: UInt64 = 1
     @State private var showingSeedSearch = false
     @State private var scrobbles: [ScrobbleSnapshot]?
@@ -67,7 +75,9 @@ struct SimilarSoundsView: View {
     @State private var notice: String?
     @State private var refineError: String?
 
-    private var saved: Options { Options(seeds: seeds, sort: sort, songLimit: songLimit, perArtist: perArtist, perAlbum: perAlbum) }
+    private var saved: Options { Options(seeds: seeds, sort: sort, songLimit: songLimit, perArtist: perArtist, perAlbum: perAlbum, includeNew: includeNew) }
+    /// New music is switched on but the pool on screen was found without looking for it.
+    private var needsRefreshForNew: Bool { includeNew && pool != nil && pool?.searchedNewMusic == false }
     private var arrangement: SimilarSoundsArrangement {
         SimilarSoundsArrangement(
             sort: sort, shuffleSeed: shuffleSeed,
@@ -90,7 +100,7 @@ struct SimilarSoundsView: View {
                 } else {
                     ContentUnavailableView(
                         "Pick a few things you love", systemImage: "waveform.badge.magnifyingglass",
-                        description: Text("Add up to \(SimilarSoundsTool.seedLimit) artists, albums or tracks, then Find Similar. You'll see what Last.fm says sounds like them — limited to music already in your library.")
+                        description: Text("Add up to \(SimilarSoundsTool.seedLimit) artists, albums or tracks, then Find Similar. You'll see what Last.fm says sounds like them from your library, and with Include new music, tracks you haven't played too.")
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 }
@@ -105,12 +115,13 @@ struct SimilarSoundsView: View {
         }
         .task {
             let loaded = ToolFilterSettingsStore.load(Options.self, toolId: Self.toolId, context: modelContext, default: Options())
-            (seeds, sort, songLimit, perArtist, perAlbum) = (
+            (seeds, sort, songLimit, perArtist, perAlbum, includeNew) = (
                 incomingSeeds.isEmpty ? loaded.seeds : incomingSeeds,
                 loaded.sort,
                 loaded.songLimit,
                 loaded.perArtist,
-                loaded.perAlbum
+                loaded.perAlbum,
+                loaded.includeNew
             )
             await loadLibrary()
             if incomingSeeds.isEmpty {
@@ -126,6 +137,7 @@ struct SimilarSoundsView: View {
         .onChange(of: arrangement) { _, _ in Task { await refine() } }
         .onChange(of: groups) { _, _ in Task { await refine() } }
         .onChange(of: columns) { _, _ in Task { await refine() } }
+        .onChange(of: includeNew) { _, _ in Task { await refine() } }
     }
 
     // MARK: - Seeds
@@ -149,7 +161,13 @@ struct SimilarSoundsView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(seeds.isEmpty || isGenerating || scrobbles == nil || Connectivity.shared.isOffline)
                     .help(Connectivity.shared.isOffline ? "Offline mode is on. Go online to look up similar music." : "Asks Last.fm for what's similar to each seed. This is the only step that uses the network.")
+                Toggle("Include new music", isOn: $includeNew)
+                    .toggleStyle(.checkbox)
+                    .help("Also offer tracks Last.fm calls similar that you haven't played, marked New. They are placed by match score; conditions describe your own listening, so they hide new tracks.")
                 if isGenerating { ProgressView().controlSize(.small) }
+                if needsRefreshForNew {
+                    Text("Refresh to look for new music.").font(AppTypography.compactMetadata).foregroundStyle(.orange)
+                }
                 if poolIsStale {
                     Text("Seeds changed — Refresh to update the results.").font(AppTypography.compactMetadata).foregroundStyle(.orange)
                 }
@@ -222,7 +240,8 @@ struct SimilarSoundsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(pool.seedsWithData) of \(pool.seedResults.count) seed\(pool.seedResults.count == 1 ? "" : "s") had similarity data in your library")
                 ForEach(pool.seedResults, id: \.label) { seed in
-                    Text("\(seed.label): Last.fm found \(seed.similarFound.formatted()), \(seed.inLibrary.formatted()) track\(seed.inLibrary == 1 ? "" : "s") in your library")
+                    Text("\(seed.label): Last.fm found \(seed.similarFound.formatted()), \(seed.inLibrary.formatted()) track\(seed.inLibrary == 1 ? "" : "s") in your library"
+                         + (pool.searchedNewMusic ? ", \(seed.newFound.formatted()) new to you" : ""))
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                 }
             }
@@ -277,8 +296,14 @@ struct SimilarSoundsView: View {
     private func resultsSummary(_ pool: SimilarSoundsPool) -> String {
         guard let result else { return "\(pool.candidates.count.formatted()) candidates" }
         let shown = result.rows.count, matched = result.matchedCount
-        if shown < matched { return "Showing \(shown.formatted()) of \(matched.formatted()) matching · \(pool.candidates.count.formatted()) candidates" }
-        return "\(matched.formatted()) of \(pool.candidates.count.formatted()) candidates"
+        var text: String
+        if shown < matched { text = "Showing \(shown.formatted()) of \(matched.formatted()) matching · \(pool.candidates.count.formatted()) candidates" }
+        else { text = "\(matched.formatted()) of \(pool.candidates.count.formatted()) candidates" }
+        if includeNew {
+            if newShown > 0 { text += " · \(newShown.formatted()) new to you" }
+            if newHidden > 0 { text += " · \(newHidden.formatted()) new hidden by your conditions" }
+        }
+        return text
     }
 
     private var playlistTracks: [AppleMusicPlaylistTrack] {
@@ -289,6 +314,8 @@ struct SimilarSoundsView: View {
     }
 
     private func open(_ row: QueryDisplayRow) {
+        // A track you haven't played has no page here; its Last.fm page is the place to hear what it is.
+        if row.isNewMusic { NewMusic.openInLastfm(artist: row.entity.artist, track: row.entity.name); return }
         navigation.goToTrack(TrackIdentity(artist: row.entity.artist, name: row.entity.name, album: result?.entityInfo[row.entityID]?.album, imageURL: row.imageURL))
     }
 
@@ -351,7 +378,7 @@ struct SimilarSoundsView: View {
         await loadLibrary()
         let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
         do {
-            let generated = try await SimilarSoundsTool.generate(seeds: seeds, scrobbles: scrobbles, client: client)
+            let generated = try await SimilarSoundsTool.generate(seeds: seeds, scrobbles: scrobbles, client: client, includeNewMusic: includeNew)
             pool = generated
             poolSeedIDs = seeds.map(\.id)
             await refine()
@@ -365,7 +392,7 @@ struct SimilarSoundsView: View {
         guard let pool, let scrobbles else { return }
         isRefining = true
         defer { isRefining = false }
-        let (currentGroups, currentColumns, currentSnapshots, currentArrangement) = (groups, columns, snapshots, arrangement)
+        let (currentGroups, currentColumns, currentSnapshots, currentArrangement, currentIncludeNew) = (groups, columns, snapshots, arrangement, includeNew)
         let evaluated = await Task.detached(priority: .userInitiated) {
             Result { try SimilarSoundsTool.evaluate(pool: pool, groups: currentGroups, columns: currentColumns, scrobbles: scrobbles, snapshots: currentSnapshots, arrangement: currentArrangement) }
         }.value
@@ -373,7 +400,19 @@ struct SimilarSoundsView: View {
         case .success(let value):
             refineError = nil
             result = value
-            displayRows = QueryDisplayRow.make(from: value, imageLookup: currentSnapshots.images.lookup)
+            let libraryRows = QueryDisplayRow.make(from: value, imageLookup: currentSnapshots.images.lookup)
+            if currentIncludeNew {
+                let blended = SimilarSoundsBlend.blend(
+                    library: libraryRows, result: value, newMusic: pool.newMusic, scores: pool.snapshot,
+                    hasConditions: currentGroups.contains { !$0.isEmpty }, arrangement: currentArrangement,
+                    imageLookup: currentSnapshots.images.lookup
+                )
+                displayRows = blended.rows
+                (newShown, newHidden) = (blended.shown, blended.hiddenByConditions)
+            } else {
+                displayRows = libraryRows
+                (newShown, newHidden) = (0, 0)
+            }
         case .failure(let error):
             // Keep the last good result on screen; say what's wrong with the conditions.
             refineError = "\(error)"

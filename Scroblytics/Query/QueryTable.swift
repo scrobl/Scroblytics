@@ -135,6 +135,7 @@ struct QueryResultsTable: View {
                         font: AppTypography.compactMetadata,
                         enabled: row.entity.target == .track || row.entity.target == .scrobble
                     )
+                    if row.isNewMusic { NewMusicBadge() }
                 }
                 if let subtitle = row.subtitle, !subtitle.isEmpty {
                     Text(subtitle).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)

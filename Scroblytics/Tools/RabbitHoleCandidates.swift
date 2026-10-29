@@ -4,7 +4,7 @@ import SwiftData
 /// Why a track is being offered at a Rabbit Hole step, in words a person can read ("you often play it after …").
 struct RabbitHoleReason: Codable, Hashable, Sendable {
     enum Kind: String, Codable, Sendable {
-        case similar, similarArtist, viaStep, sharedTags, playedNext, tempo, loved, forgotten
+        case similar, similarArtist, viaStep, sharedTags, playedNext, tempo, loved, forgotten, newToYou
     }
     let kind: Kind
     let text: String
@@ -32,6 +32,8 @@ struct RabbitHoleLibrary: Sendable {
     private var indexByPair: [String: Int] = [:]
     private var indexesByArtist: [String: [Int]] = [:]
     private var followers: [Int: [(to: Int, count: Int)]] = [:]
+    /// Every played track under `NewMusic.key`, so a track Last.fm spells slightly differently is still recognised as played.
+    private var normalizedKeys: Set<String> = []
 
     static func pairKey(artist: String, track: String) -> String { artist.lowercased() + "\u{0}" + track.lowercased() }
 
@@ -57,6 +59,7 @@ struct RabbitHoleLibrary: Sendable {
                 index = names.count
                 library.indexByPair[key] = index
                 names.append((s.artistName, s.trackName))
+                library.normalizedKeys.insert(NewMusic.key(artist: s.artistName, track: s.trackName))
                 plays.append(0)
                 lastPlayed.append(s.playedAt)
                 images.append(nil)
@@ -92,6 +95,11 @@ struct RabbitHoleLibrary: Sendable {
     }
 
     func index(artist: String, track: String) -> Int? { indexByPair[Self.pairKey(artist: artist, track: track)] }
+
+    /// Whether you have played this track (however Last.fm spells it).
+    func hasPlayed(artist: String, track: String) -> Bool {
+        indexByPair[Self.pairKey(artist: artist, track: track)] != nil || normalizedKeys.contains(NewMusic.key(artist: artist, track: track))
+    }
 
     /// The artist's tracks, most played first. `artist` is matched without regard to case.
     func trackIndexes(ofArtist artist: String) -> [Int] { indexesByArtist[artist.lowercased()] ?? [] }
@@ -182,7 +190,42 @@ struct RabbitHoleScoredCandidate: Sendable {
     var topSourceScore: Double
 }
 
+/// A track Last.fm calls similar that you have never played.
+struct RabbitHoleNewCandidate: Sendable, Equatable {
+    let artist: String
+    let track: String
+    /// 0-100.
+    let score: Double
+    let reason: String
+}
+
 enum RabbitHoleCandidates {
+    /// Never more than this many new tracks go into one step's pool.
+    static let newMusicCap = 100
+
+    /// The tracks Last.fm names as similar to the step's track (and, softly, the two before it) that you have never played. These come from
+    /// the same lookups `build` makes, so with the local answer cache they cost no further requests. `excludingKeys` are `NewMusic.key`s
+    /// already on the path.
+    @MainActor
+    static func newMusic(
+        seeds: [Seed], excludingKeys: Set<String>, library: RabbitHoleLibrary, provider: any RabbitHoleSimilarityProviding
+    ) async -> [RabbitHoleNewCandidate] {
+        let seedKeys = Set(seeds.map { NewMusic.key(artist: $0.artist, track: $0.track) })
+        var found: [String: RabbitHoleNewCandidate] = [:]
+        for (position, seed) in seeds.enumerated() {
+            guard let similar = try? await provider.similarTracks(artist: seed.artist, track: seed.track) else { continue }
+            for s in similar {
+                let key = NewMusic.key(artist: s.artist, track: s.name)
+                guard !library.hasPlayed(artist: s.artist, track: s.name), !seedKeys.contains(key), !excludingKeys.contains(key) else { continue }
+                let score = min(100, max(1, s.match * 100 * seed.weight))
+                if let existing = found[key], existing.score >= score { continue }
+                let reason = position == 0 ? "Last.fm: similar to \(seed.track)" : "Last.fm: similar to an earlier step, \(seed.track)"
+                found[key] = RabbitHoleNewCandidate(artist: s.artist, track: s.name, score: score, reason: reason)
+            }
+        }
+        return Array(found.values.sorted { $0.score != $1.score ? $0.score > $1.score : ($0.artist, $0.track) < ($1.artist, $1.track) }.prefix(newMusicCap))
+    }
+
     /// The step's own track, or one of the earlier ones on the path.
     struct Seed: Sendable {
         let artist: String

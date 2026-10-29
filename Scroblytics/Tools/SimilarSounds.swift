@@ -54,6 +54,11 @@ struct SimilarSoundsPool: Sendable {
     let snapshot: SimilaritySnapshot
     /// The pool's entities — the scope the refinement is evaluated within.
     let ids: Set<QueryEntityID>
+    /// Tracks Last.fm named that you haven't played, when the search looked for them. They are not entities the Query engine knows, so
+    /// they are never in `ids`; `SimilarSoundsBlend` places them among the results.
+    var newMusic: [NewMusicCandidate] = []
+    /// Whether the search looked for new music at all (an empty `newMusic` can mean either).
+    var searchedNewMusic = false
 
     /// Seeds Last.fm had similarity data for AND that landed on at least one library track.
     var seedsWithData: Int { seedResults.filter { $0.inLibrary > 0 }.count }
@@ -69,12 +74,19 @@ enum SimilarSoundsTool {
 
     /// `scrobbles` must be the artist-canonicalized library (`QueryIdentity.canonicalizingArtists`) — the same one
     /// Query evaluates — so a candidate's spelling is exactly the entity Query knows.
-    static func generate(seeds: [SimilarSeed], scrobbles: [ScrobbleSnapshot], client: LastfmAPIClient) async throws -> SimilarSoundsPool {
-        let result = try await SimilarSoundsEngine.run(seeds: seeds.prefix(seedLimit).map(\.recommendationSeed), scrobbles: scrobbles, client: client)
-        return pool(candidates: result.candidates, seedResults: result.seedResults)
+    static func generate(
+        seeds: [SimilarSeed], scrobbles: [ScrobbleSnapshot], client: LastfmAPIClient, includeNewMusic: Bool = false
+    ) async throws -> SimilarSoundsPool {
+        let result = try await SimilarSoundsEngine.run(
+            seeds: seeds.prefix(seedLimit).map(\.recommendationSeed), scrobbles: scrobbles, client: client, includeNewMusic: includeNewMusic
+        )
+        return pool(candidates: result.candidates, seedResults: result.seedResults, newMusic: result.newMusic, searchedNewMusic: includeNewMusic)
     }
 
-    static func pool(candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult]) -> SimilarSoundsPool {
+    static func pool(
+        candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult],
+        newMusic: [NewMusicCandidate] = [], searchedNewMusic: Bool = false
+    ) -> SimilarSoundsPool {
         var snapshot = SimilaritySnapshot()
         var ids = Set<QueryEntityID>()
         for c in candidates {
@@ -84,7 +96,10 @@ enum SimilarSoundsTool {
             snapshot.byID[id] = .init(score: c.matchScore, sources: [c.topSource] + rest)
             ids.insert(id)
         }
-        return SimilarSoundsPool(candidates: candidates, seedResults: seedResults, snapshot: snapshot, ids: ids)
+        return SimilarSoundsPool(
+            candidates: candidates, seedResults: seedResults, snapshot: snapshot, ids: ids,
+            newMusic: newMusic, searchedNewMusic: searchedNewMusic
+        )
     }
 
     /// The columns a result shows unless the user reorders them.

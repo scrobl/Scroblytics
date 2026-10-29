@@ -186,6 +186,12 @@ enum LayoutSnapshots {
             let later = ListeningGoal(title: "Next year", start: at(63), deadline: at(63 + 364), lookbackDays: 90)
             let upcoming = GoalCompute.run(goal: later, loves: loves, plays: plays, now: now, calendar: calendar)
             print("goals snapshot: remaining \(busy.analysis.remainingNow) of \(busy.analysis.membersNow), needed \(String(describing: busy.neededPerDay))")
+            // Two of the tracks still to hear are flagged, to see the flag beside their titles.
+            let flaggedTracks = FlaggedTracksStore()
+            let flagContext = ModelContext(container)
+            for love in busy.analysis.remaining.prefix(2) { flagContext.insert(FlaggedTrack(artist: love.artist, track: love.track, album: nil, flaggedAt: now)) }
+            try? flagContext.save()
+            await flaggedTracks.load(container: container, force: true)
             for (name, preview) in [("busy", (goal, busy)), ("done", (done, finished)), ("future", (later, upcoming))] {
                 for (scheme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                     for width in [1200, 700] as [CGFloat] {
@@ -193,7 +199,7 @@ enum LayoutSnapshots {
                             GoalsView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), preview: preview)
                         }
                         .environment(LovedTracksStore())
-                        .environment(FlaggedTracksStore())
+                        .environment(flaggedTracks)
                         .modelContainer(container)
                         .environment(\.colorScheme, scheme == "dark" ? .dark : .light)
                         let host = NSHostingView(rootView: view.frame(width: width, height: 1700))

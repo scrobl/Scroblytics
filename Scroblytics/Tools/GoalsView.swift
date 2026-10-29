@@ -622,7 +622,10 @@ struct GoalsView: View {
                                     EntityThumbnail(url: url, entity: .track)
                                         .frame(width: AppArtworkSizing.thumbnail, height: AppArtworkSizing.thumbnail)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(love.track).font(AppTypography.contentTitle).lineLimit(1)
+                                        HStack(spacing: 4) {
+                                            Text(love.track).font(AppTypography.contentTitle).lineLimit(1)
+                                            TrackFlaggedIndicator(artist: love.artist, track: love.track, font: AppTypography.metadata)
+                                        }
                                         Text(love.artist).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                     Spacer(minLength: 8)

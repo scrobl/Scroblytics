@@ -295,6 +295,25 @@ struct GoalAnalysis: Sendable {
     }
 }
 
+/// Independent jobs run side by side (each has its own random stream, so the answers are the same as one after another).
+enum GoalParallel {
+    private final class Slots<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [T?]
+        init(count: Int) { values = Array(repeating: nil, count: count) }
+        func set(_ index: Int, _ value: T) { lock.lock(); values[index] = value; lock.unlock() }
+        func all() -> [T] { lock.lock(); defer { lock.unlock() }; return values.compactMap { $0 } }
+    }
+
+    /// `work` for each index in 0..<count, results in order.
+    static func map<T: Sendable>(count: Int, _ work: @Sendable (Int) -> T) -> [T] {
+        guard count > 1 else { return (0..<count).map(work) }
+        let slots = Slots<T>(count: count)
+        DispatchQueue.concurrentPerform(iterations: count) { slots.set($0, work($0)) }
+        return slots.all()
+    }
+}
+
 /// The short answer the cards give about the future: the middle run of "Your habits" either finishes by the deadline, on some day, or
 /// leaves some tracks still to hear on it. Worked out exactly as the goal's own page does, so the two always agree.
 struct GoalOutlook: Sendable, Equatable {
@@ -589,7 +608,7 @@ enum GoalSimulator {
     /// ("Unplayed first") is the extreme: every play you make goes to a track you haven't heard, so it ignores both.
     static func forecast(
         _ kind: GoalScenarioKind, setup: GoalSimulationSetup, dedicatedPlaysPerDay: Double = 0,
-        sims: Int = defaultSims, seed: UInt64
+        sims: Int = defaultSims, seed: UInt64, deadlineOnly: Bool = false, stopOnceDecided confidenceToReach: Double? = nil
     ) -> GoalForecast {
         let count = setup.remainingRates.count
         let shuffleRate = setup.memberCount > 0 ? setup.lovedPlaysPerDay / Double(setup.memberCount) : 0
@@ -601,7 +620,17 @@ enum GoalSimulator {
             : (count > 0 ? setup.remainingRates.reduce(0, +) / Double(count) : 0)
         let perDay = literal ? max(setup.playsPerDay, 0) : max(dedicatedPlaysPerDay, 0)
         let chartDays = max(setup.daysLeft, 0)
-        let horizon = max(setup.horizon, chartDays)
+        // `deadlineOnly` follows each run only to the deadline: enough for the chance of finishing, not for when it would finish.
+        let horizon = deadlineOnly ? chartDays : max(setup.horizon, chartDays)
+
+        // With `stopOnceDecided`, the runs stop as soon as it is settled whether `chanceByDeadline` reaches that confidence (only that
+        // answer is meant to be used then); the chance returned stays on the right side of it.
+        let runsNeeded = confidenceToReach.map { target -> Int in
+            var n = 0
+            while n <= sims, Double(n) / Double(max(sims, 1)) < target { n += 1 }
+            return n
+        }
+        var decidedChance: Double?
 
         var generator = SeededRandom(seed: seed)
         // values[day * sims + run]
@@ -688,6 +717,10 @@ enum GoalSimulator {
             if let half { halfDays.append(half) }
             if let ninety { ninetyDays.append(ninety) }
             if values[chartDays * sims + run] == 0 { finishedByDeadline += 1 }
+            if let runsNeeded {
+                if finishedByDeadline >= runsNeeded { decidedChance = Double(finishedByDeadline) / Double(run + 1); break }
+                if finishedByDeadline + (sims - run - 1) < runsNeeded { decidedChance = Double(finishedByDeadline + sims - run - 1) / Double(sims); break }
+            }
         }
 
         var median: [Double] = []
@@ -701,7 +734,7 @@ enum GoalSimulator {
         }
         return GoalForecast(
             kind: kind, median: median, low: low, high: high,
-            chanceByDeadline: Double(finishedByDeadline) / Double(max(sims, 1)),
+            chanceByDeadline: decidedChance ?? Double(finishedByDeadline) / Double(max(sims, 1)),
             finishMedian: medianDay(finishDays, sims: sims), halfMedian: medianDay(halfDays, sims: sims),
             ninetyMedian: medianDay(ninetyDays, sims: sims), horizon: horizon, sims: sims
         )
@@ -722,7 +755,7 @@ enum GoalSimulator {
     static func neededDedicatedPlaysPerDay(setup: GoalSimulationSetup, seed: UInt64) -> Double? {
         guard !setup.remainingRates.isEmpty else { return 0 }
         func chance(_ perDay: Double) -> Double {
-            forecast(.habits, setup: setup, dedicatedPlaysPerDay: perDay, sims: 60, seed: seed).chanceByDeadline
+            forecast(.habits, setup: setup, dedicatedPlaysPerDay: perDay, sims: 60, seed: seed, deadlineOnly: true, stopOnceDecided: confidence).chanceByDeadline
         }
         if chance(0) >= confidence { return 0 }
         let ceilingPerDay = setup.playsPerDay
@@ -865,9 +898,11 @@ enum GoalCompute {
         run(goal: goal, members: GoalMembers(loves: loves), plays: plays, presence: presence, now: now, calendar: calendar)
     }
 
+    /// `withForecasts: false` is the quick first answer (the burn-down, the lists and the numbers) a page can show while the forecasts,
+    /// which take much longer, are still being worked out.
     static func run(
         goal: ListeningGoal, members: GoalMembers, plays: [ScrobbleSnapshot], presence: LibraryPresenceSnapshot? = nil,
-        now: Date, calendar: Calendar
+        now: Date, calendar: Calendar, withForecasts: Bool = true
     ) -> GoalResult {
         let (loves, leftOut, neverChecked) = counted(goal: goal, loves: members.loves, presence: presence)
         let analysis = GoalEngine.analyze(goal: goal, loves: loves, plays: plays, joinsOnPlay: members.joinsOnPlay, now: now, calendar: calendar)
@@ -880,13 +915,24 @@ enum GoalCompute {
                 history: history, leadLoves: GoalSimulator.leadLoves(analysis: analysis, goal: goal), pendingTags: members.pendingTags
             )
         }
-        guard analysis.remainingNow > 0, analysis.daysLeft > 0 else { return result([:], needed: nil, dedicated: 0) }
+        guard withForecasts, analysis.remainingNow > 0, analysis.daysLeft > 0 else { return result([:], needed: nil, dedicated: 0) }
         let seed = GoalSimulator.seed(for: goal, remaining: analysis.remainingNow)
-        let needed = GoalSimulator.neededDedicatedPlaysPerDay(setup: setup, seed: seed)
         let dedicated = goal.dedicatedShare.map { $0 * setup.playsPerDay } ?? 0
+        // The search for the pace needed and each forecast are independent, so they run side by side.
+        let kinds = GoalScenarioKind.allCases
+        enum Piece: Sendable { case needed(Double?), forecast(GoalScenarioKind, GoalForecast) }
+        let pieces = GoalParallel.map(count: kinds.count + 1) { index -> Piece in
+            index == kinds.count
+                ? .needed(GoalSimulator.neededDedicatedPlaysPerDay(setup: setup, seed: seed))
+                : .forecast(kinds[index], GoalSimulator.forecast(kinds[index], setup: setup, dedicatedPlaysPerDay: dedicated, seed: seed))
+        }
         var forecasts: [GoalScenarioKind: GoalForecast] = [:]
-        for kind in GoalScenarioKind.allCases {
-            forecasts[kind] = GoalSimulator.forecast(kind, setup: setup, dedicatedPlaysPerDay: dedicated, seed: seed)
+        var needed: Double?
+        for piece in pieces {
+            switch piece {
+            case .needed(let value): needed = value
+            case .forecast(let kind, let forecast): forecasts[kind] = forecast
+            }
         }
         return result(forecasts, needed: needed, dedicated: dedicated)
     }
@@ -919,11 +965,14 @@ enum GoalSummaryLoader {
         return await Task.detached(priority: .userInitiated) {
             let members = GoalMembership.members(for: goals, loved: loves, plays: plays, tags: tags)
             let now = Date.now
-            return Dictionary(uniqueKeysWithValues: goals.map { goal in
+            // Each goal's numbers and outlook are independent of the others, so they are worked out side by side.
+            let analyses = GoalParallel.map(count: goals.count) { index -> GoalAnalysis in
+                let goal = goals[index]
                 var analysis = GoalCompute.analysis(goal: goal, members: members[goal.id] ?? GoalMembers(loves: []), plays: plays, presence: presence, now: now, calendar: calendar)
                 analysis.outlook = GoalOutlook.make(goal: goal, analysis: analysis, now: now, calendar: calendar)
-                return (goal.id, analysis)
-            })
+                return analysis
+            }
+            return Dictionary(uniqueKeysWithValues: zip(goals, analyses).map { ($0.id, $1) })
         }.value
     }
 }

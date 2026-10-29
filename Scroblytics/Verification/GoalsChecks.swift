@@ -202,6 +202,24 @@ enum GoalsChecks {
             check("a goal past its deadline with tracks left is missed",
                   status(goal, now: at(60)).0.kind == .missed && status(goal, now: at(60)).0.headline == "Deadline passed", "\(status(goal, now: at(60)).0)")
             check("with no loved tracks the card says so", GoalCardStatus(GoalCompute.analysis(goal: goal, loves: [], plays: plays, now: now, calendar: calendar)).kind == .empty)
+            // Opening a goal shows the quick answer first; the forecasts, worked out side by side, are the same as one by one.
+            let fullRun = GoalCompute.run(goal: goal, loves: loves, plays: plays, now: now, calendar: calendar)
+            let quickRun = GoalCompute.run(goal: goal, members: GoalMembers(loves: loves), plays: plays, now: now, calendar: calendar, withForecasts: false)
+            check("the quick first answer has the same numbers and lists, and no forecasts",
+                  quickRun.forecasts.isEmpty && quickRun.analysis.actual == fullRun.analysis.actual && quickRun.analysis.remaining == fullRun.analysis.remaining && quickRun.history == fullRun.history)
+            let runSetup = GoalSimulator.setup(from: fullRun.analysis, goal: goal)
+            let runSeed = GoalSimulator.seed(for: goal, remaining: fullRun.analysis.remainingNow)
+            let runDedicated = goal.dedicatedShare.map { $0 * runSetup.playsPerDay } ?? 0
+            check("forecasts worked out side by side equal the same ones worked out singly",
+                  GoalScenarioKind.allCases.allSatisfy { kind in
+                      fullRun.forecasts[kind] == GoalSimulator.forecast(kind, setup: runSetup, dedicatedPlaysPerDay: runDedicated, seed: runSeed)
+                  })
+            check("stopping a search as soon as it is settled gives the same verdict as running every run",
+                  [0.0, 0.2, 0.5, 1, 2, runSetup.playsPerDay].allSatisfy { perDay in
+                      let all = GoalSimulator.forecast(.habits, setup: runSetup, dedicatedPlaysPerDay: perDay, sims: 60, seed: runSeed, deadlineOnly: true).chanceByDeadline >= GoalSimulator.confidence
+                      let early = GoalSimulator.forecast(.habits, setup: runSetup, dedicatedPlaysPerDay: perDay, sims: 60, seed: runSeed, deadlineOnly: true, stopOnceDecided: GoalSimulator.confidence).chanceByDeadline >= GoalSimulator.confidence
+                      return all == early
+                  })
             // The one-line outlook on the cards: the same middle run of "Your habits" the goal's own page shows.
             let pageForecast = GoalCompute.run(goal: goal, loves: loves, plays: plays, now: now, calendar: calendar).forecasts[.habits]
             let outlook = GoalOutlook.make(goal: goal, analysis: activeAnalysis, now: now, calendar: calendar)
@@ -640,6 +658,27 @@ enum GoalsChecks {
                 check("\(days) days: the last burn-down point is today's count and loved tracks add up", a.actual.last == a.remainingNow && a.heardNow + a.remainingNow == a.membersNow && a.membersNow == keys.count)
                 check("\(days) days: the burn-down never rises without loves added",
                       zip(a.actual, zip(a.members, zip(a.actual.dropFirst(), a.members.dropFirst()))).allSatisfy { $0 >= $1.1.0 || $1.1.1 > $1.0 })
+            }
+            // A goal for next year, stage by stage (what opening it costs).
+            do {
+                let yearStart = calendar.date(from: DateComponents(year: calendar.component(.year, from: now) + 1, month: 1, day: 1))!
+                let future = ListeningGoal(title: "Next year", start: yearStart, deadline: calendar.date(byAdding: .day, value: 364, to: yearStart)!)
+                func timed<T>(_ label: String, _ work: () -> T) -> T {
+                    let began = Date(); let value = work()
+                    print(String(format: "      %@: %.2f s", label, Date().timeIntervalSince(began))); return value
+                }
+                print("  a goal for next year, stage by stage:")
+                let a = timed("analysis") { GoalEngine.analyze(goal: future, loves: loves, plays: plays, now: now, calendar: calendar) }
+                let setup = timed("simulation setup") { GoalSimulator.setup(from: a, goal: future) }
+                let seed = GoalSimulator.seed(for: future, remaining: a.remainingNow)
+                print("      \(a.remainingNow) to hear, \(a.daysLeft) days to the deadline, horizon \(setup.horizon), arrivals \(String(format: "%.2f", setup.newLovesPerDay)) a day, lead loves \(GoalSimulator.leadLoves(analysis: a, goal: future))")
+                _ = timed("needed plays a day (bisection)") { GoalSimulator.neededDedicatedPlaysPerDay(setup: setup, seed: seed) }
+                for kind in GoalScenarioKind.allCases {
+                    _ = timed("forecast \(kind.rawValue)") { GoalSimulator.forecast(kind, setup: setup, seed: seed) }
+                }
+                _ = timed("history of the tracks still to hear") { GoalCompute.history(of: a.remaining, plays: plays) }
+                _ = timed("the quick first answer shown on opening (no forecasts)") { GoalCompute.run(goal: future, members: GoalMembers(loves: loves), plays: plays, now: now, calendar: calendar, withForecasts: false) }
+                _ = timed("the whole GoalCompute.run") { GoalCompute.run(goal: future, loves: loves, plays: plays, now: now, calendar: calendar) }
             }
             // How well the saved Apple Music library status covers the tracks still to hear.
             let presence = LibraryPresenceSnapshot.load(context: context)

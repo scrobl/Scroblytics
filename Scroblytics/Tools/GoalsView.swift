@@ -786,9 +786,21 @@ struct GoalsView: View {
             let presence = goal.inAppleLibraryOnly ? LibraryPresenceSnapshot.load(context: modelContext) : nil
             let tags = goal.criteria.tags.isEmpty ? EntityTagsSnapshot.empty : EntityTagsEngine.loadSnapshot(context: modelContext)
             let calendar = self.calendar
+            let members = await Task.detached(priority: .userInitiated) {
+                GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags)[goal.id] ?? GoalMembers(loves: [])
+            }.value
+            // Opening a goal shows its numbers, chart and list at once; the forecasts (the slow part) join them when they are ready.
+            // A recalculation of a goal already on the page keeps what it shows until the new answer arrives.
+            if resultGoalID != goal.id {
+                let quick = await Task.detached(priority: .userInitiated) {
+                    GoalCompute.run(goal: goal, members: members, plays: plays, presence: presence, now: .now, calendar: calendar, withForecasts: false)
+                }.value
+                if Task.isCancelled { return }
+                result = quick
+                resultGoalID = goal.id
+            }
             let computed = await Task.detached(priority: .userInitiated) {
-                let members = GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags)[goal.id] ?? GoalMembers(loves: [])
-                return GoalCompute.run(goal: goal, members: members, plays: plays, presence: presence, now: .now, calendar: calendar)
+                GoalCompute.run(goal: goal, members: members, plays: plays, presence: presence, now: .now, calendar: calendar)
             }.value
             if Task.isCancelled { return }
             result = computed

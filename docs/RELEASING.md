@@ -152,6 +152,19 @@ late plays, recent and old deletions and a late play together with an old deleti
 `SCROBLYTICS_RECHECK_CHOICE` (Debug only), and checks after each launch the app's play count against the server's (no duplicates),
 the activity log's lines, and how many pages were fetched. `SCROBLYTICS_DIAGNOSTICS_CHECK=1` covers the rules and wording on their own.
 
+## Goals and loved-track dates
+
+`SCROBLYTICS_GOALS_CHECK=1` (in `scripts/release.sh`) checks the Goals tool's burn-down, habit estimates and forecasts on made-up data.
+Before a release that changes it or the loved-tracks sync:
+
+- On a copy of a real store with Offline mode on, `SCROBLYTICS_GOALS_DUMP=1` compares the tracks still to hear with an independent recount
+  (loved tracks minus the tracks played since the start) for goals starting 30, 90, 183 and 365 days ago, and prints how well the saved
+  Apple Music library status covers them and how long the computation takes (use a Release build with the test hooks for real timings).
+- `scripts/loved-dates-test.sh` runs the loved-tracks sync end to end in an isolated test profile against the stand-in server's
+  `loved-dates` scenario: a first sync with three pages of dated loves, a new love found by the quick check, the one-time backfill of loves
+  saved without dates, and an unloved track. Build the Debug app first.
+- `SCROBLYTICS_LAYOUT_SNAPSHOT_GOALS=<folder>` renders the page, the chart's zoom and the goal editor offscreen.
+
 ## The detail pages (Artist, Album, Track)
 
 `SCROBLYTICS_DETAIL_CHECK=1` (in `scripts/release.sh`) checks the fact tiles, the album table's join, filters, sorts, directions and

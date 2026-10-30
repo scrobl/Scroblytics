@@ -8,12 +8,21 @@ struct TargetedSyncActivity: Sendable {
     let title: String
 }
 
+/// An item a screen adds at the top of the common menu (after Open), for what only that screen can do with the row.
+struct EntityContextAction: Identifiable {
+    let id = UUID()
+    let title: String
+    var isDestructive = false
+    let action: () -> Void
+}
+
 struct EntityContextMenuModifier: ViewModifier {
     let target: ImageTarget
     let currentImageURL: String?
     let onFixAlbumMatch: (() -> Void)?
     let onOpen: (() -> Void)?
     let onImageRefreshed: ((String) -> Void)?
+    var extraActions: [EntityContextAction] = []
 
     @Environment(\.modelContext) private var modelContext
     @State private var hasCustomImage = false
@@ -32,6 +41,7 @@ struct EntityContextMenuModifier: ViewModifier {
                     onFixAlbumMatch: onFixAlbumMatch,
                     onOpen: onOpen,
                     onImageRefreshed: onImageRefreshed,
+                    extraActions: extraActions,
                     hasCustomImage: $hasCustomImage,
                     errorMessage: $errorMessage,
                     resyncMessage: $resyncMessage,
@@ -110,6 +120,7 @@ private struct EntityContextMenuItems: View {
     let onFixAlbumMatch: (() -> Void)?
     let onOpen: (() -> Void)?
     let onImageRefreshed: ((String) -> Void)?
+    let extraActions: [EntityContextAction]
 
     @Environment(\.modelContext) private var modelContext
     @Environment(LovedTracksStore.self) private var lovedTracksStore
@@ -125,6 +136,13 @@ private struct EntityContextMenuItems: View {
     var body: some View {
         if let onOpen {
             Button("Open", action: onOpen)
+            Divider()
+        }
+
+        if !extraActions.isEmpty {
+            ForEach(extraActions) { item in
+                Button(item.title, role: item.isDestructive ? .destructive : nil, action: item.action)
+            }
             Divider()
         }
 
@@ -440,14 +458,16 @@ extension View {
         currentImageURL: String? = nil,
         onFixAlbumMatch: (() -> Void)? = nil,
         onOpen: (() -> Void)? = nil,
-        onImageRefreshed: ((String) -> Void)? = nil
+        onImageRefreshed: ((String) -> Void)? = nil,
+        extraActions: [EntityContextAction] = []
     ) -> some View {
         modifier(EntityContextMenuModifier(
             target: target,
             currentImageURL: currentImageURL,
             onFixAlbumMatch: onFixAlbumMatch,
             onOpen: onOpen,
-            onImageRefreshed: onImageRefreshed
+            onImageRefreshed: onImageRefreshed,
+            extraActions: extraActions
         ))
     }
 }

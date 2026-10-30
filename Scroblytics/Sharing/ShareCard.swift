@@ -335,7 +335,10 @@ extension ShareCard {
     var defaultOptions: ShareOptions {
         var options = ShareOptions()
         if snapshot != nil { options.size = .wide; options.fitToChart = true }
-        if let native { options.size = native.preferredSize }
+        if let native {
+            options.size = native.preferredSize
+            for (id, value) in native.defaultFlags { options.flags[id] = value }
+        }
         return options
     }
 

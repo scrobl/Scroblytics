@@ -32,7 +32,7 @@ enum LovedTracksEngine {
         let existing = try? context.fetch(descriptor).first
         if loved {
             if existing == nil {
-                context.insert(LovedTrackEntry(cacheKey: key, artist: artist, track: track))
+                context.insert(LovedTrackEntry(cacheKey: key, artist: artist, track: track, lovedAt: .now))
             }
         } else if let existing {
             context.delete(existing)

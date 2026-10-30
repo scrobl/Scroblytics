@@ -234,13 +234,16 @@ enum GoalsChecks {
                     && GoalOutlook.make(goal: goal, analysis: status(goal, plays: allHeard.sorted { $0.playedAt < $1.playedAt }).1, now: now, calendar: calendar) == nil
                     && GoalOutlook.make(goal: goal, analysis: status(goal, now: at(60)).1, now: at(60), calendar: calendar) == nil)
             var short = activeAnalysis
-            short.outlook = GoalOutlook(shortfall: 500, finishDate: nil)
+            short.outlook = GoalOutlook(shortfall: 500, finishDate: nil, lookbackDays: 90)
             let shortStatus = GoalCardStatus(short)
-            check("a forecast that falls short reads \"About 500 short at your pace\" and turns an ahead-of-plan card orange",
-                  shortStatus.outlook == "About 500 short at your pace" && shortStatus.fallsShort
+            check("a forecast that falls short reads \"About 500 short at your 90-day pace\" and turns an ahead-of-plan card orange",
+                  shortStatus.outlook == "About 500 short at your 90-day pace" && shortStatus.fallsShort
                     && ([GoalCardStatus.Kind.ahead, .onPlan].contains(shortStatus.kind) ? shortStatus.color == .orange : true) && shortStatus.headline == activeStatus.headline)
+            check("the pace named is the goal's own \"Learn from the last\" window, and the outlook made for a goal carries it",
+                  GoalCardStatus.describe(GoalOutlook(shortfall: 12, finishDate: nil, lookbackDays: 30)) == "About 12 short at your 30-day pace"
+                    && (GoalOutlook.make(goal: goal, analysis: activeAnalysis, now: now, calendar: calendar).map { $0.lookbackDays == goal.lookbackDays } ?? true))
             var onPace = activeAnalysis
-            onPace.outlook = GoalOutlook(shortfall: 0, finishDate: at(25))
+            onPace.outlook = GoalOutlook(shortfall: 0, finishDate: at(25), lookbackDays: 90)
             let onPaceStatus = GoalCardStatus(onPace)
             check("a forecast that finishes in time says when and keeps the card's colour",
                   onPaceStatus.outlook?.hasPrefix("On pace to finish ") == true && !onPaceStatus.fallsShort && onPaceStatus.color == activeStatus.color)

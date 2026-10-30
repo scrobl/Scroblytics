@@ -321,6 +321,8 @@ struct GoalOutlook: Sendable, Equatable {
     let shortfall: Int
     /// The day the middle run finishes, when that is by the deadline.
     let finishDate: Date?
+    /// The "Learn from the last" window the forecast's pace comes from, in days.
+    let lookbackDays: Int
 
     var fallsShort: Bool { shortfall > 0 }
 
@@ -332,9 +334,9 @@ struct GoalOutlook: Sendable, Equatable {
         let dedicated = goal.dedicatedShare.map { $0 * setup.playsPerDay } ?? 0
         let forecast = GoalSimulator.forecast(.habits, setup: setup, dedicatedPlaysPerDay: dedicated, seed: seed)
         if let days = forecast.finishMedian, days <= analysis.daysLeft {
-            return GoalOutlook(shortfall: 0, finishDate: calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now)))
+            return GoalOutlook(shortfall: 0, finishDate: calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now)), lookbackDays: analysis.lookbackDays)
         }
-        return GoalOutlook(shortfall: max(Int((forecast.median.last ?? 0).rounded()), 1), finishDate: nil)
+        return GoalOutlook(shortfall: max(Int((forecast.median.last ?? 0).rounded()), 1), finishDate: nil, lookbackDays: analysis.lookbackDays)
     }
 }
 

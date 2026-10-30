@@ -11,7 +11,7 @@ struct GoalCardStatus: Equatable {
     /// The share of the goal's loved tracks that has been heard, and the share the straight-line plan would have had heard by today.
     var heardShare: Double
     var planShare: Double
-    /// Where "Your habits" has it ending up: "About 500 short at your pace" or "On pace to finish Nov 20"; nil when there is no forecast.
+    /// Where "Your habits" has it ending up: "About 500 short at your 90-day pace" or "On pace to finish Nov 20"; nil when there is no forecast.
     var outlook: String?
     /// The habits forecast leaves tracks to hear at the deadline, however the goal stands against the plan today.
     var fallsShort = false
@@ -53,7 +53,7 @@ struct GoalCardStatus: Equatable {
     }
 
     static func describe(_ o: GoalOutlook) -> String {
-        o.finishDate.map { "On pace to finish \(GoalsView.dayLabel($0))" } ?? "About \(o.shortfall.formatted()) short at your pace"
+        o.finishDate.map { "On pace to finish \(GoalsView.dayLabel($0))" } ?? "About \(o.shortfall.formatted()) short at your \(o.lookbackDays)-day pace"
     }
 
     /// The whole percent heard; never 100 while something is left, so "5 to hear" doesn't sit beside "100%".

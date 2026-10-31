@@ -9,6 +9,22 @@ struct AppleMusicPlaylistTrack: Hashable, Sendable {
 }
 
 enum AppleMusicPlaylistBuilder {
+    /// The playlist for a Top Charts list: a track chart is its own tracks, in rank order; an artist or album chart gives the tracks
+    /// played in the period (`tracks(for:…)`). The Top Charts screen and the automatic playlists both use this, so they agree.
+    @MainActor
+    static func chartTracks(
+        entries: [TopChartEntry], entity: TopChartsEntity, range: DateRange, metric: TopChartsMetric,
+        container: ModelContainer, context: ModelContext
+    ) async throws -> [AppleMusicPlaylistTrack] {
+        if entity == .track {
+            return entries.compactMap { entry in
+                guard let artist = entry.artist, !artist.isEmpty else { return nil }
+                return AppleMusicPlaylistTrack(artist: artist, track: entry.name, album: entry.album ?? "")
+            }
+        }
+        return try await tracks(for: entries, entity: entity, range: range, metric: metric, container: container, context: context)
+    }
+
     @MainActor
     static func tracks(
         for entries: [TopChartEntry],
@@ -274,14 +290,34 @@ enum AppleMusicPlaylistExporter {
 struct AppleMusicPlaylistExportButton: View {
     let defaultPlaylistName: String
     let tracks: @MainActor () async throws -> [AppleMusicPlaylistTrack]
+    /// The list the tracks come from, when it can be run again: the dialog then offers to keep the playlist up to date after each sync.
+    var recipe: AutoPlaylistRecipe?
+    /// A short description of that list for the list of automatic playlists.
+    var recipeSummary = ""
 
+    @Environment(\.modelContext) private var modelContext
     @State private var playlistName = ""
+    @State private var keepUpdated = false
     @State private var pendingTracks: [AppleMusicPlaylistTrack] = []
+    @State private var existingPlaylistID: String?
     @State private var isNamingPlaylist = false
     @State private var isCheckingOrExporting = false
     @State private var isResolvingConflict = false
     @State private var result: AppleMusicPlaylistExporter.Result?
+    @State private var resultIsAutomatic = false
     @State private var errorMessage: String?
+
+    init(
+        defaultPlaylistName: String, tracks: @escaping @MainActor () async throws -> [AppleMusicPlaylistTrack],
+        recipe: AutoPlaylistRecipe? = nil, recipeSummary: String = ""
+    ) {
+        self.defaultPlaylistName = defaultPlaylistName
+        self.tracks = tracks
+        self.recipe = recipe
+        self.recipeSummary = recipeSummary
+    }
+
+    private var keepsUpdated: Bool { keepUpdated && recipe != nil }
 
     var body: some View {
         Button {
@@ -294,6 +330,8 @@ struct AppleMusicPlaylistExportButton: View {
         .sheet(isPresented: $isNamingPlaylist) {
             AppleMusicPlaylistNameSheet(
                 playlistName: $playlistName,
+                keepUpdated: $keepUpdated,
+                canKeepUpdated: recipe != nil,
                 isWorking: isCheckingOrExporting,
                 onCancel: { isNamingPlaylist = false },
                 onExport: requestExport
@@ -304,11 +342,20 @@ struct AppleMusicPlaylistExportButton: View {
                 isPresented: $isResolvingConflict,
                 titleVisibility: .visible
             ) {
-                Button("Add to Existing") { performExport(mode: .existing) }
-                Button("Create New Playlist") { performExport(mode: .new) }
+                if keepsUpdated, let existingPlaylistID {
+                    Button("Replace Its Contents and Keep It Updated") { performAutomatic(takeOverID: existingPlaylistID) }
+                    Button("Create New Playlist") { performAutomatic(takeOverID: nil) }
+                } else {
+                    Button("Add to Existing") { performExport(mode: .existing) }
+                    Button("Create New Playlist") { performExport(mode: .new) }
+                }
                 Button("Cancel", role: .cancel) { pendingTracks = [] }
             } message: {
-                Text("A playlist named “\(playlistName)” already exists in Music.app. Add these tracks to it, or create another playlist with the same name?")
+                if keepsUpdated {
+                    Text("A playlist named “\(playlistName)” already exists in Music.app. Replace what is in it with this list and keep it up to date, or create another playlist with the same name? Anything you added to the existing playlist by hand is removed.")
+                } else {
+                    Text("A playlist named “\(playlistName)” already exists in Music.app. Add these tracks to it, or create another playlist with the same name?")
+                }
             }
         }
         .sheet(isPresented: Binding(
@@ -319,6 +366,7 @@ struct AppleMusicPlaylistExportButton: View {
                 AppleMusicPlaylistResultSheet(
                     playlistName: playlistName,
                     result: result,
+                    isAutomatic: resultIsAutomatic,
                     onCopyMissing: {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(result.notFound.joined(separator: "\n"), forType: .string)
@@ -341,10 +389,25 @@ struct AppleMusicPlaylistExportButton: View {
         let name = playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         isCheckingOrExporting = true
+        let automatic = keepsUpdated
         Task {
             do {
                 pendingTracks = try await tracks()
                 guard !pendingTracks.isEmpty else { throw AppleMusicPlaylistExporter.ExportError.noTracks }
+                if automatic {
+                    switch try await AppleMusicPlaylistBackend().findPlaylist(named: name) {
+                    case .none:
+                        isCheckingOrExporting = false
+                        performAutomatic(takeOverID: nil)
+                    case .found(let id):
+                        existingPlaylistID = id
+                        isCheckingOrExporting = false
+                        isResolvingConflict = true
+                    case .notEditable:
+                        throw AutoPlaylistError.message("A playlist named “\(name)” exists in Music, but Music can’t change it (it is a smart playlist or a folder). Choose another name.")
+                    }
+                    return
+                }
                 let exists = (try? await AppleMusicPlaylistExporter.playlistExists(named: name)) ?? false
                 isCheckingOrExporting = false
                 if exists {
@@ -352,12 +415,21 @@ struct AppleMusicPlaylistExportButton: View {
                 } else {
                     performExport(mode: .new)
                 }
+            } catch AutoPlaylistError.notAuthorized {
+                finishWithError(AppleMusicPlaylistExporter.ExportError.notAuthorized.localizedDescription)
+            } catch AutoPlaylistError.message(let text) {
+                finishWithError(text)
             } catch {
-                isCheckingOrExporting = false
-                isNamingPlaylist = false
-                errorMessage = error.localizedDescription
+                finishWithError(error.localizedDescription)
             }
         }
+    }
+
+    private func finishWithError(_ message: String) {
+        pendingTracks = []
+        isCheckingOrExporting = false
+        isNamingPlaylist = false
+        errorMessage = message
     }
 
     private func performExport(mode: AppleMusicPlaylistExporter.Mode) {
@@ -371,21 +443,47 @@ struct AppleMusicPlaylistExportButton: View {
                 pendingTracks = []
                 isCheckingOrExporting = false
                 isNamingPlaylist = false
+                resultIsAutomatic = false
                 result = exportResult
             } catch {
-                pendingTracks = []
-                isCheckingOrExporting = false
-                isNamingPlaylist = false
-                errorMessage = error.localizedDescription
+                finishWithError(error.localizedDescription)
             }
         }
     }
 
+    /// Makes the playlist (or replaces the contents of the one that is there) and keeps it as an automatic playlist.
+    private func performAutomatic(takeOverID: String?) {
+        guard let recipe else { return }
+        let name = playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tracks = pendingTracks
+        let summary = recipeSummary.isEmpty ? name : recipeSummary
+        isResolvingConflict = false
+        isCheckingOrExporting = true
+        Task {
+            do {
+                let made = try await AutoPlaylistCreator.create(
+                    name: name, recipe: recipe, summary: summary, tracks: tracks, takeOverID: takeOverID, context: modelContext
+                )
+                pendingTracks = []
+                guard made.list != nil else {
+                    finishWithError(made.outcome.detail)
+                    return
+                }
+                isCheckingOrExporting = false
+                isNamingPlaylist = false
+                resultIsAutomatic = true
+                result = AppleMusicPlaylistExporter.Result(added: made.outcome.trackCount, notFound: made.outcome.missingAll)
+            } catch {
+                finishWithError(error.localizedDescription)
+            }
+        }
+    }
 }
 
-private struct AppleMusicPlaylistResultSheet: View {
+struct AppleMusicPlaylistResultSheet: View {
     let playlistName: String
     let result: AppleMusicPlaylistExporter.Result
+    var isAutomatic = false
     let onCopyMissing: () -> Void
     let onDismiss: () -> Void
 
@@ -399,6 +497,13 @@ private struct AppleMusicPlaylistResultSheet: View {
                 .font(AppTypography.contentTitle)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
+
+            if isAutomatic {
+                Text("This playlist is now kept up to date: after each sync, Scroblytics runs the list again and changes the playlist to match, as long as Music is open.")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if !result.notFound.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -435,8 +540,10 @@ private struct AppleMusicPlaylistResultSheet: View {
     }
 }
 
-private struct AppleMusicPlaylistNameSheet: View {
+struct AppleMusicPlaylistNameSheet: View {
     @Binding var playlistName: String
+    @Binding var keepUpdated: Bool
+    let canKeepUpdated: Bool
     let isWorking: Bool
     let onCancel: () -> Void
     let onExport: () -> Void
@@ -452,6 +559,16 @@ private struct AppleMusicPlaylistNameSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(onExport)
                 .disabled(isWorking)
+            if canKeepUpdated {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Keep this playlist updated after each sync", isOn: $keepUpdated)
+                        .disabled(isWorking)
+                    Text("After every sync Scroblytics runs this list again and changes the playlist to match: new order, nothing added twice. Music must be open for it to update. Changes you make to the playlist by hand are replaced.")
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             HStack {
                 if isWorking {
                     ProgressView()
@@ -463,7 +580,7 @@ private struct AppleMusicPlaylistNameSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel, action: onCancel)
                     .disabled(isWorking)
-                Button("Export", action: onExport)
+                Button(canKeepUpdated && keepUpdated ? "Create and Keep Updated" : "Export", action: onExport)
                     .buttonStyle(.borderedProminent)
                     .disabled(isWorking || playlistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

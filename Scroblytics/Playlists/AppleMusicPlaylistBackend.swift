@@ -3,6 +3,12 @@ import Foundation
 /// The real Music behind `AutoPlaylistEngine`, driven by AppleScript. It reads in bulk where it can (one call for the ordered track
 /// IDs of a playlist, one for the whole library), only changes the playlist it is given by persistent ID, removes tracks only from
 /// that playlist (never from the library), and never launches Music.
+enum PlaylistLookup: Equatable, Sendable {
+    case none
+    case found(id: String)
+    case notEditable
+}
+
 struct AppleMusicPlaylistBackend: PlaylistBackend {
     private static let listSeparator = ","
     private static let columnSeparator = "\u{1D}"
@@ -135,6 +141,28 @@ struct AppleMusicPlaylistBackend: PlaylistBackend {
         if text == "MISSING" { throw AutoPlaylistError.message("The playlist is no longer in Music.") }
         if text.hasPrefix("NO TRACK") { throw AutoPlaylistError.message("A track is no longer in the Music library.") }
         throw AutoPlaylistError.message("Music gave an unexpected answer when adding tracks.")
+    }
+
+    /// The playlist with this name, to take over: its ID, or that there is none, or that Music can't change it. (Names are matched the
+    /// way Music matches them, ignoring case; the first of several playlists with the same name is the one.)
+    func findPlaylist(named name: String) async throws -> PlaylistLookup {
+        let reply = try await run("""
+        on run argv
+          tell application "Music"
+            set matches to (every user playlist whose name is (item 1 of argv))
+            if (count of matches) is 0 then return "NONE"
+            set pl to item 1 of matches
+            if class of pl is not user playlist then return "NOT EDITABLE"
+            if smart of pl then return "NOT EDITABLE"
+            return "FOUND:" & (persistent ID of pl)
+          end tell
+        end run
+        """, [name])
+        let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text == "NONE" { return .none }
+        if text == "NOT EDITABLE" { return .notEditable }
+        guard text.hasPrefix("FOUND:") else { throw AutoPlaylistError.message("Music gave an unexpected answer when looking for the playlist.") }
+        return .found(id: String(text.dropFirst(6)))
     }
 
     // MARK: - Running scripts

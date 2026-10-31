@@ -57,6 +57,8 @@ struct AutoPlaylistOutcome: Sendable, Equatable {
     /// Wanted tracks the library doesn't have, and the first few of them as "Artist – Title".
     var missing = 0
     var missingSample: [String] = []
+    /// Every wanted track the library doesn't have, as "Artist – Title" (the sample is its first few).
+    var missingAll: [String] = []
     var droppedRepeats = 0
     var cache = AutoPlaylistMatchCache()
     var message = ""
@@ -84,7 +86,8 @@ enum AutoPlaylistEngine {
             outcome.cache = resolved.cache
             let missingIndexes = resolved.ids.indices.filter { resolved.ids[$0] == nil }
             outcome.missing = missingIndexes.count
-            outcome.missingSample = missingIndexes.prefix(missingSampleLimit).map { "\(request.tracks[$0].artist) – \(request.tracks[$0].track)" }
+            outcome.missingAll = missingIndexes.map { "\(request.tracks[$0].artist) – \(request.tracks[$0].track)" }
+            outcome.missingSample = Array(outcome.missingAll.prefix(missingSampleLimit))
             let unique = PlaylistDiff.droppingRepeats(resolved.ids.compactMap { $0 })
             outcome.droppedRepeats = unique.dropped
             let target = unique.ids

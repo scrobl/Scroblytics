@@ -110,6 +110,10 @@ enum AutoPlaylistChecks {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         let environment = ProcessInfo.processInfo.environment
+        if environment["SCROBLYTICS_AUTOPLAYLIST_SOURCE_DUMP"] != nil {
+            HeadlessTask.run("autoplaylist-source-dump") { try await sourceDump(container: container) }
+            return
+        }
         if let source = environment["SCROBLYTICS_AUTOPLAYLIST_LIVE_READ"] {
             HeadlessTask.run("autoplaylist-live-read") { try await liveRead(source: source) }
             return
@@ -129,6 +133,8 @@ enum AutoPlaylistChecks {
             await engineChecks(check)
             wordingAndCacheChecks(check)
             try modelAndBackupChecks(check)
+            try await recipeChecks(check)
+            try await schedulerChecks(check)
             HeadlessTask.finish(failures)
         }
     }
@@ -422,6 +428,241 @@ enum AutoPlaylistChecks {
         try NativeBackupEngine.restoreAutoPlaylists([round[0], round[0]], context: context)
         check("a repeated playlist in an archive is restored once", try context.fetch(FetchDescriptor<AutoPlaylist>()).count == 1)
         check("the backup summary counts them", NativeBackupEngine.Summary(albums: 0, tracks: 0, customImages: 0, flaggedTracks: 0, savedQueries: 0, autoPlaylists: 2).description.contains("2 automatic playlists"))
+    }
+
+
+    // MARK: - Recipes, the scheduler, making a playlist
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func bump() { lock.withLock { value += 1 } }
+        var count: Int { lock.withLock { value } }
+    }
+
+    private static func recipeList(_ n: Int) -> AutoPlaylistRecipe {
+        .topCharts(TopChartsPlaylistRecipe(entity: .track, rangeID: "year-2026", metric: .scrobbles, rowLimit: n))
+    }
+
+    @MainActor
+    private static func recipeChecks(_ report: (String, Bool, String) -> Void) async throws {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let chart = AutoPlaylistRecipe.topCharts(TopChartsPlaylistRecipe(entity: .album, rangeID: "last30", metric: .timeListened, rowLimit: 25))
+        let chartBack = AutoPlaylistRecipe(kind: chart.kind, data: try chart.encodedData())
+        check("a Top Charts recipe survives saving", chartBack == chart && chart.kind == "topCharts")
+        var spec = QuerySpec(target: .track)
+        spec.period = QueryPeriod(from: Date(timeIntervalSince1970: 1_700_000_000), to: Date(timeIntervalSince1970: 1_730_000_000))
+        spec.limit = 100
+        spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+        let query = AutoPlaylistRecipe.query(spec)
+        check("a Query recipe survives saving", AutoPlaylistRecipe(kind: query.kind, data: try query.encodedData()) == query && query.kind == "query")
+        check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
+        let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
+        check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
+
+        // Query rows become tracks in the order the query lists them; a row with no artist is left out
+        func row(_ artist: String, _ name: String) -> QueryRow { QueryRow(entity: QueryEntity(id: QueryEntityID(target: .track, artist: artist, name: name)), cells: [:]) }
+        let rows = [row("Artist A", "Song 2"), row("Artist B", "Song 1"), row("", "No Artist")]
+        let result = QueryResult(
+            rows: rows, columns: [], matchedCount: 3, universeCount: 3, pending: [], pendingEntities: [:],
+            entityInfo: [rows[0].id: .init(imageURL: nil, album: "Album X")]
+        )
+        let tracks = AutoPlaylistSources.queryTracks(result)
+        check("a track Query's rows are the playlist, in order, with their albums", tracks.map(\.track) == ["Song 2", "Song 1"] && tracks.map(\.album) == ["Album X", ""], "\(tracks)")
+    }
+
+    @MainActor
+    private static func schedulerChecks(_ report: (String, Bool, String) -> Void) async throws {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func makeContainer() throws -> ModelContainer { try ModelContainer(for: AutoPlaylist.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true)) }
+        func makeMusic() -> FakeMusic {
+            let music = FakeMusic()
+            music.with { $0.library = (1...300).map(song) }
+            return music
+        }
+        func insert(_ container: ModelContainer, name: String, recipe: AutoPlaylistRecipe?, enabled: Bool = true, offset: TimeInterval = 0) throws -> AutoPlaylist {
+            let list = AutoPlaylist(
+                name: name, recipeKind: recipe?.kind ?? "gone", recipeData: try recipe?.encodedData() ?? Data("?".utf8), sourceSummary: name,
+                isEnabled: enabled, createdAt: Date(timeIntervalSince1970: 1_800_000_000 + offset)
+            )
+            container.mainContext.insert(list)
+            return list
+        }
+
+        // Several playlists with different fates
+        do {
+            let container = try makeContainer()
+            let music = makeMusic()
+            let a = try insert(container, name: "A", recipe: recipeList(10), offset: 0)
+            let b = try insert(container, name: "B", recipe: recipeList(5), enabled: false, offset: 1)
+            let c = try insert(container, name: "C", recipe: nil, offset: 2)
+            let d = try insert(container, name: "D", recipe: recipeList(7), offset: 3)
+            let calls = Counter()
+            let provider: AutoPlaylistScheduler.TrackProvider = { recipe in
+                calls.bump()
+                guard case .topCharts(let chart) = recipe else { return [] }
+                if chart.rowLimit == 7 { throw AutoPlaylistSources.SourceError.rangeGone }
+                return wanted(Array(1...chart.rowLimit))
+            }
+            let scheduler = AutoPlaylistScheduler()
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            check("a playlist is made and remembered on its first refresh", a.status == .created && !a.playlistPersistentID.isEmpty && music.tracks(of: a.playlistPersistentID) == ids(Array(1...10)), a.lastDetail)
+            check("a playlist that is switched off is left alone", b.status == .neverRun && b.lastRefreshAt == nil)
+            check("a recipe that can't be read is reported", c.status == .failed && c.lastDetail.contains("can't be read"), c.lastDetail)
+            check("a list that can't run is reported with the reason, and the others still ran", d.status == .failed && d.lastDetail.contains("no longer available") && a.status == .created, d.lastDetail)
+            check("only the playlists switched on ran", calls.count == 2, "\(calls.count)")
+            check("no other playlist was made in Music", music.with { $0.playlists.count } == 1)
+
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            check("the next round finds nothing to change", a.status == .upToDate && music.tracks(of: a.playlistPersistentID) == ids(Array(1...10)))
+            check("…and the cache saved the library read", music.count("tracks") == 1, "\(music.count("tracks"))")
+
+            // The list changes: a new number one
+            let shifted: AutoPlaylistScheduler.TrackProvider = { recipe in
+                guard case .topCharts(let chart) = recipe, chart.rowLimit == 10 else { throw AutoPlaylistSources.SourceError.rangeGone }
+                return wanted([200] + Array(1...9))
+            }
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: shifted)
+            check("a changed list is carried into the same playlist", a.status == .updated && music.tracks(of: a.playlistPersistentID) == ids([200] + Array(1...9)) && music.with { $0.playlists.count } == 1)
+            check("…and its record says when it changed", a.lastChangedAt != nil && a.lastTrackCount == 10)
+
+            // Music not open: nothing is computed
+            music.with { $0.running = false }
+            let before = calls.count
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            check("with Music closed the lists are not even run", calls.count == before && a.status == .musicNotRunning && a.lastTrackCount == 10)
+            music.with { $0.running = true }
+
+            // The playlist is deleted in Music
+            music.with { $0.playlists.removeAll() }
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            check("a playlist deleted in Music is reported, not remade", a.status == .playlistMissing && music.with { $0.playlists.count } == 0, a.lastDetail)
+
+            // Refresh Now works on a switched-off playlist too
+            await scheduler.refresh(b, container: container, backend: music, trackProvider: provider)
+            check("Refresh Now runs a playlist even when it is switched off", b.status == .created && music.with { $0.playlists.count } == 1)
+
+            let tally = AutoPlaylistScheduler.Tally(updated: 1, upToDate: 2, attention: 1)
+            check("a round is described without names", tally.summary == "1 updated, 2 already up to date, 1 need attention" && AutoPlaylistScheduler.Tally().summary == "nothing to do")
+        }
+
+        // Two syncs finishing together: the second round waits for the first and runs once after it
+        do {
+            let container = try makeContainer()
+            let music = makeMusic()
+            let list = try insert(container, name: "A", recipe: recipeList(6))
+            let calls = Counter()
+            let provider: AutoPlaylistScheduler.TrackProvider = { _ in
+                calls.bump()
+                try await Task.sleep(for: .milliseconds(40))
+                return wanted(Array(1...6))
+            }
+            let scheduler = AutoPlaylistScheduler()
+            async let first: Void = scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            async let second: Void = scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            _ = await (first, second)
+            check("overlapping rounds never overlap: two rounds, one after the other", calls.count == 2 && !scheduler.isRefreshing && list.status == .upToDate, "\(calls.count) \(list.status)")
+        }
+
+        // No playlists, nothing happens
+        do {
+            let container = try makeContainer()
+            let music = makeMusic()
+            let calls = Counter()
+            await AutoPlaylistScheduler().refreshAll(container: container, reason: "check", backend: music, trackProvider: { _ in calls.bump(); return [] })
+            check("with no automatic playlists a sync costs nothing", calls.count == 0 && music.calls.isEmpty)
+        }
+
+        // Making a playlist from a dialog
+        do {
+            let container = try makeContainer()
+            let music = makeMusic()
+            let context = container.mainContext
+            let made = try await AutoPlaylistCreator.create(name: "Top 5", recipe: recipeList(5), summary: "Top tracks · 2026", tracks: wanted([3, 1, 2, 5, 4]), takeOverID: nil, context: context, backend: music)
+            let saved = try context.fetch(FetchDescriptor<AutoPlaylist>())
+            check("a new playlist is made in rank order and saved as automatic", made.outcome.status == .created && saved.count == 1 && music.tracks(of: saved[0].playlistPersistentID) == ids([3, 1, 2, 5, 4]) && saved[0].sourceSummary == "Top tracks · 2026" && AutoPlaylistRecipe(playlist: saved[0]) == recipeList(5))
+
+            // Taking over a playlist that is already there replaces what is in it
+            music.with { $0.playlists["OLD"] = .init(name: "Mine", tracks: ids([100, 101, 3]), smart: false) }
+            let taken = try await AutoPlaylistCreator.create(name: "Mine", recipe: recipeList(3), summary: "s", tracks: wanted([3, 7, 8]), takeOverID: "OLD", context: context, backend: music)
+            check("taking over a playlist replaces its contents and keeps it as the same playlist", taken.outcome.status == .updated && music.tracks(of: "OLD") == ids([3, 7, 8]) && taken.list?.playlistPersistentID == "OLD" && music.with { $0.playlists.count } == 2)
+
+            // Failures save nothing
+            let before = try context.fetch(FetchDescriptor<AutoPlaylist>()).count
+            music.with { $0.denyAccess = true }
+            let denied = try await AutoPlaylistCreator.create(name: "X", recipe: recipeList(1), summary: "s", tracks: wanted([1]), takeOverID: nil, context: context, backend: music)
+            music.with { $0.denyAccess = false }
+            let empty = try await AutoPlaylistCreator.create(name: "Y", recipe: recipeList(1), summary: "s", tracks: wanted([900, 901]), takeOverID: nil, context: context, backend: music)
+            let gone = try await AutoPlaylistCreator.create(name: "Z", recipe: recipeList(1), summary: "s", tracks: wanted([1]), takeOverID: "NOPE", context: context, backend: music)
+            let after = try context.fetch(FetchDescriptor<AutoPlaylist>()).count
+            check("a failed attempt saves no playlist", denied.list == nil && empty.list == nil && gone.list == nil && after == before)
+            check("…and says why", denied.outcome.status == .notAuthorized && empty.outcome.status == .emptyResult && gone.outcome.status == .playlistMissing)
+            check("the dialog gets every track that wasn't found", empty.outcome.missingAll == ["Artist A – Song 900", "Artist B – Song 901"], "\(empty.outcome.missingAll)")
+        }
+    }
+
+    // MARK: - Real data, no Music
+
+    /// On a copy of a real store (Offline mode on): runs a Top Charts recipe and a Query recipe for the last full year and checks the
+    /// tracks against an independent count of that year's plays. Nothing is sent to Music.
+    @MainActor
+    private static func sourceDump(container: ModelContainer) async throws {
+        var failures = 0
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty || ok ? "" : "  [\(detail)]"))
+            if !ok { failures += 1 }
+        }
+        let calendar = AppCalendars.listening
+        let year = calendar.component(.year, from: Date()) - 1
+        let range = DateRange(
+            from: calendar.date(from: DateComponents(year: year, month: 1, day: 1))!,
+            to: calendar.date(from: DateComponents(year: year + 1, month: 1, day: 1))!.addingTimeInterval(-1)
+        )
+        let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container).filter { $0.playedAt >= range.from && $0.playedAt <= range.to }
+        print("year \(year): \(plays.count) plays")
+        guard !plays.isEmpty else { print("no plays in that year"); HeadlessTask.finish(1) }
+        func songKey(_ artist: String, _ title: String) -> String { "\(TextNormalization.artistIdentityKey(artist))\u{0}\(TextNormalization.normalizeTrackTitle(title))" }
+        var counts: [String: Int] = [:]
+        for play in plays { counts[songKey(play.artistName, play.trackName), default: 0] += 1 }
+        let ranked = counts.values.sorted(by: >)
+
+        func verify(_ label: String, _ tracks: [AppleMusicPlaylistTrack], limit: Int) {
+            let listed = tracks.map { counts[songKey($0.artist, $0.track)] ?? 0 }
+            let nonIncreasing = zip(listed, listed.dropFirst()).allSatisfy { $0 >= $1 }
+            let expectedCount = min(limit, ranked.count)
+            let boundary = listed.last ?? 0
+            // nothing outside the list may have more plays than the last track inside it
+            let listedKeys = Set(tracks.map { songKey($0.artist, $0.track) })
+            let outsiders = counts.filter { !listedKeys.contains($0.key) && $0.value > boundary }.count
+            check("\(label): \(tracks.count) tracks in non-increasing play order (independent recount)", nonIncreasing && listed.allSatisfy { $0 > 0 }, "listed counts start \(listed.prefix(8))")
+            check("\(label): the right number of tracks", tracks.count == expectedCount, "\(tracks.count) vs \(expectedCount)")
+            check("\(label): no track left out that was played more than the last one listed", outsiders == 0, "\(outsiders) outsiders above \(boundary) plays")
+            check("\(label): no song twice", listedKeys.count == tracks.count)
+        }
+
+        let began = Date()
+        let chartTracks = try await AutoPlaylistSources.tracks(
+            for: .topCharts(TopChartsPlaylistRecipe(entity: .track, rangeID: "year-\(year)", metric: .scrobbles, rowLimit: 100)), container: container, popularity: nil
+        )
+        print(String(format: "  Top Charts recipe: %.2f s", Date().timeIntervalSince(began)))
+        verify("Top Charts, top 100 tracks of \(year)", chartTracks, limit: 100)
+
+        var spec = TrendsDrill.spec(from: range.from, to: range.to, target: .track)
+        spec.limit = 100
+        let queryBegan = Date()
+        let queryTracks = try await AutoPlaylistSources.tracks(for: .query(spec), container: container, popularity: nil)
+        print(String(format: "  Query recipe: %.2f s", Date().timeIntervalSince(queryBegan)))
+        verify("Query, top 100 tracks of \(year)", queryTracks, limit: 100)
+
+        let sameSongs = Set(chartTracks.map { songKey($0.artist, $0.track) }).symmetricDifference(Set(queryTracks.map { songKey($0.artist, $0.track) })).count
+        print("  songs in one list but not the other (ties at the cut-off can differ): \(sameSongs)")
+
+        // The same chart for artists: the playlist holds the tracks of the top artists
+        let artistTracks = try await AutoPlaylistSources.tracks(
+            for: .topCharts(TopChartsPlaylistRecipe(entity: .artist, rangeID: "year-\(year)", metric: .scrobbles, rowLimit: 10)), container: container, popularity: nil
+        )
+        check("Top Charts, top 10 artists: tracks of the artists, up to the builder's limits", !artistTracks.isEmpty && artistTracks.count <= 500, "\(artistTracks.count)")
+        HeadlessTask.finish(failures)
     }
 
     // MARK: - Real Music

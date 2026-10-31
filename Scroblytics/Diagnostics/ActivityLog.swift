@@ -51,7 +51,7 @@ final class ActivityLog: @unchecked Sendable {
     static let shared = ActivityLog()
 
     enum Category: String, Sendable {
-        case app, sync, account, network, update, startup
+        case app, sync, account, network, update, startup, playlists
     }
 
     /// Lines kept after a trim, and the size at which a trim happens.

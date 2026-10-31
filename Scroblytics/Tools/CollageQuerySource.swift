@@ -115,27 +115,8 @@ enum SavedQueryCollage {
         let registry = QueryFieldRegistry.standard
         let validated: ValidatedQuery
         do { validated = try spec.validate(against: registry) } catch { throw Failure.invalid(set.name, "\(error)") }
-        let scrobbles: [ScrobbleSnapshot]
-        if let history { scrobbles = history } else {
-            scrobbles = try await offMain {
-                try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
-            }
-        }
-        let loaded = await QuerySnapshotReader.loadAll(container: container)
-        let snapshots = QuerySnapshots(
-            popularity: popularity?.snapshot ?? .empty, durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates,
-            turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, flaggedKeys: loaded.flaggedKeys,
-            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, weather: loaded.weather, images: loaded.images
-        )
-        let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
-            let inScope = validated.spec.countedPlays(scrobbles, weather: snapshots.weather)
-            let run = QueryRun(
-                target: validated.spec.target, asOf: validated.spec.asOf ?? Date(), scrobbles: inScope, allTimeScrobbles: scrobbles,
-                snapshots: snapshots, sessionGapMinutes: Double(validated.spec.effectiveSessionGapMinutes)
-            )
-            return QueryEngine.evaluate(validated, run: run)
-        }.value
-        let rows = QueryDisplayRow.make(from: result, imageLookup: loaded.images.lookup)
+        let (result, imageLookup) = try await QueryHeadlessRunner.run(validated, container: container, popularity: popularity, history: history)
+        let rows = QueryDisplayRow.make(from: result, imageLookup: imageLookup)
         let sorted = ShareCards.sortedColumnIndex(columns: result.columns, sorts: spec.sorts, target: spec.target, registry: registry)
         guard var payload = CollageQuerySource.payload(
             title: set.name, target: spec.target, rows: rows, columns: result.columns, sortedColumn: sorted, entityInfo: result.entityInfo

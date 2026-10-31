@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum TopChartsEntity: String, CaseIterable, Identifiable {
+enum TopChartsEntity: String, CaseIterable, Identifiable, Codable, Sendable {
     case artist, album, track
     var id: String { rawValue }
     var displayName: String {
@@ -58,7 +58,7 @@ enum ChartCompareMode: String, CaseIterable, Identifiable {
 /// Which value ranks and displays — Scrobbles (play count, always available)
 /// or Time Listened (derived from resolved track durations, per
 /// `DurationEngine` — never a second resolution pipeline of its own).
-enum TopChartsMetric: String, CaseIterable, Identifiable {
+enum TopChartsMetric: String, CaseIterable, Identifiable, Codable, Sendable {
     case scrobbles, timeListened
     var id: String { rawValue }
     var displayName: String {

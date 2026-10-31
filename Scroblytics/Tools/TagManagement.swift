@@ -332,7 +332,7 @@ extension View {
     /// must outlive the Tag Management page). `ContentView`'s modifier chain is at the compiler's limit.
     func toolRuntime(
         gapBadges: LibraryGapBadgeStore, tagWriter: TagWriteRunner, work: BackgroundWorkStore, container: ModelContainer,
-        askRouter: AskSimilarRouter, askSuggestions: AskSuggestionStore, nowPlaying: NowPlayingStore, onAskSimilar: @escaping () -> Void,
+        askRouter: AskSimilarRouter, askSuggestions: AskSuggestionStore, nowPlaying: NowPlayingStore, popularity: PopularityStore, onAskSimilar: @escaping () -> Void,
         onAccountConnected: @escaping () -> Void, onStopRequested: @escaping () -> Void, onOpenTool: @escaping (ToolDescriptor.Kind) -> Void
     ) -> some View {
         libraryGapBadges(gapBadges, container: container)
@@ -341,6 +341,7 @@ extension View {
             .environment(tagWriter)
             .environment(askRouter)
             .environment(askSuggestions)
+            .autoPlaylistRuntime(container: container, popularity: popularity)
             .task { askSuggestions.markStale(container: container) }
             .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
                 askSuggestions.markStale(container: container)

@@ -1009,7 +1009,9 @@ struct QueryView: View {
 
                 AppleMusicPlaylistExportButton(
                     defaultPlaylistName: "Query Results (\(Date().formatted(date: .abbreviated, time: .omitted)))",
-                    tracks: { queryPlaylistTracks }
+                    tracks: { queryPlaylistTracks },
+                    recipe: .query(model.spec),
+                    recipeSummary: "Query · \(resultsTitle)"
                 )
                 .controlSize(.small)
 

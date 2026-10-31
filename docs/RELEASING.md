@@ -172,6 +172,10 @@ Music with made-up songs: the plan (keep the matching top, remove the tail, add 
 when Music is closed or the list comes out empty, a deleted or smart playlist, a playlist edited mid-refresh, stopping part way, the
 match cache, and the backup round trip. The stand-in never touches a real library. Before a release that changes it, with Music open:
 
+- `SCROBLYTICS_AUTOPLAYLIST_SOURCE_DUMP=1` (Debug build, a copy of a real store, Offline mode on; no Music needed) runs a Top Charts recipe
+  and a Query recipe for the last full year and checks both lists against an independent count of that year's plays (non-increasing
+  plays, nothing played more left out, no song twice), and prints how long each takes.
+- `SCROBLYTICS_LAYOUT_SNAPSHOT_PLAYLIST=<folder>` renders the playlist dialog with and without the keep-updated switch, and the result sheet.
 - `SCROBLYTICS_AUTOPLAYLIST_LIVE_READ=<playlist persistent ID>` (Debug build, scratch `SCROBLYTICS_STORE_PATH`) reads one playlist,
   finds each of its tracks in the library the way a refresh does, and prints how many came back as the playlist's own track and how
   long it took; a dry run then reports "up to date". It changes nothing. A smart playlist is refused ("notEditable"), which makes that

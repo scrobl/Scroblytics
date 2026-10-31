@@ -203,6 +203,7 @@
 		98669009F4293BC7E957723B /* FirstRunGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3699F6134FD0D75DFCFB45D /* FirstRunGate.swift */; };
 		991B3D247DD5F9AFFCD5C17F /* ShareCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85F7A298126670E3EE7BE3F1 /* ShareCardViews.swift */; };
 		994BF50286A54227E2A6E94C /* QuerySeasons.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8FA67E37F642308A67B3194 /* QuerySeasons.swift */; };
+		99648673F775F4DF1AE3A2E2 /* QueryHeadlessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 807BAEB8429FA382607FB44D /* QueryHeadlessRunner.swift */; };
 		99904DCEEDF4DCD42803FBAF /* StaleRecordReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15823A406059F0DBE9DFD419 /* StaleRecordReviewView.swift */; };
 		9AC95092CE3063B37F9DF9B1 /* ConnectivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718A5749D00DD6B05B892BB4 /* ConnectivityViews.swift */; };
 		9B414285D44757A7DAFA4AD8 /* ShareSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF99019D496068838648850F /* ShareSnapshot.swift */; };
@@ -250,6 +251,7 @@
 		C01B8440CEFD6EA614427E2B /* MusicBrainzAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44EA5486AF4477944C07512 /* MusicBrainzAPIClient.swift */; };
 		C05A15698264F952F04F7DB7 /* DetailFactGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57F65372523BDDFB6F99CDC8 /* DetailFactGrid.swift */; };
 		C1183D7E8297FD4C5AC8213A /* AskVocabulary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0139290ED37C297353BFBD74 /* AskVocabulary.swift */; };
+		C1398B6C087166C2B86C46AF /* AutoPlaylistRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC0B6072860932169FC8397 /* AutoPlaylistRecipe.swift */; };
 		C150E7D2B0FB847984F6C4A6 /* TagManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16B8936C50A253B8D529B686 /* TagManagement.swift */; };
 		C20CA820AEA8ED72EC434DAE /* QueryMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59612875235DD5729636341 /* QueryMatcher.swift */; };
 		C34D609D9C02A263D364CBE3 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FD509D061EB1E054BDDC1B /* UpdateChecker.swift */; };
@@ -356,6 +358,7 @@
 		FC202BE73AA90EBFCB1F369E /* TrendsMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = 640182F05471471A2F4F4D5D /* TrendsMetric.swift */; };
 		FC2C21E12C3416B10A2822E9 /* GoalsLanding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B04BBA9C28E32BAD16A9CCA1 /* GoalsLanding.swift */; };
 		FCA38E86DE6DE914C6842B28 /* BackgroundWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB4B0817343EE8CD301C15C /* BackgroundWork.swift */; };
+		FF31F86B5A3FDD7909AD2DAD /* AutoPlaylistScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF936AA815452AB41C8A2F0 /* AutoPlaylistScheduler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -467,6 +470,7 @@
 		4CD5A66A015FD2BF9EE1A15F /* ReverbEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReverbEngine.swift; sourceTree = "<group>"; };
 		4D1D3672276B33D19658D2E7 /* QueryScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryScope.swift; sourceTree = "<group>"; };
 		4E3BCD49A9738E56A7BED103 /* StoreStartup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoreStartup.swift; sourceTree = "<group>"; };
+		4FF936AA815452AB41C8A2F0 /* AutoPlaylistScheduler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutoPlaylistScheduler.swift; sourceTree = "<group>"; };
 		5033C685E21358856C1B32B6 /* ConsistencyChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConsistencyChecks.swift; sourceTree = "<group>"; };
 		50975E90A0F20009307C588F /* LovedTracksEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LovedTracksEngine.swift; sourceTree = "<group>"; };
 		50A180D6008EC4ABC19CD6A7 /* AppleMusicPlaylistExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicPlaylistExporter.swift; sourceTree = "<group>"; };
@@ -524,6 +528,7 @@
 		79362147ED4233884B6A0F45 /* HistoryEmptyState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HistoryEmptyState.swift; sourceTree = "<group>"; };
 		7A22AFA3823B3FA4B68E7B05 /* TagManagementView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TagManagementView.swift; sourceTree = "<group>"; };
 		7A2E235FEADBC246A91B1558 /* DurationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurationEngine.swift; sourceTree = "<group>"; };
+		7AC0B6072860932169FC8397 /* AutoPlaylistRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutoPlaylistRecipe.swift; sourceTree = "<group>"; };
 		7CD96AFC245A7C42A3F31AE8 /* AskSuggestions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskSuggestions.swift; sourceTree = "<group>"; };
 		7CE436DD34F6AACF330623D7 /* AskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskView.swift; sourceTree = "<group>"; };
 		7D0B6E8DF3AB897EA26A86CD /* TrendsWeatherViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsWeatherViews.swift; sourceTree = "<group>"; };
@@ -532,6 +537,7 @@
 		7E6CD2CF6BBED3E493AB77C0 /* RabbitHoleSeeds.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RabbitHoleSeeds.swift; sourceTree = "<group>"; };
 		7E745ABA6B7EF033F09F1A80 /* AskInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskInterpreter.swift; sourceTree = "<group>"; };
 		801BD49F9742F88D02490056 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
+		807BAEB8429FA382607FB44D /* QueryHeadlessRunner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryHeadlessRunner.swift; sourceTree = "<group>"; };
 		80F244FF2E3268E8650582D1 /* TrendsTimeTravelGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsTimeTravelGrid.swift; sourceTree = "<group>"; };
 		8145C38DD7DA0D2AD747D5F1 /* TrackBPMEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackBPMEditView.swift; sourceTree = "<group>"; };
 		8155E01BF993AFE2BB92CFAB /* QueryCellText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryCellText.swift; sourceTree = "<group>"; };
@@ -882,6 +888,8 @@
 				95E4503819ADFF05004EC6FD /* PlaylistDiff.swift */,
 				F2960A3CCEBDDC922121F626 /* AutoPlaylistEngine.swift */,
 				3354F0A70C691DCC4C7DF6C1 /* AppleMusicPlaylistBackend.swift */,
+				7AC0B6072860932169FC8397 /* AutoPlaylistRecipe.swift */,
+				4FF936AA815452AB41C8A2F0 /* AutoPlaylistScheduler.swift */,
 			);
 			name = Playlists;
 			path = Playlists;
@@ -1076,6 +1084,7 @@
 				5D84D4BF752A38812BB1717E /* QueryScrobbleInheritedFields.swift */,
 				347B2904FD60764974814573 /* QueryScrobbleSessionFields.swift */,
 				359D06A2DE4BF1E1E56DD86D /* QuerySessionFields.swift */,
+				807BAEB8429FA382607FB44D /* QueryHeadlessRunner.swift */,
 			);
 			path = Query;
 			sourceTree = "<group>";
@@ -1768,6 +1777,9 @@
 				F617E9D6C3C3C45CB603F486 /* AutoPlaylistEngine.swift in Sources */,
 				37492E5DB8C5C64304A41CAA /* AppleMusicPlaylistBackend.swift in Sources */,
 				8C82C8DF697BF8B7346E47B0 /* AutoPlaylistChecks.swift in Sources */,
+				C1398B6C087166C2B86C46AF /* AutoPlaylistRecipe.swift in Sources */,
+				FF31F86B5A3FDD7909AD2DAD /* AutoPlaylistScheduler.swift in Sources */,
+				99648673F775F4DF1AE3A2E2 /* QueryHeadlessRunner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

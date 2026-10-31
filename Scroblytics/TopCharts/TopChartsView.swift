@@ -89,6 +89,8 @@ struct TopChartsView: View {
                     showsPlaylistExport: !entries.isEmpty,
                     playlistName: defaultPlaylistName,
                     playlistTracks: makePlaylistTracks,
+                    playlistRecipe: playlistRecipe,
+                    playlistRecipeSummary: playlistRecipeSummary,
                     shareCard: makeShareCard
                 )
                 Divider()
@@ -204,21 +206,20 @@ struct TopChartsView: View {
     }
 
     private func makePlaylistTracks() async throws -> [AppleMusicPlaylistTrack] {
-        if entity == .track {
-            return entries.compactMap { entry in
-                guard let artist = entry.artist, !artist.isEmpty else { return nil }
-                return AppleMusicPlaylistTrack(artist: artist, track: entry.name, album: entry.album ?? "")
-            }
-        }
-
-        return try await AppleMusicPlaylistBuilder.tracks(
-            for: entries,
-            entity: entity,
-            range: currentRange,
-            metric: settings.metric,
-            container: modelContainer,
-            context: modelContext
+        try await AppleMusicPlaylistBuilder.chartTracks(
+            entries: entries, entity: entity, range: currentRange, metric: settings.metric,
+            container: modelContainer, context: modelContext
         )
+    }
+
+    /// What an automatic playlist made from this chart would run again after each sync.
+    private var playlistRecipe: AutoPlaylistRecipe {
+        .topCharts(TopChartsPlaylistRecipe(entity: entity, rangeID: settings.selectedRangeId, metric: settings.metric, rowLimit: currentRowLimit))
+    }
+
+    private var playlistRecipeSummary: String {
+        let period = rangeOptions.first { $0.id == settings.selectedRangeId }?.label ?? "Last 30 days"
+        return "Top \(entity.displayName.lowercased()) · \(period) · by \(settings.metric == .timeListened ? "time listened" : "plays") · \(currentRowLimit) rows"
     }
 
     private func artistDetail(_ identity: ArtistIdentity) -> some View {
@@ -425,6 +426,8 @@ private struct TopChartsHeader: View {
     let showsPlaylistExport: Bool
     let playlistName: String
     let playlistTracks: @MainActor () async throws -> [AppleMusicPlaylistTrack]
+    let playlistRecipe: AutoPlaylistRecipe
+    let playlistRecipeSummary: String
     let shareCard: @MainActor () -> ShareCard?
 
     var body: some View {
@@ -461,7 +464,9 @@ private struct TopChartsHeader: View {
                     if showsPlaylistExport && !showsChartRace {
                         AppleMusicPlaylistExportButton(
                             defaultPlaylistName: playlistName,
-                            tracks: playlistTracks
+                            tracks: playlistTracks,
+                            recipe: playlistRecipe,
+                            recipeSummary: playlistRecipeSummary
                         )
                     }
 

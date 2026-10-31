@@ -13,6 +13,10 @@ enum LayoutSnapshots {
             snapshotAskEngine(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_PLAYLIST"] {
+            snapshotPlaylistDialog(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_UPDATES"] {
             snapshotUpdates(into: folder)
             return
@@ -116,6 +120,37 @@ enum LayoutSnapshots {
 
     /// `SCROBLYTICS_LAYOUT_SNAPSHOT_UPDATES=<folder>`: the "update available" strip at several widths and the Settings › Updates section.
     @MainActor
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_PLAYLIST=<folder>`: the playlist dialog with and without the keep-updated switch, and the result sheet for an
+    /// automatic playlist with some tracks not found, light and dark.
+    private static func snapshotPlaylistDialog(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let appearance = scheme == "dark" ? NSAppearance.Name.darkAqua : .aqua
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme).png"))
+                }
+            }
+            let missing = ["Artist A – Song 9", "Artist B – A song with a much longer title that has to be cut off somewhere"]
+            for scheme in ["dark", "light"] {
+                await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Top Tracks (2026)"), keepUpdated: .constant(false), canKeepUpdated: true, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-off")
+                await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Top Tracks (2026)"), keepUpdated: .constant(true), canKeepUpdated: true, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-on")
+                await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Flagged Tracks"), keepUpdated: .constant(false), canKeepUpdated: false, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-plain")
+                await render(AppleMusicPlaylistResultSheet(playlistName: "Top Tracks (2026)", result: .init(added: 98, notFound: missing), isAutomatic: true, onCopyMissing: {}, onDismiss: {}), width: 620, scheme: scheme, name: "result-automatic")
+            }
+            exit(0)
+        }
+    }
+
     private static func snapshotUpdates(into folder: String) {
         Task { @MainActor in
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)

@@ -460,6 +460,18 @@ enum AutoPlaylistChecks {
         let recent = AutoPlaylistRecipe.mostRecentMostOften(MostRecentMostOftenPlaylistRecipe(windowDays: 90, minPlays: 5, sort: .velocity, rowLimit: 50))
         check("a Most Recent, Most Often recipe survives saving", AutoPlaylistRecipe(kind: recent.kind, data: try recent.encodedData()) == recent && recent.kind == "mostRecentMostOften")
         check("…and describes itself", MostRecentMostOftenPlaylistRecipe(windowDays: 90, minPlays: 5, sort: .velocity, rowLimit: 50).summary == "Most Recent, Most Often · discovered in the last 90 days · 5+ plays · by speed · 50 rows" && MostRecentMostOftenPlaylistRecipe(windowDays: 30, minPlays: 1, sort: .plays, rowLimit: 0).summary.hasSuffix("by plays · all rows"))
+        let toppers = AutoPlaylistRecipe.chartToppers(ChartToppersPlaylistRecipe(entity: .track, period: .year, metric: .scrobbles, yearRange: 0))
+        check("a Chart Toppers recipe survives saving", AutoPlaylistRecipe(kind: toppers.kind, data: try toppers.encodedData()) == toppers && toppers.kind == "chartToppers")
+        check("…and describes itself", toppers.summary == "Chart Toppers · #1 tracks by year · by plays · all years" && ChartToppersPlaylistRecipe(entity: .artist, period: .decade, metric: .timeListened, yearRange: 10).summary == "Chart Toppers · #1 artists by decade · by time listened · last 10 years")
+        func entry(_ artist: String, _ track: String, rank: Int = 1) -> ChartTopperEntry {
+            ChartTopperEntry(id: "\(artist)\(track)\(rank)", rank: rank, name: track, artist: artist, album: nil, metricValue: 10, imageURL: nil, loved: false, flagged: false, exportTrack: .init(artist: artist, track: track, album: ""))
+        }
+        func period(_ label: String, _ entries: [ChartTopperEntry]) -> ChartTopperPeriod { ChartTopperPeriod(id: label, label: label, start: Date(), entries: entries) }
+        let toppersTracks = ChartToppersReader.playlistTracks(periods: [
+            period("1999", [entry("Artist A", "Song 1"), entry("Artist B", "Song 2", rank: 2)]), period("2000", [entry("Artist B", "Song 2")]),
+            period("2001", [entry("artist a", "SONG 1")]), period("2002", []), period("2003", [entry("Artist C", "Song 3")]),
+        ])
+        check("Chart Toppers: each period's number one, a track once however many periods it won, empty periods skipped", toppersTracks.map(\.track) == ["Song 1", "Song 2", "Song 3"], "\(toppersTracks.map(\.track))")
         check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
         let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
         check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
@@ -743,6 +755,21 @@ enum AutoPlaylistChecks {
         check("Most Recent, Most Often: every track qualifies by an independent count (first played in the window, enough plays)", allEligible)
         check("Most Recent, Most Often: the right number of tracks", mrmoTracks.count == min(mrmo.rowLimit, eligibleCount), "\(mrmoTracks.count) vs \(min(mrmo.rowLimit, eligibleCount))")
         check("Most Recent, Most Often: each track carries its most-played album", albumsRight)
+
+        // Chart Toppers: each year's number one track; its plays must equal an independent count of the track's plays
+        let toppersRecipe = ChartToppersPlaylistRecipe(entity: .track, period: .year, metric: .scrobbles, yearRange: 0)
+        let periods = try await ChartToppersReader(modelContainer: container).load(entity: .track, metric: .scrobbles, period: .year, yearRange: 0)
+        let allPlays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        var allTime: [String: Int] = [:]
+        for play in allPlays { allTime[songKey(play.artistName, play.trackName), default: 0] += 1 }
+        let winners = periods.compactMap { $0.entries.first }
+        let countsMatch = winners.filter { allTime[songKey($0.artist, $0.name)] == $0.metricValue }.count
+        let sortedWithin = periods.allSatisfy { p in zip(p.entries, p.entries.dropFirst()).allSatisfy { $0.metricValue >= $1.metricValue } }
+        let toppersList = try await AutoPlaylistSources.tracks(for: .chartToppers(toppersRecipe), container: container, popularity: nil)
+        print("  Chart Toppers: \(periods.count) years, \(winners.count) with a number one, \(countsMatch) whose plays equal the independent count, \(toppersList.count) tracks")
+        check("Chart Toppers: each year's list is in non-increasing order", sortedWithin)
+        check("Chart Toppers: the number ones' plays equal an independent count (all but a few merged spellings)", winners.isEmpty || Double(countsMatch) / Double(winners.count) >= 0.9, "\(countsMatch) of \(winners.count)")
+        check("Chart Toppers: the playlist is the winners, each song once", toppersList.count == Set(toppersList.map { songKey($0.artist, $0.track) }).count && toppersList.count <= winners.count)
 
         // The same chart for artists: the playlist holds the tracks of the top artists
         let artistTracks = try await AutoPlaylistSources.tracks(

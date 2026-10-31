@@ -27,6 +27,18 @@ struct MostRecentMostOftenPlaylistRecipe: Codable, Equatable, Sendable {
     }
 }
 
+/// Chart Toppers: each period's number one, for the chosen kind, period and ranking (year range 0 = all years).
+struct ChartToppersPlaylistRecipe: Codable, Equatable, Sendable {
+    var entity: TopChartsEntity
+    var period: CollagePeriod
+    var metric: TopChartsMetric
+    var yearRange: Int
+
+    var summary: String {
+        "Chart Toppers · #1 \(entity.displayName.lowercased()) by \(period.rawValue) · by \(metric == .timeListened ? "time listened" : "plays") · \(yearRange == 0 ? "all years" : "last \(yearRange) years")"
+    }
+}
+
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
 /// again have one: a list built from a random walk or from one answer of Last.fm would give a different list every time.
 enum AutoPlaylistRecipe: Equatable, Sendable {
@@ -34,16 +46,29 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     /// A Query whose rows are tracks.
     case query(QuerySpec)
     case mostRecentMostOften(MostRecentMostOftenPlaylistRecipe)
+    case chartToppers(ChartToppersPlaylistRecipe)
 
     static let topChartsKind = "topCharts"
     static let queryKind = "query"
     static let mostRecentMostOftenKind = "mostRecentMostOften"
+    static let chartToppersKind = "chartToppers"
 
     var kind: String {
         switch self {
         case .topCharts: Self.topChartsKind
         case .query: Self.queryKind
         case .mostRecentMostOften: Self.mostRecentMostOftenKind
+        case .chartToppers: Self.chartToppersKind
+        }
+    }
+
+    /// The short description kept with the playlist when the screen has none of its own.
+    var summary: String {
+        switch self {
+        case .topCharts(let chart): "Top \(chart.entity.displayName.lowercased()) · \(chart.rangeID)"
+        case .query: "Query"
+        case .mostRecentMostOften(let recipe): recipe.summary
+        case .chartToppers(let recipe): recipe.summary
         }
     }
 
@@ -52,6 +77,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .topCharts(let recipe): try JSONEncoder().encode(recipe)
         case .query(let spec): try spec.encoded()
         case .mostRecentMostOften(let recipe): try JSONEncoder().encode(recipe)
+        case .chartToppers(let recipe): try JSONEncoder().encode(recipe)
         }
     }
 
@@ -67,6 +93,9 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case Self.mostRecentMostOftenKind:
             guard let recipe = try? JSONDecoder().decode(MostRecentMostOftenPlaylistRecipe.self, from: data) else { return nil }
             self = .mostRecentMostOften(recipe)
+        case Self.chartToppersKind:
+            guard let recipe = try? JSONDecoder().decode(ChartToppersPlaylistRecipe.self, from: data) else { return nil }
+            self = .chartToppers(recipe)
         default:
             return nil
         }
@@ -125,6 +154,11 @@ enum AutoPlaylistSources {
             let rows = MostRecentMostOftenEngine.limited(computed?.rows ?? [], to: tool.rowLimit)
             let lookup = (try? ImageResolutionEngine.imageLookup(context: container.mainContext)) ?? [:]
             return MostRecentMostOftenEngine.playlistTracks(rows: rows, scrobbles: all, lookup: lookup)
+        case .chartToppers(let chart):
+            let periods = try await ChartToppersReader(modelContainer: container).load(
+                entity: chart.entity, metric: chart.metric, period: chart.period, yearRange: chart.period == .year ? chart.yearRange : 0
+            )
+            return ChartToppersReader.playlistTracks(periods: periods)
         }
     }
 

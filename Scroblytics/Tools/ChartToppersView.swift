@@ -51,7 +51,8 @@ struct ChartToppersView: View {
                     period: options.period,
                     isLoading: isLoading,
                     playlistName: defaultPlaylistName,
-                    playlistTracks: playlistTracks
+                    playlistTracks: playlistTracks,
+                    playlistRecipe: playlistRecipe
                 )
 
                 ChartToppersContent(
@@ -106,11 +107,10 @@ struct ChartToppersView: View {
         isLoading = false
     }
 
-    private var playlistTracks: [AppleMusicPlaylistTrack] {
-        var seen = Set<String>()
-        return periods.compactMap { $0.entries.first?.exportTrack }.filter { track in
-            seen.insert(TextNormalization.lovedKey(artist: track.artist, track: track.track)).inserted
-        }
+    private var playlistTracks: [AppleMusicPlaylistTrack] { ChartToppersReader.playlistTracks(periods: periods) }
+
+    private var playlistRecipe: AutoPlaylistRecipe {
+        .chartToppers(ChartToppersPlaylistRecipe(entity: entity, period: options.period, metric: metric, yearRange: options.period == .year ? options.yearRange : 0))
     }
 
     private var defaultPlaylistName: String {
@@ -238,6 +238,7 @@ private struct ChartToppersSummary: View {
     let isLoading: Bool
     let playlistName: String
     let playlistTracks: [AppleMusicPlaylistTrack]
+    let playlistRecipe: AutoPlaylistRecipe
 
     var body: some View {
         HStack(spacing: 12) {
@@ -253,9 +254,10 @@ private struct ChartToppersSummary: View {
             Spacer()
 
             if !playlistTracks.isEmpty {
-                AppleMusicPlaylistExportButton(defaultPlaylistName: playlistName) {
-                    playlistTracks
-                }
+                AppleMusicPlaylistExportButton(
+                    defaultPlaylistName: playlistName, tracks: { playlistTracks },
+                    recipe: playlistRecipe, recipeSummary: playlistRecipe.summary
+                )
             }
         }
     }

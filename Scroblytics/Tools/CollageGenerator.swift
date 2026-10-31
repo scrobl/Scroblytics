@@ -90,6 +90,17 @@ struct ChartTopperPeriod: Identifiable, Hashable, Sendable {
     let entries: [ChartTopperEntry]
 }
 
+extension ChartToppersReader {
+    /// The playlist for a Chart Toppers list: each period's number one, oldest first as listed, a track once however many periods it won.
+    @MainActor
+    static func playlistTracks(periods: [ChartTopperPeriod]) -> [AppleMusicPlaylistTrack] {
+        var seen = Set<String>()
+        return periods.compactMap { $0.entries.first?.exportTrack }.filter { track in
+            seen.insert(TextNormalization.lovedKey(artist: track.artist, track: track.track)).inserted
+        }
+    }
+}
+
 @ModelActor
 actor ChartToppersReader {
     func load(

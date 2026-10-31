@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-enum SubListSort: String, CaseIterable, Identifiable {
+enum SubListSort: String, CaseIterable, Identifiable, Codable, Sendable {
     case mostPlayed, alphabetical, recentlyPlayed, trackOrder, releaseYear
     var id: String { rawValue }
 
@@ -16,76 +16,11 @@ enum SubListSort: String, CaseIterable, Identifiable {
     }
 }
 
-/// Sortable list of an artist's own albums/tracks, or an album's own
-/// tracks — the "Library"-mode half of the merged Top Charts/Library view
-/// (Phase 5). One unified sort menu rather than a separate mode toggle.
-/// The leading position column shows chart rank for "Most played" and the
-/// album track number for "Track order"; the other browse modes omit it.
-struct EntitySubListView: View {
-    /// `.album` for an artist's own Albums tab; `.track` for an artist's
-    /// own Tracks tab OR an album's own track list.
-    let entity: TopChartsEntity
-    let artist: String
-    /// Set only when this is an ALBUM's own track list — enables Track
-    /// order and scopes the ranking query to just that album. Nil for an
-    /// artist's own Albums/Tracks tab (scoped to the artist's whole catalog).
-    let album: String?
-    let range: DateRange
-    let compareRange: DateRange?
-    let metric: TopChartsMetric
-    let isGridView: Bool
-    /// Where this page was reached from — drives the initial sort default
-    /// only: Library's own Artist→Album grid defaults to Release year
-    /// descending (the paused Phase 2 gap this closes), while every other
-    /// origin (Top Charts, Overview) keeps defaulting to Most played. The
-    /// user can still switch away from either default via the sort menu.
-    let origin: DetailNavigationOrigin
-    @Environment(\.modelContext) private var modelContext
-    @State private var entries: [TopChartEntry] = []
-    @State private var trackOrderIndex: [String: Int] = [:]
-    @State private var sort: SubListSort
-    /// nil means the sort's own starting direction (see `SubListSort.startsAscending`).
-    @State private var ascendingOverride: Bool?
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-
-    init(entity: TopChartsEntity, artist: String, album: String?, range: DateRange, compareRange: DateRange?, metric: TopChartsMetric, isGridView: Bool, origin: DetailNavigationOrigin) {
-        self.entity = entity
-        self.artist = artist
-        self.album = album
-        self.range = range
-        self.compareRange = compareRange
-        self.metric = metric
-        self.isGridView = isGridView
-        self.origin = origin
-        _sort = State(initialValue: origin == .library && entity == .album ? .releaseYear : .mostPlayed)
-    }
-
-    private var filterID: String {
-        [
-            entity.rawValue,
-            TextNormalization.artistIdentityKey(artist),
-            album.map(TextNormalization.normalizeAlbumName) ?? "",
-            String(Int(range.from.timeIntervalSinceReferenceDate / 86_400)),
-            String(Int(range.to.timeIntervalSinceReferenceDate / 86_400)),
-            String(Int((compareRange?.from.timeIntervalSinceReferenceDate ?? 0) / 86_400)),
-            metric.rawValue
-        ].joined(separator: "|")
-    }
-
-    private var availableSorts: [SubListSort] {
-        if entity == .track && album != nil {
-            return [.mostPlayed, .alphabetical, .recentlyPlayed, .trackOrder, .releaseYear]
-        }
-        return entity == .album || entity == .track
-            ? [.mostPlayed, .alphabetical, .recentlyPlayed, .releaseYear]
-            : [.mostPlayed, .alphabetical, .recentlyPlayed]
-    }
-
+enum SubListSorting {
     /// The entries in the chosen order and direction. The sorts below are written in their starting direction; a reversed one is that
     /// list backwards, except that dates nobody knows stay last in a release-year order, since "unknown" is neither oldest nor newest.
-    private var sortedEntries: [TopChartEntry] {
-        let natural = startingDirectionEntries
+    static func sorted(_ entries: [TopChartEntry], by sort: SubListSort, ascendingOverride: Bool?, trackOrderIndex: [String: Int]) -> [TopChartEntry] {
+        let natural = startingDirection(entries, by: sort, trackOrderIndex: trackOrderIndex)
         guard let override = ascendingOverride, override != sort.startsAscending else { return natural }
         if sort == .releaseYear {
             let known = natural.filter { $0.releaseDate.flatMap(ReleaseDateEngine.year(of:)) != nil }
@@ -95,7 +30,7 @@ struct EntitySubListView: View {
         return Array(natural.reversed())
     }
 
-    private var startingDirectionEntries: [TopChartEntry] {
+    static func startingDirection(_ entries: [TopChartEntry], by sort: SubListSort, trackOrderIndex: [String: Int]) -> [TopChartEntry] {
         switch sort {
         case .mostPlayed:
             return entries
@@ -129,6 +64,94 @@ struct EntitySubListView: View {
         }
     }
 
+    /// The sorts a refresh can reproduce without looking anything up: Track order needs the album's tracklist from Last.fm and Release
+    /// year needs the release dates the screen has loaded.
+    static let playlistSorts: Set<SubListSort> = [.mostPlayed, .alphabetical, .recentlyPlayed]
+
+    /// The tracks as a playlist, in the order given: an artist's own track list takes each track's artist, an album's the album's.
+    static func playlistTracks(_ ordered: [TopChartEntry], artist: String, album: String?) -> [AppleMusicPlaylistTrack] {
+        ordered.compactMap { entry in
+            let trackArtist = entry.artist ?? artist
+            guard !trackArtist.isEmpty else { return nil }
+            return AppleMusicPlaylistTrack(artist: trackArtist, track: entry.name, album: entry.album ?? album ?? "")
+        }
+    }
+}
+
+/// Sortable list of an artist's own albums/tracks, or an album's own
+/// tracks — the "Library"-mode half of the merged Top Charts/Library view
+/// (Phase 5). One unified sort menu rather than a separate mode toggle.
+/// The leading position column shows chart rank for "Most played" and the
+/// album track number for "Track order"; the other browse modes omit it.
+struct EntitySubListView: View {
+    /// `.album` for an artist's own Albums tab; `.track` for an artist's
+    /// own Tracks tab OR an album's own track list.
+    let entity: TopChartsEntity
+    let artist: String
+    /// Set only when this is an ALBUM's own track list — enables Track
+    /// order and scopes the ranking query to just that album. Nil for an
+    /// artist's own Albums/Tracks tab (scoped to the artist's whole catalog).
+    let album: String?
+    let range: DateRange
+    let compareRange: DateRange?
+    let metric: TopChartsMetric
+    let isGridView: Bool
+    /// Where this page was reached from — drives the initial sort default
+    /// only: Library's own Artist→Album grid defaults to Release year
+    /// descending (the paused Phase 2 gap this closes), while every other
+    /// origin (Top Charts, Overview) keeps defaulting to Most played. The
+    /// user can still switch away from either default via the sort menu.
+    let origin: DetailNavigationOrigin
+    /// The period's preset ID, when it is one, so an automatic playlist can find the same period again.
+    let rangeID: String?
+    @Environment(\.modelContext) private var modelContext
+    @State private var entries: [TopChartEntry] = []
+    @State private var trackOrderIndex: [String: Int] = [:]
+    @State private var sort: SubListSort
+    /// nil means the sort's own starting direction (see `SubListSort.startsAscending`).
+    @State private var ascendingOverride: Bool?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    init(entity: TopChartsEntity, artist: String, album: String?, range: DateRange, compareRange: DateRange?, metric: TopChartsMetric, isGridView: Bool, origin: DetailNavigationOrigin, rangeID: String? = nil) {
+        self.rangeID = rangeID
+        self.entity = entity
+        self.artist = artist
+        self.album = album
+        self.range = range
+        self.compareRange = compareRange
+        self.metric = metric
+        self.isGridView = isGridView
+        self.origin = origin
+        _sort = State(initialValue: origin == .library && entity == .album ? .releaseYear : .mostPlayed)
+    }
+
+    private var filterID: String {
+        [
+            entity.rawValue,
+            TextNormalization.artistIdentityKey(artist),
+            album.map(TextNormalization.normalizeAlbumName) ?? "",
+            String(Int(range.from.timeIntervalSinceReferenceDate / 86_400)),
+            String(Int(range.to.timeIntervalSinceReferenceDate / 86_400)),
+            String(Int((compareRange?.from.timeIntervalSinceReferenceDate ?? 0) / 86_400)),
+            metric.rawValue
+        ].joined(separator: "|")
+    }
+
+    private var availableSorts: [SubListSort] {
+        if entity == .track && album != nil {
+            return [.mostPlayed, .alphabetical, .recentlyPlayed, .trackOrder, .releaseYear]
+        }
+        return entity == .album || entity == .track
+            ? [.mostPlayed, .alphabetical, .recentlyPlayed, .releaseYear]
+            : [.mostPlayed, .alphabetical, .recentlyPlayed]
+    }
+
+    /// The entries in the chosen order and direction.
+    private var sortedEntries: [TopChartEntry] {
+        SubListSorting.sorted(entries, by: sort, ascendingOverride: ascendingOverride, trackOrderIndex: trackOrderIndex)
+    }
+
     private var maxMetricValue: Int {
         entries.map { $0.metricValue(for: metric) }.max() ?? 1
     }
@@ -141,7 +164,8 @@ struct EntitySubListView: View {
                 if entity == .track, !entries.isEmpty {
                     AppleMusicPlaylistExportButton(
                         defaultPlaylistName: defaultPlaylistName,
-                        tracks: { playlistTracks }
+                        tracks: { playlistTracks },
+                        recipe: playlistRecipe, recipeSummary: playlistRecipe?.summary ?? ""
                     )
                     .controlSize(.small)
                 }
@@ -230,15 +254,17 @@ struct EntitySubListView: View {
     }
 
     private var playlistTracks: [AppleMusicPlaylistTrack] {
-        sortedEntries.compactMap { entry in
-            let trackArtist = entry.artist ?? artist
-            guard !trackArtist.isEmpty else { return nil }
-            return AppleMusicPlaylistTrack(
-                artist: trackArtist,
-                track: entry.name,
-                album: entry.album ?? album ?? ""
-            )
-        }
+        SubListSorting.playlistTracks(sortedEntries, artist: artist, album: album)
+    }
+
+    /// What an automatic playlist made from this list would run again: only when the period is one of the presets (so it can be found
+    /// again) and the order is one a refresh can reproduce.
+    private var playlistRecipe: AutoPlaylistRecipe? {
+        guard entity == .track, let rangeID, SubListSorting.playlistSorts.contains(sort) else { return nil }
+        return .entityTracks(EntityTracksPlaylistRecipe(
+            artist: artist, album: album, rangeID: rangeID, metric: metric, sort: sort,
+            ascending: ascendingOverride.flatMap { $0 == sort.startsAscending ? nil : $0 }
+        ))
     }
 
     private func imageChangeAffectsVisibleEntries(_ notification: Notification) -> Bool {

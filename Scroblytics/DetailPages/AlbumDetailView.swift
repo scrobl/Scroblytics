@@ -62,7 +62,7 @@ struct AlbumDetailView: View {
                     EntitySubListView(
                         entity: .track, artist: identity.artist, album: identity.name,
                         range: range, compareRange: compareRange, metric: settings.metric,
-                        isGridView: true, origin: navigation.origin
+                        isGridView: true, origin: navigation.origin, rangeID: settings.selectedRangeId
                     )
                 } else {
                     AlbumTrackTable(

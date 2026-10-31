@@ -70,6 +70,21 @@ struct GoalPlaylistRecipe: Codable, Equatable, Sendable {
     }
 }
 
+/// An artist's track list on its page (or an album's, in grid view) for a period, in one of the orders a refresh can reproduce.
+/// `ascending` is nil for the order's own starting direction.
+struct EntityTracksPlaylistRecipe: Codable, Equatable, Sendable {
+    var artist: String
+    var album: String?
+    var rangeID: String
+    var metric: TopChartsMetric
+    var sort: SubListSort
+    var ascending: Bool?
+
+    func summary(periodLabel: String) -> String {
+        "\(artist)\(album.map { " – \($0)" } ?? "") · tracks played in \(periodLabel) · \(sort.label.lowercased())\(ascending == nil ? "" : ", reversed")"
+    }
+}
+
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
 /// again have one: a list built from a random walk or from one answer of Last.fm would give a different list every time.
 enum AutoPlaylistRecipe: Equatable, Sendable {
@@ -80,6 +95,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     case chartToppers(ChartToppersPlaylistRecipe)
     case flaggedTracks(FlaggedTracksPlaylistRecipe)
     case goalRemaining(GoalPlaylistRecipe)
+    case entityTracks(EntityTracksPlaylistRecipe)
 
     static let topChartsKind = "topCharts"
     static let queryKind = "query"
@@ -87,6 +103,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     static let chartToppersKind = "chartToppers"
     static let flaggedTracksKind = "flaggedTracks"
     static let goalRemainingKind = "goalRemaining"
+    static let entityTracksKind = "entityTracks"
 
     var kind: String {
         switch self {
@@ -96,18 +113,20 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .chartToppers: Self.chartToppersKind
         case .flaggedTracks: Self.flaggedTracksKind
         case .goalRemaining: Self.goalRemainingKind
+        case .entityTracks: Self.entityTracksKind
         }
     }
 
     /// The short description kept with the playlist when the screen has none of its own.
     var summary: String {
         switch self {
-        case .topCharts(let chart): "Top \(chart.entity.displayName.lowercased()) · \(chart.rangeID)"
+        case .topCharts(let chart): chart.summary(periodLabel: DateRangePresets.label(forID: chart.rangeID) ?? chart.rangeID)
         case .query: "Query"
         case .mostRecentMostOften(let recipe): recipe.summary
         case .chartToppers(let recipe): recipe.summary
         case .flaggedTracks(let recipe): recipe.summary
         case .goalRemaining: "Goal · still to hear"
+        case .entityTracks(let recipe): recipe.summary(periodLabel: DateRangePresets.label(forID: recipe.rangeID) ?? recipe.rangeID)
         }
     }
 
@@ -119,6 +138,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .chartToppers(let recipe): try JSONEncoder().encode(recipe)
         case .flaggedTracks(let recipe): try JSONEncoder().encode(recipe)
         case .goalRemaining(let recipe): try JSONEncoder().encode(recipe)
+        case .entityTracks(let recipe): try JSONEncoder().encode(recipe)
         }
     }
 
@@ -143,6 +163,9 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case Self.goalRemainingKind:
             guard let recipe = try? JSONDecoder().decode(GoalPlaylistRecipe.self, from: data) else { return nil }
             self = .goalRemaining(recipe)
+        case Self.entityTracksKind:
+            guard let recipe = try? JSONDecoder().decode(EntityTracksPlaylistRecipe.self, from: data) else { return nil }
+            self = .entityTracks(recipe)
         default:
             return nil
         }
@@ -158,6 +181,7 @@ enum AutoPlaylistSources {
         case rangeGone
         case invalidQuery(String)
         case notTracks
+        case unsupportedOrder
 
         var errorDescription: String? {
             switch self {
@@ -165,6 +189,7 @@ enum AutoPlaylistSources {
             case .rangeGone: "The period this chart used is no longer available."
             case .invalidQuery(let reason): "The query can't run: \(reason)"
             case .notTracks: "The query doesn't list tracks."
+            case .unsupportedOrder: "This list is in an order a refresh can't reproduce."
             }
         }
     }
@@ -218,6 +243,16 @@ enum AutoPlaylistSources {
             return FlaggedTracksEngine.playlistTracks(visible)
         case .goalRemaining(let goal):
             return try await GoalPlaylistSource.tracks(goalID: goal.goalID, filter: goal.filter, sort: goal.sort, search: goal.search, container: container)
+        case .entityTracks(let list):
+            guard SubListSorting.playlistSorts.contains(list.sort) else { throw SourceError.unsupportedOrder }
+            let oldest = try? await TopChartsEngine.fetchOldestScrobbleDate(container: container)
+            guard let option = DateRangePresets.build(oldestScrobbleDate: oldest).first(where: { $0.id == list.rangeID }) else { throw SourceError.rangeGone }
+            let entries = try await TopChartsEngine.fetchScopedRankings(
+                container: container, durationContext: container.mainContext, entity: .track, artist: list.artist, album: list.album,
+                range: option.range(), compareRange: nil, metric: list.metric
+            )
+            let ordered = SubListSorting.sorted(entries, by: list.sort, ascendingOverride: list.ascending, trackOrderIndex: [:])
+            return SubListSorting.playlistTracks(ordered, artist: list.artist, album: list.album)
         }
     }
 

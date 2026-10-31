@@ -539,6 +539,11 @@ enum AutoPlaylistChecks {
         let loveA = GoalLove(key: "a", artist: "Artist A", track: "Song 1", lovedAt: nil), loveB = GoalLove(key: "b", artist: "Artist B", track: "Song 2", lovedAt: nil)
         let goalTracks = GoalRemainingList.playlistTracks([loveB, loveA], history: ["a": GoalTrackHistory(plays: 3, lastPlayed: nil, album: "Album X", imageURL: nil)])
         check("a goal's playlist keeps the list's order and each track's album, empty when never played", goalTracks.map(\.track) == ["Song 2", "Song 1"] && goalTracks.map(\.album) == ["", "Album X"], "\(goalTracks)")
+        let entityRecipe = EntityTracksPlaylistRecipe(artist: "Artist A", album: nil, rangeID: "year-2025", metric: .scrobbles, sort: .recentlyPlayed, ascending: true)
+        let entityList = AutoPlaylistRecipe.entityTracks(entityRecipe)
+        check("an artist's tracks recipe survives saving", AutoPlaylistRecipe(kind: entityList.kind, data: try entityList.encodedData()) == entityList && entityList.kind == "entityTracks")
+        check("…and describes itself, with the period's name", entityList.summary == "Artist A · tracks played in 2025 · recently played, reversed" && AutoPlaylistRecipe.entityTracks(EntityTracksPlaylistRecipe(artist: "Artist A", album: "Album X", rangeID: "last30", metric: .scrobbles, sort: .mostPlayed, ascending: nil)).summary == "Artist A – Album X · tracks played in Last 30 days · most played", entityList.summary)
+        check("period names come from the preset IDs", DateRangePresets.label(forID: "year-1999") == "1999" && DateRangePresets.label(forID: "ytd") == "Year to date" && DateRangePresets.label(forID: "nope") == nil)
         check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
         let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
         check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
@@ -877,6 +882,20 @@ enum AutoPlaylistChecks {
             var gone = false
             do { _ = try await AutoPlaylistSources.tracks(for: .goalRemaining(GoalPlaylistRecipe(goalID: UUID(), filter: .all, sort: .recentlyLoved, search: "")), container: container, popularity: nil) } catch { gone = (error as? GoalPlaylistSource.SourceError) != nil }
             check("Goal: a goal that was deleted is reported, not guessed at", gone)
+        }
+
+        // An artist's tracks for the year: the artist of the top track, most played order, against an independent count
+        if let topTrack = chartTracks.first {
+            let artistName = topTrack.artist
+            let listed = try await AutoPlaylistSources.tracks(for: .entityTracks(EntityTracksPlaylistRecipe(artist: artistName, album: nil, rangeID: "year-\(year)", metric: .scrobbles, sort: .mostPlayed, ascending: nil)), container: container, popularity: nil)
+            let artistKey = TextNormalization.artistIdentityKey(artistName)
+            var theirs: [String: Int] = [:]
+            for play in plays where TextNormalization.artistIdentityKey(play.artistName) == artistKey { theirs[songKey(play.artistName, play.trackName), default: 0] += 1 }
+            let listedCounts = listed.map { theirs[songKey($0.artist, $0.track)] ?? 0 }
+            print("  Artist tracks: \(listed.count) tracks listed, independent count \(theirs.count)")
+            check("Artist tracks: every track the artist played that year, most played first", listed.count == theirs.count && zip(listedCounts, listedCounts.dropFirst()).allSatisfy { $0 >= $1 } && listedCounts.allSatisfy { $0 > 0 }, "\(listed.count) vs \(theirs.count)")
+            let alphabetical = try await AutoPlaylistSources.tracks(for: .entityTracks(EntityTracksPlaylistRecipe(artist: artistName, album: nil, rangeID: "year-\(year)", metric: .scrobbles, sort: .alphabetical, ascending: false)), container: container, popularity: nil)
+            check("Artist tracks: A–Z reversed is Z–A, the same tracks", alphabetical.count == listed.count && zip(alphabetical, alphabetical.dropFirst()).allSatisfy { $0.track.localizedStandardCompare($1.track) != .orderedAscending })
         }
 
         // The same chart for artists: the playlist holds the tracks of the top artists

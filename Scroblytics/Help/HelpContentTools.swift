@@ -255,7 +255,7 @@ extension HelpContent {
                     "**The list is empty now**: the playlist is left as it was rather than emptied, because an empty list usually means something didn’t load.",
                     "**The playlist changed in Music during the refresh** or **didn’t match afterwards**: nothing is lost; the next refresh puts it right.",
                 ]),
-                .paragraph("Lists that can be run again can be kept up to date: Top Charts, a Query of tracks, Most Recent, Most Often, Chart Toppers, Flagged Tracks and a goal’s tracks still to hear. The option isn’t offered for a Rabbit Hole path, Similar Sounds or the Loved Status Audit. The list of playlists (not their tracks) is included in [backups](help://data-backup); after a restore each is refreshed from scratch. Everything happens on your Mac: Scroblytics talks to Music through its own scripting, and nothing is sent anywhere. See [What leaves your Mac](help://what-leaves-your-mac)."),
+                .paragraph("Lists that can be run again can be kept up to date: Top Charts, a Query of tracks, Most Recent, Most Often, Chart Toppers, Flagged Tracks, a goal’s tracks still to hear and an artist’s Tracks list. The option isn’t offered for a Rabbit Hole path, Similar Sounds or the Loved Status Audit. The list of playlists (not their tracks) is included in [backups](help://data-backup); after a restore each is refreshed from scratch. Everything happens on your Mac: Scroblytics talks to Music through its own scripting, and nothing is sent anywhere. See [What leaves your Mac](help://what-leaves-your-mac)."),
             ]
         ),
         HelpArticle(

@@ -58,7 +58,8 @@ struct ArtistDetailView: View {
                 EntitySubListView(
                     entity: subListEntity, artist: identity.name, album: nil,
                     range: range, compareRange: compareRange, metric: settings.metric,
-                    isGridView: settings.isGridView(for: subListEntity, context: .detail), origin: navigation.origin
+                    isGridView: settings.isGridView(for: subListEntity, context: .detail), origin: navigation.origin,
+                    rangeID: settings.selectedRangeId
                 )
                 .id(subListEntity)
             }

@@ -15,6 +15,12 @@ struct DateRangeOption: Identifiable {
 }
 
 enum DateRangePresets {
+    /// The label of the preset with this ID ("Last 30 days", "2026"), without needing the history; nil for an ID that isn't one.
+    static func label(forID id: String) -> String? {
+        if id.hasPrefix("year-"), Int(id.dropFirst(5)) != nil { return String(id.dropFirst(5)) }
+        return build(oldestScrobbleDate: nil).first { $0.id == id }?.label
+    }
+
     /// `oldestScrobbleDate` bounds "All time" and the range of per-year presets.
     static func build(oldestScrobbleDate: Date?) -> [DateRangeOption] {
         let calendar = AppCalendars.listening

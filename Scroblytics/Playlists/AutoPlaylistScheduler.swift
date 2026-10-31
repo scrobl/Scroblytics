@@ -46,13 +46,7 @@ final class AutoPlaylistScheduler {
 
     /// Whether a save of the database touched stored data a list can depend on.
     static func isRelevantSave(_ note: Notification) -> Bool {
-        // The lists of changed records sit under the keys "inserted", "updated" and "deleted", which are plain strings in the notification:
-        // looking them up with `ModelContext.NotificationKey` finds nothing.
-        let names: Set<String> = ["inserted", "updated", "deleted"]
-        return (note.userInfo ?? [:]).contains { key, value in
-            guard let name = (key.base as? String) ?? (key.base as? ModelContext.NotificationKey)?.rawValue, names.contains(name) else { return false }
-            return (value as? [PersistentIdentifier])?.contains { lookupEntities.contains($0.entityName) } ?? false
-        }
+        note.savedAnyEntity(in: lookupEntities)
     }
 
     /// Records that a sync changed the plays and/or the loved tracks, for the next round to take into account.

@@ -733,6 +733,27 @@ enum AutoPlaylistChecks {
             let notes = saves.lock.withLock { saves.notes }
             check("saving a playlist record is not a change in what lists are made of, saving a flag is", notes.count == 2 && !AutoPlaylistScheduler.isRelevantSave(notes[0]) && AutoPlaylistScheduler.isRelevantSave(notes[1]), "\(notes.count)")
 
+            // The names of the changed kinds of record, as the automatic playlists read them
+            if notes.count == 2 {
+                check("a save says which kinds of record it inserted", notes[0].savedEntityNames == ["AutoPlaylist"] && notes[1].savedEntityNames == ["FlaggedTrack"], "\(notes.map(\.savedEntityNames))")
+                check("a save is matched against a set of kinds", notes[1].savedAnyEntity(in: ["Track", "FlaggedTrack"]) && !notes[1].savedAnyEntity(in: ["Scrobble", "Album"]) && !notes[0].savedAnyEntity(in: []))
+                check("the lists are not found under a ModelContext.NotificationKey (why the names are read as strings)", notes[1].userInfo?[ModelContext.NotificationKey.insertedIdentifiers] == nil && notes[1].userInfo?["inserted"] != nil)
+            }
+            let flagged = try context.fetch(FetchDescriptor<FlaggedTrack>())
+            let updateToken = NotificationCenter.default.addObserver(forName: ModelContext.didSave, object: context, queue: nil) { note in saves.lock.withLock { saves.notes.append(note) } }
+            flagged.first?.track = "Song 2"
+            try context.save()
+            context.delete(flagged[0])
+            try context.save()
+            context.insert(TrackDurationCacheEntry(cacheKey: "artist a|song 1", seconds: 200, cachedAt: Date()))
+            try context.save()
+            NotificationCenter.default.removeObserver(updateToken)
+            let laterNotes = saves.lock.withLock { Array(saves.notes.dropFirst(notes.count)) }
+            check("a save says which kinds of record it updated and which it deleted", laterNotes.count == 3 && laterNotes[0].savedEntityNames == ["FlaggedTrack"] && laterNotes[1].savedEntityNames == ["FlaggedTrack"], "\(laterNotes.map(\.savedEntityNames))")
+            // What a ranking by time listened saves while it loads must not look like a change in the ranking
+            check("saving a track length names only the length, which no screen reloads for", laterNotes.count == 3 && laterNotes[2].savedEntityNames == ["TrackDurationCacheEntry"] && !laterNotes[2].savedAnyEntity(in: ["Scrobble", "Artist", "Album", "Track"]), "\(laterNotes.map(\.savedEntityNames))")
+            check("a notification that is not a save names nothing", Notification(name: .NSSystemClockDidChange).savedEntityNames.isEmpty)
+
             // A burst of saves makes one round after a quiet moment, not one each, and not while a sync is running
             let appContainer = try makeContainer()
             let music = makeMusic()

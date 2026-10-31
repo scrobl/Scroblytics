@@ -135,6 +135,7 @@ enum AutoPlaylistChecks {
             try modelAndBackupChecks(check)
             try await recipeChecks(check)
             try await schedulerChecks(check)
+            try await toolChecks(check)
             HeadlessTask.finish(failures)
         }
     }
@@ -599,6 +600,59 @@ enum AutoPlaylistChecks {
             check("…and says why", denied.outcome.status == .notAuthorized && empty.outcome.status == .emptyResult && gone.outcome.status == .playlistMissing)
             check("the dialog gets every track that wasn't found", empty.outcome.missingAll == ["Artist A – Song 900", "Artist B – Song 901"], "\(empty.outcome.missingAll)")
         }
+    }
+
+    // MARK: - The tool
+
+    @MainActor
+    private static func toolChecks(_ report: (String, Bool, String) -> Void) async throws {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let descriptor = ToolDescriptor.all.first { $0.id == .autoPlaylists }
+        check("the tool is on the landing page, under Create", descriptor?.category == "Create" && descriptor?.name == "Auto-Updating Playlists")
+        check("its summary describes it", descriptor.map { $0.summary.localizedCaseInsensitiveContains("playlists") } == true)
+        check("a Top Charts recipe describes itself", TopChartsPlaylistRecipe(entity: .track, rangeID: "year-2026", metric: .scrobbles, rowLimit: 100).summary(periodLabel: "2026") == "Top tracks · 2026 · by plays · 100 rows")
+        check("…and one ranked by time listened says so", TopChartsPlaylistRecipe(entity: .album, rangeID: "last30", metric: .timeListened, rowLimit: 25).summary(periodLabel: "Last 30 days") == "Top albums · Last 30 days · by time listened · 25 rows")
+
+        // Saved queries an automatic playlist can be made from: tracks only, readable, by name
+        func saved(_ name: String, target: QueryTarget) throws -> SavedConditionSet {
+            var spec = QuerySpec(target: target)
+            spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+            return SavedConditionSet(name: name, specJSON: try spec.encoded())
+        }
+        let sets = [try saved("Zebra tracks", target: .track), try saved("Albums", target: .album), try saved("apple tracks", target: .track), SavedConditionSet(name: "Broken", specJSON: Data("x".utf8))]
+        check("only saved queries of tracks that can run are offered, by name", AutoPlaylistStore.eligibleQueries(sets).map(\.set.name) == ["apple tracks", "Zebra tracks"])
+
+        // Stopping and making again
+        let container = try ModelContainer(for: AutoPlaylist.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        let music = FakeMusic()
+        music.with { $0.library = (1...30).map(song) }
+        let recipe = recipeList(5)
+        let made = try await AutoPlaylistCreator.create(name: "Kept", recipe: recipe, summary: "s", tracks: wanted([1, 2, 3, 4, 5]), takeOverID: nil, context: context, backend: music)
+        guard let list = made.list else { check("a playlist can be made for the tool checks", false, made.outcome.detail); return }
+        let firstID = list.playlistPersistentID
+        music.with { $0.playlists.removeAll() }
+        let scheduler = AutoPlaylistScheduler()
+        let provider: AutoPlaylistScheduler.TrackProvider = { _ in wanted([1, 2, 3, 4, 5]) }
+        await scheduler.refresh(list, container: container, backend: music, trackProvider: provider)
+        check("a deleted playlist shows as missing", list.status == .playlistMissing && music.with { $0.playlists.count } == 0)
+        AutoPlaylistStore.makeAgain(list)
+        check("Make It Again forgets the old playlist", list.playlistPersistentID.isEmpty && list.status == .neverRun)
+        await scheduler.refresh(list, container: container, backend: music, trackProvider: provider)
+        check("…and the next refresh makes it again under the same name", list.status == .created && !list.playlistPersistentID.isEmpty && list.playlistPersistentID != firstID && music.with { $0.playlists[list.playlistPersistentID]?.name } == "Kept" && music.tracks(of: list.playlistPersistentID) == ids([1, 2, 3, 4, 5]))
+        let keptTracks = music.tracks(of: list.playlistPersistentID)
+        try AutoPlaylistStore.stopUpdating(list, context: context)
+        check("Stop Updating forgets the list and leaves the playlist in Music as it is", try context.fetch(FetchDescriptor<AutoPlaylist>()).isEmpty && music.with { $0.playlists.count } == 1 && music.tracks(of: music.with { Array($0.playlists.keys) }[0]) == keptTracks)
+
+        // The words on a row
+        let row = AutoPlaylist(name: "R", recipeKind: "topCharts", recipeData: Data(), sourceSummary: "s")
+        check("a new row says it has not been refreshed", AutoPlaylistRowText.status(row) == "Not refreshed yet." && AutoPlaylistRowText.times(row) == nil)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        row.record(AutoPlaylistOutcome(status: .updated, playlistID: "P", trackCount: 10, added: 2, removed: 2), at: now.addingTimeInterval(-3_600))
+        let times = AutoPlaylistRowText.times(row, now: now) ?? ""
+        check("a refreshed row says when, and when it last changed", times.hasPrefix("Last refreshed ") && times.contains("changed"), times)
+        row.isEnabled = false
+        check("a switched-off row says so", AutoPlaylistRowText.status(row).hasPrefix("Switched off"))
     }
 
     // MARK: - Real data, no Music

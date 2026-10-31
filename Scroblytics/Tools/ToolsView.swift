@@ -230,6 +230,8 @@ struct ToolsView: View {
             TripsView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
         case .goals:
             GoalsView(modelContainer: modelContainer, navigation: navigation)
+        case .autoPlaylists:
+            AutoPlaylistsView(modelContainer: modelContainer, navigation: navigation)
         case .query:
             QueryView(modelContainer: modelContainer, settings: settings, isActive: true, askRequest: $askRequest, navigation: navigation)
         }
@@ -238,7 +240,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
     let id: Kind
     let name: String
     let summary: String
@@ -332,6 +334,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .goals, name: "Goals",
             summary: "Set a date to hear every loved track, and see what's left and whether you're on course.",
             systemImage: "target", category: "Analyze"
+        ),
+        ToolDescriptor(
+            id: .autoPlaylists, name: "Auto-Updating Playlists",
+            summary: "Apple Music playlists that follow a chart or query: refreshed after every sync, in rank order.",
+            systemImage: "arrow.triangle.2.circlepath", category: "Create"
         ),
         ToolDescriptor(
             id: .timeMachine, name: "Time Machine",

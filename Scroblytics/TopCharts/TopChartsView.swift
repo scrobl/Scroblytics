@@ -219,7 +219,7 @@ struct TopChartsView: View {
 
     private var playlistRecipeSummary: String {
         let period = rangeOptions.first { $0.id == settings.selectedRangeId }?.label ?? "Last 30 days"
-        return "Top \(entity.displayName.lowercased()) · \(period) · by \(settings.metric == .timeListened ? "time listened" : "plays") · \(currentRowLimit) rows"
+        return TopChartsPlaylistRecipe(entity: entity, rangeID: settings.selectedRangeId, metric: settings.metric, rowLimit: currentRowLimit).summary(periodLabel: period)
     }
 
     private func artistDetail(_ identity: ArtistIdentity) -> some View {

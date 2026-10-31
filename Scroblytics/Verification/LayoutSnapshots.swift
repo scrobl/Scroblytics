@@ -146,6 +146,24 @@ enum LayoutSnapshots {
                 await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Top Tracks (2026)"), keepUpdated: .constant(true), canKeepUpdated: true, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-on")
                 await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Flagged Tracks"), keepUpdated: .constant(false), canKeepUpdated: false, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-plain")
                 await render(AppleMusicPlaylistResultSheet(playlistName: "Top Tracks (2026)", result: .init(added: 98, notFound: missing), isAutomatic: true, onCopyMissing: {}, onDismiss: {}), width: 620, scheme: scheme, name: "result-automatic")
+                // The tool's rows in the states a person meets
+                func row(_ name: String, _ summary: String, _ outcome: AutoPlaylistOutcome?, enabled: Bool = true) -> AutoPlaylist {
+                    let list = AutoPlaylist(name: name, playlistPersistentID: "PID", recipeKind: "topCharts", recipeData: Data(), sourceSummary: summary, isEnabled: enabled)
+                    if let outcome { list.record(outcome, at: Date().addingTimeInterval(-5_400)) }
+                    return list
+                }
+                let updated = AutoPlaylistOutcome(status: .updated, playlistID: "PID", trackCount: 98, added: 4, removed: 4, missing: 2, missingSample: missing, droppedRepeats: 0)
+                let rows: [(String, AutoPlaylist)] = [
+                    ("updated", row("Top Tracks · 2026", "Top tracks · 2026 · by plays · 100 rows", updated)),
+                    ("music-closed", row("Query Results (Oct 31, 2026)", "Query · Loved tracks · played in the last 90 days, a very long description that has to wrap onto a second line somewhere", AutoPlaylistOutcome(status: .musicNotRunning, playlistID: "PID"))),
+                    ("missing", row("Last 30 Days", "Top tracks · Last 30 days · by time listened · 50 rows", AutoPlaylistOutcome(status: .playlistMissing, playlistID: "PID"))),
+                    ("off", row("Old favourites", "Saved query · Old favourites", AutoPlaylistOutcome(status: .upToDate, playlistID: "PID", trackCount: 40), enabled: false)),
+                ]
+                for (key, list) in rows {
+                    for width in [700, 460] as [CGFloat] {
+                        await render(AutoPlaylistRow(list: list, isRefreshing: false, onRefresh: {}, onShow: {}, onMakeAgain: {}, onStop: {}, onToggle: {}).padding(16), width: width, scheme: scheme, name: "row-\(key)-\(Int(width))")
+                    }
+                }
             }
             exit(0)
         }

@@ -165,6 +165,23 @@ struct AppleMusicPlaylistBackend: PlaylistBackend {
         return .found(id: String(text.dropFirst(6)))
     }
 
+    /// Shows the playlist in Music (selects it in the sidebar). Only when Music is already open; it never launches it.
+    func reveal(id: String) async throws -> Bool {
+        guard isMusicRunning else { return false }
+        let reply = try await run("""
+        on run argv
+          tell application "Music"
+            set matches to (every playlist whose persistent ID is (item 1 of argv))
+            if (count of matches) is 0 then return "MISSING"
+            reveal (item 1 of matches)
+            activate
+            return "OK"
+          end tell
+        end run
+        """, [id])
+        return reply.trimmingCharacters(in: .whitespacesAndNewlines) == "OK"
+    }
+
     // MARK: - Running scripts
 
     /// Library and playlist IDs are hexadecimal text, so a comma-separated list is unambiguous.

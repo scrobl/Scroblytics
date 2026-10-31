@@ -8,6 +8,11 @@ struct TopChartsPlaylistRecipe: Codable, Equatable, Sendable {
     var rangeID: String
     var metric: TopChartsMetric
     var rowLimit: Int
+
+    /// How the list is described in the list of automatic playlists and in the dialog: "Top tracks · 2026 · by plays · 100 rows".
+    func summary(periodLabel: String) -> String {
+        "Top \(entity.displayName.lowercased()) · \(periodLabel) · by \(metric == .timeListened ? "time listened" : "plays") · \(rowLimit) rows"
+    }
 }
 
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
@@ -102,5 +107,31 @@ enum AutoPlaylistSources {
             guard row.entity.target == .track, !row.entity.artist.isEmpty else { return nil }
             return AppleMusicPlaylistTrack(artist: row.entity.artist, track: row.entity.name, album: result.entityInfo[row.id]?.album ?? "")
         }
+    }
+}
+
+/// What the list of automatic playlists does to a saved playlist, apart from refreshing it.
+enum AutoPlaylistStore {
+    /// Stops keeping the playlist up to date. The playlist stays in Music as it is.
+    static func stopUpdating(_ list: AutoPlaylist, context: ModelContext) throws {
+        context.delete(list)
+        try context.save()
+    }
+
+    /// For a playlist that was deleted in Music: forget the old one, so the next refresh makes it again under the same name.
+    static func makeAgain(_ list: AutoPlaylist) {
+        list.playlistPersistentID = ""
+        list.lastStatus = AutoPlaylistStatus.neverRun.rawValue
+        list.lastDetail = ""
+    }
+
+    /// The saved queries an automatic playlist can be made from: those that list tracks and can run, by name.
+    static func eligibleQueries(_ sets: [SavedConditionSet]) -> [(set: SavedConditionSet, spec: QuerySpec)] {
+        sets.compactMap { set -> (SavedConditionSet, QuerySpec)? in
+            guard let spec = try? QuerySpec.decode(set.specJSON), spec.target == .track,
+                  (try? spec.validate(against: QueryFieldRegistry.standard)) != nil else { return nil }
+            return (set, spec)
+        }
+        .sorted { $0.0.name.localizedCaseInsensitiveCompare($1.0.name) == .orderedAscending }
     }
 }

@@ -529,6 +529,12 @@ struct AppleMusicPlaylistResultSheet: View {
                 if !result.notFound.isEmpty {
                     Button("Copy Missing Names", action: onCopyMissing)
                 }
+                if isAutomatic {
+                    Button("Manage Playlists") {
+                        onDismiss()
+                        NotificationCenter.default.post(name: .openToolRequested, object: ToolDescriptor.Kind.autoPlaylists)
+                    }
+                }
                 Spacer()
                 Button("OK", action: onDismiss)
                     .buttonStyle(.borderedProminent)
@@ -563,7 +569,7 @@ struct AppleMusicPlaylistNameSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Keep this playlist updated after each sync", isOn: $keepUpdated)
                         .disabled(isWorking)
-                    Text("After every sync Scroblytics runs this list again and changes the playlist to match: new order, nothing added twice. Music must be open for it to update. Changes you make to the playlist by hand are replaced.")
+                    Text("After every sync Scroblytics runs this list again and changes the playlist to match: new order, nothing added twice. Music must be open for it to update. Changes you make to the playlist by hand are replaced. You can see how it is doing, or stop it, in Tools › Auto-Updating Playlists.")
                         .font(AppTypography.metadata)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

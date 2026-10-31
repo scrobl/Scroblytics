@@ -39,7 +39,7 @@ extension HelpContent {
                 .bullets([
                     "A **diamond** beside a row is [popularity](help://metrics-popularity); a heart on a track is loved.",
                     "**Right-click** a row for actions: open, love/unlove (needs Track Actions), flag, Fix Album Match, Resync, refresh/copy/paste/set/reset image, View Lyrics, View in Apple Music, View in Last.fm.",
-                    "**Create Apple Music Playlist** exports the chart’s tracks that are in your Music library. Turn on **Keep this playlist updated after each sync** in its dialog and the playlist follows the chart from then on: after every sync the chart is run again (a chart of “Last 30 days” moves on, “2026” stays that year) and the playlist is changed to match, in rank order and without adding a song twice. Music has to be open for that; if it isn’t, the playlist is brought up to date after the next sync once it is.",
+                    "**Create Apple Music Playlist** exports the chart’s tracks that are in your Music library. Turn on **Keep this playlist updated after each sync** in its dialog and the playlist follows the chart from then on: after every sync the chart is run again (a chart of “Last 30 days” moves on, “2026” stays that year) and the playlist is changed to match, in rank order and without adding a song twice. Music has to be open for that; if it isn’t, the playlist is brought up to date after the next sync once it is. See [Auto-Updating Playlists](help://tool-auto-playlists).",
                     "**Chart race** animates cumulative rankings across the range.",
                     "List or grid layout is a toggle.",
                     "**Share** makes an image or text of the chart as it is on screen ([Sharing](help://screen-sharing)).",

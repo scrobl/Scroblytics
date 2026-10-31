@@ -26,6 +26,7 @@ extension HelpContent {
                     ["[Library Gaps](help://tool-library-gaps)", "Scrobbled tracks missing from your Music library", "Music app permission"],
                     ["[Tag Management](help://tool-tag-management)", "Bulk add/remove Last.fm tags", "Track Actions (**writes to Last.fm**)"],
                     ["[Collage Generator](help://tool-collage)", "A shareable image of your top items", "Nothing"],
+                    ["[Auto-Updating Playlists](help://tool-auto-playlists)", "Apple Music playlists kept in step with a chart or query", "Music app permission"],
                 ]),
             ]
         ),
@@ -226,6 +227,33 @@ extension HelpContent {
                     "Click **Apply to Last.fm**. Writes are paced at about three per second.",
                 ]),
                 .paragraph("**Why some tracks are unchecked:** Last.fm tags a track’s *title*, not an album’s copy, so a tag also lands on other versions with the same title. Those are unchecked by default; **Select likely reissues** and the optional length comparison help you decide. Saving a playlist as a **rule** lets you review and re-apply later; deleting a rule leaves tags already on Last.fm. Rules are included in backups."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-auto-playlists",
+            title: "Auto-Updating Playlists",
+            summary: "Apple Music playlists that follow a chart or a query after every sync.",
+            blocks: [
+                .paragraph("A playlist made from a **Top Charts** list or a **Query** of tracks can be kept up to date. Turn on **Keep this playlist updated after each sync** in the dialog of **Create Apple Music Playlist** (or press **Add Playlist…** here and choose a Top Charts preset or one of your saved queries), and from then on, after every sync, Scroblytics runs the list again and changes the playlist in Music to match."),
+                .heading("What a refresh does"),
+                .bullets([
+                    "**Keeps the order.** The playlist follows the list’s rank order. Music can only remove tracks from a playlist and add them at its end, so a changed rank keeps the tracks at the top that are still right, removes everything after the first change and adds the rest in order. A list that hasn’t changed is left alone.",
+                    "**Never adds a song twice**, however often it refreshes, and never touches your library: tracks are only removed from that one playlist.",
+                    "**Runs the same list.** A chart of “Last 30 days” moves on with the date and “2026” stays that year; a query keeps its conditions, sorts and limit (and a relative period moves on). The tracks are the ones that are in your Music library; the rest are counted on the row (**not in your library**) and can be copied.",
+                    "**Needs Music open.** Scroblytics never launches Music. If it is closed at a sync, the row says so and the playlist is brought up to date after the next sync once Music is open, or when you press **Refresh Now**.",
+                    "**Replaces your edits.** Anything you add to or reorder in the playlist by hand is undone at the next refresh that changes it. Make a copy in Music if you want to keep a version.",
+                ]),
+                .heading("The list of playlists"),
+                .paragraph("Each row shows what the playlist is made from, how its last refresh went (up to date, updated, or what needs attention), when it was refreshed and when it last changed. **Refresh Now** runs it straight away (even when it is switched off), **Show in Music** selects it in Music, the switch stops the refreshes without forgetting the playlist, and **Stop Updating…** forgets it (the playlist stays in Music exactly as it is). **Refresh All Now** runs every playlist that is switched on."),
+                .heading("When something needs attention"),
+                .bullets([
+                    "**Music isn’t open** or **isn’t allowed**: open Music, or allow Scroblytics to control it in System Settings › Privacy & Security › Automation.",
+                    "**The playlist is no longer in Music**: you deleted it there. **Make It Again** makes a new one under the same name, or **Stop Updating…** forgets it. Scroblytics never makes it again by itself.",
+                    "**Music can’t change this playlist**: it is a smart playlist or a folder. Smart playlists follow their own rules in Music; choose another name for the new playlist.",
+                    "**The list is empty now**: the playlist is left as it was rather than emptied, because an empty list usually means something didn’t load.",
+                    "**The playlist changed in Music during the refresh** or **didn’t match afterwards**: nothing is lost; the next refresh puts it right.",
+                ]),
+                .paragraph("Only lists that can be run again can be kept up to date, so the option isn’t offered for a Rabbit Hole path, Similar Sounds or the Loved Status Audit. The list of playlists (not their tracks) is included in [backups](help://data-backup); after a restore each is refreshed from scratch. Everything happens on your Mac: Scroblytics talks to Music through its own scripting, and nothing is sent anywhere. See [What leaves your Mac](help://what-leaves-your-mac)."),
             ]
         ),
         HelpArticle(

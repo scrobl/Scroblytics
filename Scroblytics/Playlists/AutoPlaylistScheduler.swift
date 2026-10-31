@@ -27,18 +27,43 @@ final class AutoPlaylistScheduler {
     /// The status line under the toolbar, where a round of refreshes shows how many playlists are left; set once by the app window.
     var work: BackgroundWorkStore?
     private var rerunRequested = false
+    /// What has changed since the last round started: the plays (a sync added or removed some) and the loved tracks.
+    private var scrobblesChanged = false
+    private var lovedChanged = false
 
-    /// Refreshes every enabled playlist. `trackProvider` replaces the real lists (for checks).
+    /// Records that a sync changed the plays and/or the loved tracks, for the next round to take into account.
+    func noteChanges(scrobbles: Bool = false, loved: Bool = false) {
+        scrobblesChanged = scrobblesChanged || scrobbles
+        lovedChanged = lovedChanged || loved
+    }
+
+    /// Whether a playlist's list could give a different answer than at its last refresh: the plays or the loved tracks changed, or a day
+    /// has gone by (a list of the last 30 days, or of tracks first played in a window, moves on without any new plays), or the last
+    /// refresh didn't go through (Music was closed) or never happened. Anything else would only find the same list and the same playlist.
+    static func needsRefresh(_ list: AutoPlaylist, scrobblesChanged: Bool, lovedChanged: Bool, now: Date, calendar: Calendar = .current) -> Bool {
+        if scrobblesChanged || lovedChanged { return true }
+        guard let last = list.lastRefreshAt else { return true }
+        if list.status.isProblem || list.status == .neverRun { return true }
+        return !calendar.isDate(last, inSameDayAs: now)
+    }
+
+    /// Refreshes the enabled playlists whose list could have changed (all of them when `everything`, as when a person asks).
+    /// `trackProvider` replaces the real lists (for checks).
     func refreshAll(
-        container: ModelContainer, reason: String, backend: PlaylistBackend = AppleMusicPlaylistBackend(), trackProvider: TrackProvider? = nil
+        container: ModelContainer, reason: String, everything: Bool = false, now: Date = Date(),
+        backend: PlaylistBackend = AppleMusicPlaylistBackend(), trackProvider: TrackProvider? = nil
     ) async {
         guard !isRefreshing else { rerunRequested = true; return }
         isRefreshing = true
         defer { isRefreshing = false }
         repeat {
             rerunRequested = false
+            let (plays, loved) = (scrobblesChanged, lovedChanged)
+            scrobblesChanged = false
+            lovedChanged = false
             let context = container.mainContext
-            let lists = (try? context.fetch(FetchDescriptor<AutoPlaylist>(sortBy: [SortDescriptor(\.createdAt)])))?.filter(\.isEnabled) ?? []
+            let enabled = (try? context.fetch(FetchDescriptor<AutoPlaylist>(sortBy: [SortDescriptor(\.createdAt)])))?.filter(\.isEnabled) ?? []
+            let lists = everything ? enabled : enabled.filter { Self.needsRefresh($0, scrobblesChanged: plays, lovedChanged: loved, now: now) }
             guard !lists.isEmpty else { return }
             let provider = trackProvider ?? { [popularity] recipe in
                 try await AutoPlaylistSources.tracks(for: recipe, container: container, popularity: popularity)
@@ -47,7 +72,7 @@ final class AutoPlaylistScheduler {
             if !backend.isMusicRunning {
                 for list in lists {
                     let outcome = AutoPlaylistOutcome(status: .musicNotRunning, playlistID: list.playlistPersistentID, cache: AutoPlaylistMatchCache.decode(list.matchCacheData))
-                    list.record(outcome)
+                    list.record(outcome, at: now)
                     tally.add(outcome.status)
                 }
             } else {
@@ -56,7 +81,7 @@ final class AutoPlaylistScheduler {
                 for (index, list) in lists.enumerated() {
                     if Task.isCancelled { break }
                     let outcome = await Self.run(list, provider: provider, backend: backend)
-                    list.record(outcome)
+                    list.record(outcome, at: now)
                     tally.add(outcome.status)
                     work?.report(.playlists, remaining: lists.count - index - 1, total: lists.count)
                 }
@@ -160,7 +185,12 @@ extension View {
             AutoPlaylistScheduler.shared.popularity = popularity
             AutoPlaylistScheduler.shared.work = work
         }
-            .onReceive(NotificationCenter.default.publisher(for: .lovedTracksSyncDidFinish)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+                // Posted only when the sync changed the plays.
+                AutoPlaylistScheduler.shared.noteChanges(scrobbles: true)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .lovedTracksSyncDidFinish)) { note in
+                AutoPlaylistScheduler.shared.noteChanges(loved: (note.object as? Bool) ?? false)
                 #if DEBUG
                 TestProfile.log("AUTOPLAYLISTS refresh requested")
                 #endif

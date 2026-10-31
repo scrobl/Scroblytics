@@ -244,6 +244,7 @@ extension HelpContent {
                     "**Never adds a song twice**, however often it refreshes, and never touches your library: tracks are only removed from that one playlist.",
                     "**Runs the same list.** A chart of “Last 30 days” moves on with the date and “2026” stays that year; a query keeps its conditions, sorts and limit (and a relative period moves on). The tracks are the ones that are in your Music library; the rest are counted on the row (**not in your library**) and can be copied.",
                     "**Needs Music open.** Scroblytics never launches Music. If it is closed at a sync, the row says so and the playlist is brought up to date after the next sync once Music is open, or when you press **Refresh Now**.",
+                    "**Only when it could have changed.** After a sync, a playlist is refreshed when the sync added or removed plays, when the loved-tracks check found a change, for the first sync of each day (a list of the last 30 days moves on with the date even with no new plays), or when its last refresh didn’t go through. A sync that finds nothing new leaves the others alone, without even running their lists. **Refresh Now** and **Refresh All Now** run regardless.",
                     "**Replaces your edits.** Anything you add to or reorder in the playlist by hand is undone at the next refresh that changes it. Make a copy in Music if you want to keep a version.",
                 ]),
                 .heading("The list of playlists"),

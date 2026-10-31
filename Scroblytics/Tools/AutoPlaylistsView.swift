@@ -74,7 +74,7 @@ struct AutoPlaylistsView: View {
             Button("Add Playlist…", systemImage: "plus") { isAdding = true }
             Button("Refresh All Now", systemImage: "arrow.clockwise") {
                 Task {
-                    await scheduler.refreshAll(container: modelContainer, reason: "asked")
+                    await scheduler.refreshAll(container: modelContainer, reason: "asked", everything: true)
                     musicIsOpen = AppleMusicFavoritesReader.isMusicRunning
                 }
             }

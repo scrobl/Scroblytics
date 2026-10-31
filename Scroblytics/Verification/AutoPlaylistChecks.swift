@@ -619,7 +619,7 @@ enum AutoPlaylistChecks {
             check("only the playlists switched on ran", calls.count == 2, "\(calls.count)")
             check("no other playlist was made in Music", music.with { $0.playlists.count } == 1)
 
-            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            await scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: provider)
             check("the next round finds nothing to change", a.status == .upToDate && music.tracks(of: a.playlistPersistentID) == ids(Array(1...10)))
             check("…and the cache saved the library read", music.count("tracks") == 1, "\(music.count("tracks"))")
 
@@ -628,20 +628,20 @@ enum AutoPlaylistChecks {
                 guard case .topCharts(let chart) = recipe, chart.rowLimit == 10 else { throw AutoPlaylistSources.SourceError.rangeGone }
                 return wanted([200] + Array(1...9))
             }
-            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: shifted)
+            await scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: shifted)
             check("a changed list is carried into the same playlist", a.status == .updated && music.tracks(of: a.playlistPersistentID) == ids([200] + Array(1...9)) && music.with { $0.playlists.count } == 1)
             check("…and its record says when it changed", a.lastChangedAt != nil && a.lastTrackCount == 10)
 
             // Music not open: nothing is computed
             music.with { $0.running = false }
             let before = calls.count
-            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            await scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: provider)
             check("with Music closed the lists are not even run", calls.count == before && a.status == .musicNotRunning && a.lastTrackCount == 10)
             music.with { $0.running = true }
 
             // The playlist is deleted in Music
             music.with { $0.playlists.removeAll() }
-            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            await scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: provider)
             check("a playlist deleted in Music is reported, not remade", a.status == .playlistMissing && music.with { $0.playlists.count } == 0, a.lastDetail)
 
             // Refresh Now works on a switched-off playlist too
@@ -650,6 +650,62 @@ enum AutoPlaylistChecks {
 
             let tally = AutoPlaylistScheduler.Tally(updated: 1, upToDate: 2, attention: 1)
             check("a round is described without names", tally.summary == "1 updated, 2 already up to date, 1 need attention" && AutoPlaylistScheduler.Tally().summary == "nothing to do")
+        }
+
+        // Which playlists a round touches: only those whose list could have changed
+        do {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+            // Noon UTC, so an hour or a minute earlier is the same day in any time zone the check might run in.
+            let today = Date(timeIntervalSince1970: 1_800_014_400)
+            let sameDay = today.addingTimeInterval(-3_600)
+            let yesterday = today.addingTimeInterval(-86_400)
+            func list(_ status: AutoPlaylistStatus, refreshed: Date?) -> AutoPlaylist {
+                let item = AutoPlaylist(name: "L", recipeKind: "topCharts", recipeData: Data(), sourceSummary: "s")
+                item.lastStatus = status.rawValue
+                item.lastRefreshAt = refreshed
+                return item
+            }
+            func needs(_ item: AutoPlaylist, plays: Bool = false, loved: Bool = false) -> Bool {
+                AutoPlaylistScheduler.needsRefresh(item, scrobblesChanged: plays, lovedChanged: loved, now: today, calendar: calendar)
+            }
+            let settled = list(.upToDate, refreshed: sameDay)
+            check("a playlist refreshed today whose last refresh went through is left alone when nothing changed", !needs(settled))
+            check("…but not when the plays changed", needs(settled, plays: true))
+            check("…or the loved tracks changed", needs(settled, loved: true))
+            check("a playlist last refreshed yesterday is refreshed (a window moves on with the date)", needs(list(.upToDate, refreshed: yesterday)))
+            check("a playlist that has never been refreshed is", needs(list(.neverRun, refreshed: nil)))
+            check("a playlist whose last refresh had a problem is retried", needs(list(.musicNotRunning, refreshed: sameDay)) && needs(list(.failed, refreshed: sameDay)) && needs(list(.playlistMissing, refreshed: sameDay)))
+            check("one that changed things last time is left alone too, if nothing changed since", !needs(list(.updated, refreshed: sameDay)) && !needs(list(.created, refreshed: sameDay)))
+
+            // And through a round
+            let container = try makeContainer()
+            let music = makeMusic()
+            let item = try insert(container, name: "A", recipe: recipeList(5))
+            item.lastStatus = AutoPlaylistStatus.upToDate.rawValue
+            item.lastRefreshAt = today.addingTimeInterval(-60)
+            item.playlistPersistentID = "PID"
+            let calls = Counter()
+            let provider: AutoPlaylistScheduler.TrackProvider = { _ in calls.bump(); return wanted([1, 2, 3, 4, 5]) }
+            let scheduler = AutoPlaylistScheduler()
+            let work = BackgroundWorkStore()
+            scheduler.work = work
+            await scheduler.refreshAll(container: container, reason: "check", now: today, backend: music, trackProvider: provider)
+            check("a sync that changed nothing costs nothing: the list isn't run, Music isn't asked, nothing shows", calls.count == 0 && music.calls.isEmpty && !work.isVisible, "\(calls.count) \(music.calls)")
+            scheduler.noteChanges(scrobbles: true)
+            music.with { $0.playlists["PID"] = .init(name: "A", tracks: ids([1, 2, 3, 4, 5]), smart: false) }
+            await scheduler.refreshAll(container: container, reason: "check", now: today, backend: music, trackProvider: provider)
+            check("a sync that added plays runs it", calls.count == 1 && item.status == .upToDate)
+            await scheduler.refreshAll(container: container, reason: "check", now: today, backend: music, trackProvider: provider)
+            check("the note of a change is used once: the next sync with nothing new does nothing", calls.count == 1)
+            scheduler.noteChanges(loved: false)
+            await scheduler.refreshAll(container: container, reason: "check", now: today, backend: music, trackProvider: provider)
+            check("a loved check that found nothing is not a change", calls.count == 1)
+            scheduler.noteChanges(loved: true)
+            await scheduler.refreshAll(container: container, reason: "check", now: today, backend: music, trackProvider: provider)
+            check("a loved check that found something is", calls.count == 2)
+            await scheduler.refreshAll(container: container, reason: "check", everything: true, now: today, backend: music, trackProvider: provider)
+            check("Refresh All Now runs everything regardless", calls.count == 3)
         }
 
         // The status line under the toolbar: how many playlists are left, then nothing
@@ -673,7 +729,7 @@ enum AutoPlaylistChecks {
 
             music.with { $0.running = false }
             let closed = SeenStates()
-            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: { _ in closed.add("ran"); return [] })
+            await scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: { _ in closed.add("ran"); return [] })
             check("with Music closed there is nothing to show", closed.values.isEmpty && !work.isVisible)
             music.with { $0.running = true }
 
@@ -695,8 +751,8 @@ enum AutoPlaylistChecks {
                 return wanted(Array(1...6))
             }
             let scheduler = AutoPlaylistScheduler()
-            async let first: Void = scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
-            async let second: Void = scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            async let first: Void = scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: provider)
+            async let second: Void = scheduler.refreshAll(container: container, reason: "check", everything: true, backend: music, trackProvider: provider)
             _ = await (first, second)
             check("overlapping rounds never overlap: two rounds, one after the other", calls.count == 2 && !scheduler.isRefreshing && list.status == .upToDate, "\(calls.count) \(list.status)")
         }

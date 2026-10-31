@@ -594,7 +594,7 @@ struct ContentView: View {
                 #if DEBUG
                 TestProfile.log("LOVED sync finished changed=\(changed)")
                 #endif
-                NotificationCenter.default.post(name: .lovedTracksSyncDidFinish, object: nil)
+                NotificationCenter.default.post(name: .lovedTracksSyncDidFinish, object: changed)
             }
         }
     }

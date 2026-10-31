@@ -6,6 +6,9 @@ import SwiftUI
 extension Notification.Name {
     /// Posted after a round of refreshes, so a list of playlists can reload.
     static let autoPlaylistsDidRefresh = Notification.Name("AutoPlaylistsDidRefresh")
+    /// Posted when the loved-tracks check that follows a sync has ended, whether it found anything, failed or was cut short. It is the end
+    /// of a sync's work, so the automatic playlists (some of which depend on loved tracks) are refreshed on it.
+    static let lovedTracksSyncDidFinish = Notification.Name("LovedTracksSyncDidFinish")
 }
 
 /// Refreshes the automatic playlists: after each sync, and when a person asks. One round at a time (a sync that finishes while a
@@ -143,10 +146,14 @@ enum AutoPlaylistCreator {
 }
 
 extension View {
-    /// Refreshes the automatic playlists after each sync. One modifier so `ContentView`'s chain stays short.
+    /// Refreshes the automatic playlists after each sync, once its loved-tracks check has ended too (a goal's playlist reads the loved
+    /// tracks). One modifier so `ContentView`'s chain stays short.
     func autoPlaylistRuntime(container: ModelContainer, popularity: PopularityStore) -> some View {
         onAppear { AutoPlaylistScheduler.shared.popularity = popularity }
-            .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidFinish)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .lovedTracksSyncDidFinish)) { _ in
+                #if DEBUG
+                TestProfile.log("AUTOPLAYLISTS refresh requested")
+                #endif
                 Task { await AutoPlaylistScheduler.shared.refreshAll(container: container, reason: "after a sync") }
             }
     }

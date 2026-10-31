@@ -589,6 +589,13 @@ struct ContentView: View {
             if changed {
                 await lovedTracksStore.load(container: modelContainer, force: true)
             }
+            // The end of the sync's work: the automatic playlists are refreshed now, with the new loves in.
+            await MainActor.run {
+                #if DEBUG
+                TestProfile.log("LOVED sync finished changed=\(changed)")
+                #endif
+                NotificationCenter.default.post(name: .lovedTracksSyncDidFinish, object: nil)
+            }
         }
     }
 

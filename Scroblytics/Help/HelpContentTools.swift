@@ -237,7 +237,7 @@ extension HelpContent {
             title: "Auto-Updating Playlists",
             summary: "Apple Music playlists that follow a chart or a query after every sync.",
             blocks: [
-                .paragraph("A playlist made from a **Top Charts** list or a **Query** of tracks can be kept up to date. Turn on **Keep this playlist updated after each sync** in the dialog of **Create Apple Music Playlist** (or press **Add Playlist…** here and choose a Top Charts preset or one of your saved queries), and from then on, after every sync, Scroblytics runs the list again and changes the playlist in Music to match."),
+                .paragraph("A playlist made from a **Top Charts** list or a **Query** of tracks can be kept up to date. Turn on **Keep this playlist updated after each sync** in the dialog of **Create Apple Music Playlist** (or press **Add Playlist…** here and choose a Top Charts preset or one of your saved queries), and from then on, after every sync, Scroblytics runs the list again and changes the playlist in Music to match. It waits until the sync has finished, including its check for newly loved tracks, so a goal’s playlist sees your latest loves."),
                 .heading("What a refresh does"),
                 .bullets([
                     "**Keeps the order.** The playlist follows the list’s order. Music can only remove tracks from a playlist and add them at its end, so a changed rank keeps the tracks at the top that are still right, removes everything after the first change and adds the rest in order. When tracks have only dropped out of the middle of a list (the tracks of a goal as you hear them), just those tracks are removed and the others stay where they are. A list that hasn’t changed is left alone.",

@@ -146,6 +146,11 @@ enum LayoutSnapshots {
                 await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Top Tracks (2026)"), keepUpdated: .constant(true), canKeepUpdated: true, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-on")
                 await render(AppleMusicPlaylistNameSheet(playlistName: .constant("Flagged Tracks"), keepUpdated: .constant(false), canKeepUpdated: false, isWorking: false, onCancel: {}, onExport: {}), width: 440, scheme: scheme, name: "name-plain")
                 await render(AppleMusicPlaylistResultSheet(playlistName: "Top Tracks (2026)", result: .init(added: 98, notFound: missing), isAutomatic: true, onCopyMissing: {}, onDismiss: {}), width: 620, scheme: scheme, name: "result-automatic")
+                let status = BackgroundWorkStore()
+                status.report(.playlists, remaining: 2, total: 3)
+                await render(BackgroundWorkStrip(store: status), width: 700, scheme: scheme, name: "status-playlists")
+                status.report(.artwork, remaining: 40, total: 100)
+                await render(BackgroundWorkStrip(store: status), width: 700, scheme: scheme, name: "status-mixed")
                 // The tool's rows in the states a person meets
                 func row(_ name: String, _ summary: String, _ outcome: AutoPlaylistOutcome?, enabled: Bool = true) -> AutoPlaylist {
                     let list = AutoPlaylist(name: name, playlistPersistentID: "PID", recipeKind: "topCharts", recipeData: Data(), sourceSummary: summary, isEnabled: enabled)

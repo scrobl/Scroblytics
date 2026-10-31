@@ -9,7 +9,7 @@ import Observation
 @Observable
 final class BackgroundWorkStore {
     enum Job: CaseIterable, Hashable {
-        case artwork, durations, tempos, releaseDates, lovedTracks, popularity, tags, tagWrites
+        case artwork, durations, tempos, releaseDates, lovedTracks, popularity, tags, tagWrites, playlists
 
         var label: String {
             switch self {
@@ -21,6 +21,7 @@ final class BackgroundWorkStore {
             case .popularity: "popularity"
             case .tags: "tags"
             case .tagWrites: "tag changes"
+            case .playlists: "playlists"
             }
         }
     }
@@ -115,7 +116,9 @@ struct BackgroundWorkStrip: View {
             return "\(job.label.capitalized): \(message)"
         }
         if !store.active.isEmpty {
-            var text = "Resolving \(store.labels(of: store.activeJobs)) · \(store.totalRemaining.formatted()) left"
+            // Playlists are brought up to date; everything else here is looked up.
+            let verb = store.activeJobs.allSatisfy { $0 == .playlists } ? "Updating" : "Resolving"
+            var text = "\(verb) \(store.labels(of: store.activeJobs)) · \(store.totalRemaining.formatted()) left"
             if store.totalFailedThisRun > 0 { text += " · \(store.totalFailedThisRun.formatted()) couldn’t be resolved" }
             return text
         }

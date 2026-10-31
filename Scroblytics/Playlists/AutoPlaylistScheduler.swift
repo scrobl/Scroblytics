@@ -24,6 +24,8 @@ final class AutoPlaylistScheduler {
     private(set) var isRefreshing = false
     /// The Popularity store a Query's popularity fields read; set once by the app window.
     var popularity: PopularityStore?
+    /// The status line under the toolbar, where a round of refreshes shows how many playlists are left; set once by the app window.
+    var work: BackgroundWorkStore?
     private var rerunRequested = false
 
     /// Refreshes every enabled playlist. `trackProvider` replaces the real lists (for checks).
@@ -49,11 +51,14 @@ final class AutoPlaylistScheduler {
                     tally.add(outcome.status)
                 }
             } else {
-                for list in lists {
+                defer { work?.finish(.playlists) }
+                work?.report(.playlists, remaining: lists.count, total: lists.count)
+                for (index, list) in lists.enumerated() {
                     if Task.isCancelled { break }
                     let outcome = await Self.run(list, provider: provider, backend: backend)
                     list.record(outcome)
                     tally.add(outcome.status)
+                    work?.report(.playlists, remaining: lists.count - index - 1, total: lists.count)
                 }
             }
             try? context.save()
@@ -71,6 +76,8 @@ final class AutoPlaylistScheduler {
         }
         let outcome: AutoPlaylistOutcome
         if backend.isMusicRunning {
+            work?.report(.playlists, remaining: 1, total: 1)
+            defer { work?.finish(.playlists) }
             outcome = await Self.run(list, provider: provider, backend: backend)
         } else {
             outcome = AutoPlaylistOutcome(status: .musicNotRunning, playlistID: list.playlistPersistentID, cache: AutoPlaylistMatchCache.decode(list.matchCacheData))
@@ -148,8 +155,11 @@ enum AutoPlaylistCreator {
 extension View {
     /// Refreshes the automatic playlists after each sync, once its loved-tracks check has ended too (a goal's playlist reads the loved
     /// tracks). One modifier so `ContentView`'s chain stays short.
-    func autoPlaylistRuntime(container: ModelContainer, popularity: PopularityStore) -> some View {
-        onAppear { AutoPlaylistScheduler.shared.popularity = popularity }
+    func autoPlaylistRuntime(container: ModelContainer, popularity: PopularityStore, work: BackgroundWorkStore) -> some View {
+        onAppear {
+            AutoPlaylistScheduler.shared.popularity = popularity
+            AutoPlaylistScheduler.shared.work = work
+        }
             .onReceive(NotificationCenter.default.publisher(for: .lovedTracksSyncDidFinish)) { _ in
                 #if DEBUG
                 TestProfile.log("AUTOPLAYLISTS refresh requested")

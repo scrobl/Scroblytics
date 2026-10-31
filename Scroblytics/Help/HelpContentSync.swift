@@ -87,6 +87,7 @@ extension HelpContent {
                     ["**Release dates**", "MusicBrainz first, Deezer only if MusicBrainz has nothing", "One request at a time, about a second apart (MusicBrainz’s limit)"],
                     ["**Track lengths**", "Deezer, only when a screen needs them", "8 at a time"],
                     ["**Loved tracks**", "As above", ""],
+                    ["**Playlists**", "Not a lookup: the [Auto-Updating Playlists](help://tool-auto-playlists) are brought up to date in Music once a sync and its loved-tracks check have finished; the strip reads “Updating playlists · 2 left” while it runs", "One playlist at a time; only while Music is open"],
                 ]),
                 .paragraph("A lookup that fails for a temporary reason is never remembered as “no data”; it is retried at the next launch or sync, and the strip says “N lookups couldn’t be resolved — they’ll be retried next launch”. A lookup that genuinely finds nothing is remembered, so it isn’t repeated."),
                 .callout(.tip, "Because these run in the background, the first days with a large library show fewer tags, popularity marks and release dates than later. Fields that depend on them are “pending” until they arrive; see [Missing and pending](help://concepts-missing-pending)."),

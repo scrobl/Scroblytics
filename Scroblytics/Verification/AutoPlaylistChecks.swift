@@ -482,6 +482,13 @@ enum AutoPlaylistChecks {
         .topCharts(TopChartsPlaylistRecipe(entity: .track, rangeID: "year-2026", metric: .scrobbles, rowLimit: n))
     }
 
+    private final class SeenStates: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [String] = []
+        func add(_ value: String) { lock.withLock { items.append(value) } }
+        var values: [String] { lock.withLock { items } }
+    }
+
     @MainActor
     private static func recipeChecks(_ report: (String, Bool, String) -> Void) async throws {
         func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
@@ -643,6 +650,37 @@ enum AutoPlaylistChecks {
 
             let tally = AutoPlaylistScheduler.Tally(updated: 1, upToDate: 2, attention: 1)
             check("a round is described without names", tally.summary == "1 updated, 2 already up to date, 1 need attention" && AutoPlaylistScheduler.Tally().summary == "nothing to do")
+        }
+
+        // The status line under the toolbar: how many playlists are left, then nothing
+        do {
+            let container = try makeContainer()
+            let music = makeMusic()
+            _ = try insert(container, name: "A", recipe: recipeList(3), offset: 0)
+            _ = try insert(container, name: "B", recipe: recipeList(4), offset: 1)
+            let work = BackgroundWorkStore()
+            let scheduler = AutoPlaylistScheduler()
+            scheduler.work = work
+            let seen = SeenStates()
+            let provider: AutoPlaylistScheduler.TrackProvider = { recipe in
+                seen.add(work.active[.playlists].map { "\($0.remaining) of \($0.total)" } ?? "none")
+                guard case .topCharts(let chart) = recipe else { return [] }
+                return wanted(Array(1...chart.rowLimit))
+            }
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: provider)
+            check("the status line counts the playlists down while a round runs", seen.values == ["2 of 2", "1 of 2"], "\(seen.values)")
+            check("…and clears when it ends", work.active[.playlists] == nil && !work.isVisible)
+
+            music.with { $0.running = false }
+            let closed = SeenStates()
+            await scheduler.refreshAll(container: container, reason: "check", backend: music, trackProvider: { _ in closed.add("ran"); return [] })
+            check("with Music closed there is nothing to show", closed.values.isEmpty && !work.isVisible)
+            music.with { $0.running = true }
+
+            let list = try container.mainContext.fetch(FetchDescriptor<AutoPlaylist>(sortBy: [SortDescriptor(\.createdAt)]))[0]
+            let single = SeenStates()
+            await scheduler.refresh(list, container: container, backend: music, trackProvider: { _ in single.add(work.active[.playlists].map { "\($0.remaining) of \($0.total)" } ?? "none"); return wanted([1, 2, 3]) })
+            check("Refresh Now shows its one playlist and clears", single.values == ["1 of 1"] && !work.isVisible, "\(single.values)")
         }
 
         // Two syncs finishing together: the second round waits for the first and runs once after it

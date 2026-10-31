@@ -341,7 +341,7 @@ extension View {
             .environment(tagWriter)
             .environment(askRouter)
             .environment(askSuggestions)
-            .autoPlaylistRuntime(container: container, popularity: popularity)
+            .autoPlaylistRuntime(container: container, popularity: popularity, work: work)
             .task { askSuggestions.markStale(container: container) }
             .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
                 askSuggestions.markStale(container: container)

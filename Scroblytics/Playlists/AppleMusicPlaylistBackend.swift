@@ -115,6 +115,37 @@ struct AppleMusicPlaylistBackend: PlaylistBackend {
         }
     }
 
+    func removeIndexes(id: String, indexes: [Int], expectedCount: Int) async throws {
+        guard !indexes.isEmpty else { return }
+        // Music numbers tracks from 1; removing from the end first keeps the positions still to remove where they were.
+        let positions = indexes.sorted(by: >).map { String($0 + 1) }.joined(separator: Self.listSeparator)
+        let reply = try await run("""
+        on run argv
+          set pid to item 1 of argv
+          set expectedCount to (item 2 of argv) as integer
+          set AppleScript's text item delimiters to "\(Self.listSeparator)"
+          set positions to text items of (item 3 of argv)
+          set AppleScript's text item delimiters to ""
+          tell application "Music"
+            set matches to (every user playlist whose persistent ID is pid)
+            if (count of matches) is 0 then return "MISSING"
+            set pl to item 1 of matches
+            if (count of tracks of pl) is not expectedCount then return "CHANGED"
+            repeat with position in positions
+              delete (track ((position as string) as integer) of pl)
+            end repeat
+            return "OK"
+          end tell
+        end run
+        """, [id, String(expectedCount), positions])
+        switch reply.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "OK": return
+        case "CHANGED": throw AutoPlaylistError.changedDuringRefresh
+        case "MISSING": throw AutoPlaylistError.message("The playlist is no longer in Music.")
+        default: throw AutoPlaylistError.message("Music gave an unexpected answer when removing tracks.")
+        }
+    }
+
     func append(id: String, trackIDs: [String]) async throws {
         guard !trackIDs.isEmpty else { return }
         let reply = try await run("""

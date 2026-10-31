@@ -81,6 +81,19 @@ private final class FakeMusic: PlaylistBackend, @unchecked Sendable {
         if !outcome { throw AutoPlaylistError.changedDuringRefresh }
     }
 
+    func removeIndexes(id: String, indexes: [Int], expectedCount: Int) async throws {
+        try log("removeAt \(indexes.count)")
+        beforeRemove?()
+        let outcome = with { state -> Bool in
+            guard var playlist = state.playlists[id], playlist.tracks.count == expectedCount, indexes.allSatisfy({ $0 >= 0 && $0 < expectedCount }) else { return false }
+            let gone = Set(indexes)
+            playlist.tracks = playlist.tracks.enumerated().filter { !gone.contains($0.offset) }.map(\.element)
+            state.playlists[id] = playlist
+            return true
+        }
+        if !outcome { throw AutoPlaylistError.changedDuringRefresh }
+    }
+
     func append(id: String, trackIDs: [String]) async throws {
         try log("append \(trackIDs.count)")
         let cancel = with { state -> Bool in state.appendCalls += 1; return state.cancelOnAppend == state.appendCalls }
@@ -160,19 +173,31 @@ enum AutoPlaylistChecks {
         let repeats = PlaylistDiff.droppingRepeats(["a", "b", "a", "c", "b"])
         check("a song is kept once, at its first place", repeats.ids == ["a", "b", "c"] && repeats.dropped == 2)
 
+        let dropped = PlaylistDiff.bestPlan(current: ["a", "b", "c", "d", "e", "f"], target: ["a", "c", "e", "f"])
+        check("tracks that dropped out of the middle are removed one by one, the rest stay where they are", dropped.removeIndexes == [1, 3] && dropped.append.isEmpty && PlaylistDiff.apply(dropped, to: ["a", "b", "c", "d", "e", "f"]) == ["a", "c", "e", "f"], "\(dropped)")
+        let droppedAndNew = PlaylistDiff.bestPlan(current: ["a", "b", "c", "d", "e", "f"], target: ["a", "c", "e", "f", "g"])
+        check("…and new tracks are added at the end in the same pass", droppedAndNew.removeIndexes == [1, 3] && droppedAndNew.append == ["g"])
+        check("a tail removal is still one change, so it wins over removing one by one", PlaylistDiff.bestPlan(current: ["a", "b", "c", "d"], target: ["a", "b"]) == .init(keep: 2, removeCount: 2, append: []))
+        check("a changed order still uses the tail plan", PlaylistDiff.bestPlan(current: ["a", "b", "c", "d"], target: ["a", "c", "b", "d"]).removeIndexes == nil)
         // Random lists over a small alphabet, so repeats and long shared tops both happen. The check is made independently of the
         // plan's own loop: carrying the plan out gives the target, the kept top really is shared, and no longer top would be.
         struct Lcg { var state: UInt64; mutating func next(_ bound: Int) -> Int { state = state &* 6364136223846793005 &+ 1442695040888963407; return Int((state >> 33) % UInt64(bound)) } }
         var rng = Lcg(state: 20260101)
         var bad = 0
+        var badBest = 0
         for _ in 0..<3_000 {
             let current = (0..<rng.next(9)).map { _ in String(rng.next(4)) }
             let target = (0..<rng.next(9)).map { _ in String(rng.next(4)) }
             let plan = PlaylistDiff.plan(current: current, target: target)
             let sharedTop = zip(current, target).prefix(while: { $0.0 == $0.1 }).count
             if PlaylistDiff.apply(plan, to: current) != target || plan.keep != sharedTop || plan.keep + plan.removeCount != current.count { bad += 1 }
+            let best = PlaylistDiff.bestPlan(current: current, target: target)
+            let bestCost = best.removalCount + best.append.count
+            let tailCost = (plan.removeCount > 0 ? 1 : 0) + plan.append.count
+            if PlaylistDiff.apply(best, to: current) != target || (best.removeIndexes == nil ? bestCost > plan.removeCount + plan.append.count : bestCost >= tailCost) { badBest += 1 }
         }
         check("3,000 random lists: carrying out the plan gives exactly the target, keeping the longest shared top", bad == 0, "\(bad) wrong")
+        check("3,000 random lists: the best plan also gives exactly the target, and removing one by one is only used when it needs fewer changes", badBest == 0, "\(badBest) wrong")
     }
 
     // MARK: - The refresh, against the stand-in Music
@@ -245,6 +270,18 @@ enum AutoPlaylistChecks {
             music.clearCalls()
             outcome = await AutoPlaylistEngine.refresh(request, backend: music)
             check("a shorter list only removes the tail", outcome.status == .updated && music.count("append") == 0 && music.tracks(of: playlistID) == ids(Array(newFirst.prefix(40))) && outcome.removed == 80 && outcome.added == 0)
+
+            // A long list that only loses tracks from the middle (tracks heard) is not rewritten
+            request.tracks = wanted(Array(1...30))
+            outcome = await AutoPlaylistEngine.refresh(request, backend: music)
+            request.cache = outcome.cache
+            let afterFirst = music.tracks(of: playlistID)
+            var remaining = Array(1...30)
+            remaining.removeAll { [4, 5, 17].contains($0) }
+            request.tracks = wanted(remaining)
+            music.clearCalls()
+            outcome = await AutoPlaylistEngine.refresh(request, backend: music)
+            check("tracks that left the middle of a list are removed one by one, with nothing added again", outcome.status == .updated && music.count("removeAt 3") == 1 && music.count("append") == 0 && music.count("remove ") == 0 && music.tracks(of: playlistID) == ids(remaining) && outcome.removed == 3 && outcome.added == 0, "\(music.calls) \(afterFirst.count)")
 
             // A dry run
             request.tracks = wanted(Array(1...30))
@@ -494,6 +531,14 @@ enum AutoPlaylistChecks {
         check("flagged: the row limit applies after sorting", visible("", loved: false, .mostPlayed, limit: 2) == ["Song 2 (Live)", "Song 4"])
         let flaggedTracks = FlaggedTracksEngine.playlistTracks(Array(flaggedRows.prefix(2)))
         check("flagged: the playlist has each row's album, empty when there is none", flaggedTracks.map(\.album) == ["Album X", ""] && flaggedTracks.map(\.artist) == ["Artist A", "Artist B"])
+        let goalID = UUID()
+        let goalRecipe = GoalPlaylistRecipe(goalID: goalID, filter: .neverPlayed, sort: .oldestLoved, search: "live")
+        let goalList = AutoPlaylistRecipe.goalRemaining(goalRecipe)
+        check("a Goal recipe survives saving (it keeps the goal's ID, not a copy)", AutoPlaylistRecipe(kind: goalList.kind, data: try goalList.encodedData()) == goalList && goalList.kind == "goalRemaining")
+        check("…and describes itself", goalRecipe.summary(goalTitle: "Hear them all") == "Goal “Hear them all” · still to hear · never played · matching “live” · oldest loved" && GoalPlaylistRecipe(goalID: goalID, filter: .all, sort: .recentlyLoved, search: "").summary(goalTitle: "G") == "Goal “G” · still to hear · recently loved")
+        let loveA = GoalLove(key: "a", artist: "Artist A", track: "Song 1", lovedAt: nil), loveB = GoalLove(key: "b", artist: "Artist B", track: "Song 2", lovedAt: nil)
+        let goalTracks = GoalRemainingList.playlistTracks([loveB, loveA], history: ["a": GoalTrackHistory(plays: 3, lastPlayed: nil, album: "Album X", imageURL: nil)])
+        check("a goal's playlist keeps the list's order and each track's album, empty when never played", goalTracks.map(\.track) == ["Song 2", "Song 1"] && goalTracks.map(\.album) == ["", "Album X"], "\(goalTracks)")
         check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
         let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
         check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
@@ -803,6 +848,37 @@ enum AutoPlaylistChecks {
         let lovedSet = LovedTracksEngine.lovedSet(context: container.mainContext)
         check("Flagged Tracks: loved only keeps exactly the loved ones", flaggedLoved.count == flaggedAll.filter { lovedSet.contains(TextNormalization.lovedKey(artist: $0.artist, track: $0.track)) }.count)
 
+        // A goal's still-to-hear list: a goal started 90 days ago is saved in this COPY of the store's tool settings, and the playlist's tracks
+        // are compared with an independent recount (loved tracks minus those played since the start)
+        do {
+            let calendar = AppCalendars.listening
+            let start = calendar.date(byAdding: .day, value: -90, to: calendar.startOfDay(for: now))!
+            let goal = ListeningGoal(title: "Dump", start: start, deadline: calendar.date(byAdding: .day, value: 60, to: now)!)
+            var saved = GoalsState()
+            saved.goals = [goal]
+            ToolFilterSettingsStore.save(saved, toolId: GoalsState.toolId, context: container.mainContext)
+            let began = Date()
+            let goalTracks = try await AutoPlaylistSources.tracks(for: .goalRemaining(GoalPlaylistRecipe(goalID: goal.id, filter: .all, sort: .recentlyLoved, search: "")), container: container, popularity: nil)
+            print(String(format: "  Goal recipe: %.2f s", Date().timeIntervalSince(began)))
+            let lovedKeys = Set(try container.mainContext.fetch(FetchDescriptor<LovedTrackEntry>()).map(\.cacheKey))
+            var heard = Set<String>()
+            for play in all where play.playedAt >= start {
+                let key = TextNormalization.lovedKey(artist: play.artistName, track: play.trackName)
+                if lovedKeys.contains(key) { heard.insert(key) }
+            }
+            let expected = lovedKeys.subtracting(heard)
+            let got = Set(goalTracks.map { TextNormalization.lovedKey(artist: $0.artist, track: $0.track) })
+            print("  Goal: \(goalTracks.count) tracks still to hear (independent recount \(expected.count))")
+            check("Goal: the playlist is exactly the loved tracks not played since the start", got == expected && goalTracks.count == expected.count, "\(got.count) vs \(expected.count)")
+            let neverPlayed = try await AutoPlaylistSources.tracks(for: .goalRemaining(GoalPlaylistRecipe(goalID: goal.id, filter: .neverPlayed, sort: .artist, search: "")), container: container, popularity: nil)
+            var everPlayed = Set<String>()
+            for play in all { everPlayed.insert(TextNormalization.lovedKey(artist: play.artistName, track: play.trackName)) }
+            check("Goal: 'Never played' keeps only tracks with no play at all, by artist", neverPlayed.allSatisfy { !everPlayed.contains(TextNormalization.lovedKey(artist: $0.artist, track: $0.track)) } && zip(neverPlayed, neverPlayed.dropFirst()).allSatisfy { $0.artist.localizedStandardCompare($1.artist) != .orderedDescending })
+            var gone = false
+            do { _ = try await AutoPlaylistSources.tracks(for: .goalRemaining(GoalPlaylistRecipe(goalID: UUID(), filter: .all, sort: .recentlyLoved, search: "")), container: container, popularity: nil) } catch { gone = (error as? GoalPlaylistSource.SourceError) != nil }
+            check("Goal: a goal that was deleted is reported, not guessed at", gone)
+        }
+
         // The same chart for artists: the playlist holds the tracks of the top artists
         let artistTracks = try await AutoPlaylistSources.tracks(
             for: .topCharts(TopChartsPlaylistRecipe(entity: .artist, rangeID: "year-\(year)", metric: .scrobbles, rowLimit: 10)), container: container, popularity: nil
@@ -913,6 +989,18 @@ enum AutoPlaylistChecks {
         outcome = await AutoPlaylistEngine.refresh(request, backend: backend)
         heldNow = await held()
         check("a new number one and a shorter list", outcome.status == .updated && heldNow == expected([11, 0, 1, 3, 2, 4]), outcome.detail)
+
+        // Tracks that dropped out of the middle are removed one by one, and the others keep their places
+        request.cache = outcome.cache
+        request.tracks = tracks([11, 0, 3, 2, 4, 5, 6])
+        outcome = await AutoPlaylistEngine.refresh(request, backend: backend)
+        heldNow = await held()
+        check("tracks that left the middle are removed one by one, in place", outcome.status == .updated && outcome.removed == 1 && outcome.added == 2 && heldNow == expected([11, 0, 3, 2, 4, 5, 6]), outcome.detail)
+        request.cache = outcome.cache
+        request.tracks = tracks([11, 3, 2, 5, 6])
+        outcome = await AutoPlaylistEngine.refresh(request, backend: backend)
+        heldNow = await held()
+        check("…and with nothing to add, only removals are made", outcome.status == .updated && outcome.removed == 2 && outcome.added == 0 && heldNow == expected([11, 3, 2, 5, 6]), outcome.detail)
 
         // Music's own library is untouched by all of that
         let stillThere = try await backend.libraryTrackIDs()

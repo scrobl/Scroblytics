@@ -14,6 +14,9 @@ protocol PlaylistBackend: Sendable {
     /// Removes the tracks after the first `index` from the playlist (only from the playlist, never from the library). Throws
     /// `AutoPlaylistError.changedDuringRefresh` when the playlist no longer holds `expectedCount` tracks.
     func removeTail(id: String, from index: Int, expectedCount: Int) async throws
+    /// Removes just these tracks (positions from 0) from the playlist, leaving the others in order. Like `removeTail`, only from the
+    /// playlist, and it throws `AutoPlaylistError.changedDuringRefresh` when the playlist no longer holds `expectedCount` tracks.
+    func removeIndexes(id: String, indexes: [Int], expectedCount: Int) async throws
     func append(id: String, trackIDs: [String]) async throws
 }
 
@@ -110,15 +113,17 @@ enum AutoPlaylistEngine {
             outcome.playlistID = playlistID.isEmpty ? nil : playlistID
 
             // 3. Change as little as possible.
-            let plan = PlaylistDiff.plan(current: current, target: target)
+            let plan = PlaylistDiff.bestPlan(current: current, target: target)
             outcome.trackCount = target.count
             outcome.added = plan.append.count
-            outcome.removed = plan.removeCount
+            outcome.removed = plan.removalCount
             if plan.isNoOp { outcome.status = .upToDate; return outcome }
             outcome.status = madeNow ? .created : .updated
             if request.dryRun { return outcome }
 
-            if plan.removeCount > 0 {
+            if let indexes = plan.removeIndexes {
+                try await backend.removeIndexes(id: playlistID, indexes: indexes, expectedCount: current.count)
+            } else if plan.removeCount > 0 {
                 try await backend.removeTail(id: playlistID, from: plan.keep, expectedCount: current.count)
             }
             var offset = 0

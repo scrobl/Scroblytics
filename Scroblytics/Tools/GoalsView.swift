@@ -598,9 +598,12 @@ struct GoalsView: View {
                 Spacer()
                 if !matching.isEmpty {
                     // The tracks the list shows now (after Search, Show and Sort), not only the first rows.
-                    AppleMusicPlaylistExportButton(defaultPlaylistName: "\(goal.title): still to hear") {
-                        matching.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.track, album: result.history[$0.key]?.album ?? "") }
-                    }
+                    let recipe = GoalPlaylistRecipe(goalID: goal.id, filter: remainingFilter, sort: sort, search: remainingSearch)
+                    AppleMusicPlaylistExportButton(
+                        defaultPlaylistName: "\(goal.title): still to hear",
+                        tracks: { GoalRemainingList.playlistTracks(matching, history: result.history) },
+                        recipe: .goalRemaining(recipe), recipeSummary: recipe.summary(goalTitle: goal.title)
+                    )
                 }
             }
             if !a.remaining.isEmpty {

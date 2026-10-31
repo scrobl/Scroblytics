@@ -132,7 +132,7 @@ struct GoalTrackHistory: Sendable, Equatable {
     var imageURL: String?
 }
 
-enum GoalRemainingFilter: String, CaseIterable, Identifiable, Sendable {
+enum GoalRemainingFilter: String, CaseIterable, Identifiable, Codable, Sendable {
     case all, playedBefore, neverPlayed
 
     var id: String { rawValue }
@@ -145,7 +145,7 @@ enum GoalRemainingFilter: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum GoalRemainingSort: String, CaseIterable, Identifiable, Sendable {
+enum GoalRemainingSort: String, CaseIterable, Identifiable, Codable, Sendable {
     case recentlyLoved, oldestLoved, mostPlayed, lastHeard, artist, track
 
     var id: String { rawValue }
@@ -209,6 +209,41 @@ enum GoalRemainingList {
             return a.offset < b.offset
         }
         return ordered.map(\.element)
+    }
+}
+
+extension GoalRemainingList {
+    /// The tracks still to hear as a playlist, in the order the list shows them: the album is the one each was last played on, if any.
+    static func playlistTracks(_ matching: [GoalLove], history: [String: GoalTrackHistory]) -> [AppleMusicPlaylistTrack] {
+        matching.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.track, album: history[$0.key]?.album ?? "") }
+    }
+}
+
+/// A goal's still-to-hear list worked out from the saved goal and the stored history, for the playlists kept up to date.
+enum GoalPlaylistSource {
+    enum SourceError: LocalizedError {
+        case goalGone
+        var errorDescription: String? { "The goal this playlist follows no longer exists. Stop updating it, or make a new one from the goal." }
+    }
+
+    @MainActor
+    static func tracks(
+        goalID: UUID, filter: GoalRemainingFilter, sort: GoalRemainingSort, search: String, container: ModelContainer, calendar: Calendar = AppCalendars.listening
+    ) async throws -> [AppleMusicPlaylistTrack] {
+        let context = container.mainContext
+        let state = ToolFilterSettingsStore.load(GoalsState.self, toolId: GoalsState.toolId, context: context, default: GoalsState())
+        guard let goal = state.goals.first(where: { $0.id == goalID }) else { throw SourceError.goalGone }
+        let stored = try context.fetch(FetchDescriptor<LovedTrackEntry>())
+        let loves = stored.map { GoalLove(key: $0.cacheKey, artist: $0.artist, track: $0.track, lovedAt: $0.lovedAt) }
+        let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        let presence = goal.inAppleLibraryOnly ? LibraryPresenceSnapshot.load(context: context) : nil
+        let tags = goal.criteria.tags.isEmpty ? EntityTagsSnapshot.empty : EntityTagsEngine.loadSnapshot(context: context)
+        let result = await Task.detached(priority: .utility) {
+            let members = GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags)[goal.id] ?? GoalMembers(loves: [])
+            return GoalCompute.run(goal: goal, members: members, plays: plays, presence: presence, now: .now, calendar: calendar, withForecasts: false)
+        }.value
+        let matching = GoalRemainingList.apply(result.analysis.remaining, history: result.history, filter: filter, sort: sort, search: search)
+        return GoalRemainingList.playlistTracks(matching, history: result.history)
     }
 }
 

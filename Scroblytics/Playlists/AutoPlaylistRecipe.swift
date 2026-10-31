@@ -54,6 +54,22 @@ struct FlaggedTracksPlaylistRecipe: Codable, Equatable, Sendable {
     }
 }
 
+/// The tracks still to hear in a goal, as the goal's list shows them (its search, "Show" choice and ordering). It stores the goal's ID,
+/// not a copy, so a change to the goal's settings is followed.
+struct GoalPlaylistRecipe: Codable, Equatable, Sendable {
+    var goalID: UUID
+    var filter: GoalRemainingFilter
+    var sort: GoalRemainingSort
+    var search: String
+
+    func summary(goalTitle: String) -> String {
+        var text = "Goal “\(goalTitle)” · still to hear"
+        if filter != .all { text += " · \(filter.label.lowercased())" }
+        if !search.isEmpty { text += " · matching “\(search)”" }
+        return text + " · \(sort.label(joinsOnPlay: false).lowercased())"
+    }
+}
+
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
 /// again have one: a list built from a random walk or from one answer of Last.fm would give a different list every time.
 enum AutoPlaylistRecipe: Equatable, Sendable {
@@ -63,12 +79,14 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     case mostRecentMostOften(MostRecentMostOftenPlaylistRecipe)
     case chartToppers(ChartToppersPlaylistRecipe)
     case flaggedTracks(FlaggedTracksPlaylistRecipe)
+    case goalRemaining(GoalPlaylistRecipe)
 
     static let topChartsKind = "topCharts"
     static let queryKind = "query"
     static let mostRecentMostOftenKind = "mostRecentMostOften"
     static let chartToppersKind = "chartToppers"
     static let flaggedTracksKind = "flaggedTracks"
+    static let goalRemainingKind = "goalRemaining"
 
     var kind: String {
         switch self {
@@ -77,6 +95,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .mostRecentMostOften: Self.mostRecentMostOftenKind
         case .chartToppers: Self.chartToppersKind
         case .flaggedTracks: Self.flaggedTracksKind
+        case .goalRemaining: Self.goalRemainingKind
         }
     }
 
@@ -88,6 +107,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .mostRecentMostOften(let recipe): recipe.summary
         case .chartToppers(let recipe): recipe.summary
         case .flaggedTracks(let recipe): recipe.summary
+        case .goalRemaining: "Goal · still to hear"
         }
     }
 
@@ -98,6 +118,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .mostRecentMostOften(let recipe): try JSONEncoder().encode(recipe)
         case .chartToppers(let recipe): try JSONEncoder().encode(recipe)
         case .flaggedTracks(let recipe): try JSONEncoder().encode(recipe)
+        case .goalRemaining(let recipe): try JSONEncoder().encode(recipe)
         }
     }
 
@@ -119,6 +140,9 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case Self.flaggedTracksKind:
             guard let recipe = try? JSONDecoder().decode(FlaggedTracksPlaylistRecipe.self, from: data) else { return nil }
             self = .flaggedTracks(recipe)
+        case Self.goalRemainingKind:
+            guard let recipe = try? JSONDecoder().decode(GoalPlaylistRecipe.self, from: data) else { return nil }
+            self = .goalRemaining(recipe)
         default:
             return nil
         }
@@ -192,6 +216,8 @@ enum AutoPlaylistSources {
                 isLoved: { loved.contains(TextNormalization.lovedKey(artist: $0, track: $1)) }
             )
             return FlaggedTracksEngine.playlistTracks(visible)
+        case .goalRemaining(let goal):
+            return try await GoalPlaylistSource.tracks(goalID: goal.goalID, filter: goal.filter, sort: goal.sort, search: goal.search, container: container)
         }
     }
 

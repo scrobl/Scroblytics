@@ -4,7 +4,9 @@ import Foundation
 ///
 /// Music can remove tracks from a playlist and add tracks to its end, but it cannot move a track inside a playlist. So the
 /// plan keeps the longest run of tracks that already match at the top, removes everything after it, and adds the rest in rank
-/// order. A playlist that already matches needs no change at all; the worst case (a new #1) is a full rewrite of the same playlist.
+/// order. When tracks have only dropped out of the middle of a list (a goal's tracks being heard) it is cheaper to remove just those
+/// tracks, which leaves the order of the rest alone; `bestPlan` picks whichever needs fewer changes. A playlist that already matches
+/// needs no change at all; the worst case (a new #1) is a full rewrite of the same playlist.
 enum PlaylistDiff {
     struct Plan: Equatable, Sendable {
         /// How many tracks at the top stay as they are.
@@ -13,8 +15,13 @@ enum PlaylistDiff {
         let removeCount: Int
         /// What is added after the kept tracks, in order.
         let append: [String]
+        /// When set, only these tracks (positions in the playlist, from 0, ascending) are removed, one by one, and the others stay where they
+        /// are; `keep` is then how many of the target's first tracks are among those that stay. nil: everything after `keep` is removed.
+        var removeIndexes: [Int]? = nil
 
-        var isNoOp: Bool { removeCount == 0 && append.isEmpty }
+        var isNoOp: Bool { removalCount == 0 && append.isEmpty }
+        /// How many tracks are removed.
+        var removalCount: Int { removeIndexes?.count ?? removeCount }
     }
 
     /// The plan that turns `current` (Music's track IDs, in playlist order) into `target`.
@@ -25,9 +32,35 @@ enum PlaylistDiff {
         return Plan(keep: keep, removeCount: current.count - keep, append: Array(target[keep...]))
     }
 
+    /// The plan that needs the fewest changes: the tail plan above, or removing only the tracks that left when the target is the playlist
+    /// minus those tracks plus new ones at the end. A removal of a range at the end counts as one change.
+    static func bestPlan(current: [String], target: [String]) -> Plan {
+        let tail = plan(current: current, target: target)
+        if tail.isNoOp { return tail }
+        // The longest start of the target that is still in the playlist, in the same order.
+        var matched: [Int] = []
+        var position = 0
+        for wanted in target {
+            while position < current.count, current[position] != wanted { position += 1 }
+            if position == current.count { break }
+            matched.append(position)
+            position += 1
+        }
+        let stays = Set(matched)
+        let removals = (0..<current.count).filter { !stays.contains($0) }
+        let scatteredCost = removals.count + (target.count - matched.count)
+        let tailCost = (tail.removeCount > 0 ? 1 : 0) + tail.append.count
+        guard scatteredCost < tailCost else { return tail }
+        return Plan(keep: matched.count, removeCount: removals.count, append: Array(target[matched.count...]), removeIndexes: removals)
+    }
+
     /// What the playlist holds after the plan is carried out.
     static func apply(_ plan: Plan, to current: [String]) -> [String] {
-        Array(current.prefix(plan.keep)) + plan.append
+        if let removeIndexes = plan.removeIndexes {
+            let gone = Set(removeIndexes)
+            return current.enumerated().filter { !gone.contains($0.offset) }.map(\.element) + plan.append
+        }
+        return Array(current.prefix(plan.keep)) + plan.append
     }
 
     /// The same list with each ID kept only the first time it appears (a song is never in the playlist twice), and how many were dropped.

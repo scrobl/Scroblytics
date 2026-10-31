@@ -165,6 +165,22 @@ Before a release that changes it or the loved-tracks sync:
   saved without dates, and an unloved track. Build the Debug app first.
 - `SCROBLYTICS_LAYOUT_SNAPSHOT_GOALS=<folder>` renders the page, the chart's zoom and the goal editor offscreen.
 
+## Automatic Apple Music playlists
+
+`SCROBLYTICS_AUTOPLAYLIST_CHECK=1` (in `scripts/release.sh`) checks the rules for keeping a playlist up to date against a stand-in
+Music with made-up songs: the plan (keep the matching top, remove the tail, add the rest in order), no song added twice, nothing done
+when Music is closed or the list comes out empty, a deleted or smart playlist, a playlist edited mid-refresh, stopping part way, the
+match cache, and the backup round trip. The stand-in never touches a real library. Before a release that changes it, with Music open:
+
+- `SCROBLYTICS_AUTOPLAYLIST_LIVE_READ=<playlist persistent ID>` (Debug build, scratch `SCROBLYTICS_STORE_PATH`) reads one playlist,
+  finds each of its tracks in the library the way a refresh does, and prints how many came back as the playlist's own track and how
+  long it took; a dry run then reports "up to date". It changes nothing. A smart playlist is refused ("notEditable"), which makes that
+  one report a failure on purpose.
+- `SCROBLYTICS_AUTOPLAYLIST_LIVE_WRITE=<playlist persistent ID>` makes a playlist called "Scroblytics test" from the first twelve
+  different tracks of that playlist, runs the real sequence of refreshes on it (make, same list, swapped rank, new number one and a
+  shorter list), checks the library is untouched and deletes the scratch playlist. It writes to Music, so it is only run with the
+  owner's say-so, never from a script.
+
 ## The detail pages (Artist, Album, Track)
 
 `SCROBLYTICS_DETAIL_CHECK=1` (in `scripts/release.sh`) checks the fact tiles, the album table's join, filters, sorts, directions and

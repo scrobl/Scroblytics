@@ -130,6 +130,7 @@ struct ScroblyticsApp: App {
             LovedAuditDecision.self,
             AlbumEditionMatch.self,
             TagPlaylistRule.self,
+            AutoPlaylist.self,
         ])
         #if DEBUG
         // Lets a verification run use a COPY of the store (and, with
@@ -187,6 +188,7 @@ struct ScroblyticsApp: App {
         RabbitHoleChecks.runHeadlessIfRequested(container: modelContainer)
         NewMusicChecks.runHeadlessIfRequested(container: modelContainer)
         GoalsChecks.runHeadlessIfRequested(container: modelContainer)
+        AutoPlaylistChecks.runHeadlessIfRequested(container: modelContainer)
         Task { @MainActor in ProgressSimulator.startIfRequested() }
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()

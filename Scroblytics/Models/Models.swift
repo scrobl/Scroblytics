@@ -659,6 +659,60 @@ final class TagPlaylistRule {
     }
 }
 
+/// An Apple Music playlist that Scroblytics keeps up to date: after each sync the list it was made from is run again and the
+/// playlist is changed to match, in rank order and without adding a song twice (`AutoPlaylistEngine`). It holds the recipe
+/// (what to run) and what the last refresh did, never the tracks themselves. User-authored, so part of native backups.
+@Model
+final class AutoPlaylist {
+    @Attribute(.unique) var id: UUID
+    /// The playlist's name when it was made (and the name used to make it again if the person asks).
+    var name: String
+    /// Music's persistent ID of the playlist; it survives a rename. Empty until the playlist has been created.
+    var playlistPersistentID: String
+    /// Which kind of list this is and what it needs to run again. Opaque to the engine; the recipe types read them.
+    var recipeKind: String
+    var recipeData: Data
+    /// A short human description of the source ("Top tracks · 2026 · by plays · 100"), shown in the list of playlists.
+    var sourceSummary: String
+    /// Off = kept in the list but not refreshed.
+    var isEnabled: Bool
+    var createdAt: Date
+    var lastRefreshAt: Date?
+    /// When the playlist's contents last changed (a refresh that found nothing to change leaves it).
+    var lastChangedAt: Date?
+    /// `AutoPlaylistStatus.rawValue` and its wording at the last refresh.
+    var lastStatus: String
+    var lastDetail: String
+    var lastTrackCount: Int
+    var lastMissingCount: Int
+    /// The first few tracks of the last refresh that were not found in the library, one per line.
+    var lastMissingSample: String
+    /// `AutoPlaylistMatchCache` as JSON: which library track each wanted track was matched to. Rebuilt when missing.
+    var matchCacheData: Data?
+
+    init(
+        id: UUID = UUID(), name: String, playlistPersistentID: String = "", recipeKind: String, recipeData: Data,
+        sourceSummary: String, isEnabled: Bool = true, createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.playlistPersistentID = playlistPersistentID
+        self.recipeKind = recipeKind
+        self.recipeData = recipeData
+        self.sourceSummary = sourceSummary
+        self.isEnabled = isEnabled
+        self.createdAt = createdAt
+        self.lastRefreshAt = nil
+        self.lastChangedAt = nil
+        self.lastStatus = AutoPlaylistStatus.neverRun.rawValue
+        self.lastDetail = ""
+        self.lastTrackCount = 0
+        self.lastMissingCount = 0
+        self.lastMissingSample = ""
+        self.matchCacheData = nil
+    }
+}
+
 /// The identity of an entity in the tag caches: `"<kind>␟<artist>␟<name>"`, every part trimmed and
 /// lowercased (an artist is `"artist␟<artist>"`). Uses U+241F like the other keys, never a NUL
 /// (SQLite silently truncates a NUL).

@@ -108,6 +108,8 @@ enum NativeBackupFormat {
         var tagRules: [TagRuleRecord]?
         /// Editions counted on their own, with their match decisions. Optional for the same reason as above.
         var albumEditionMatches: [AlbumEditionMatchRecord]?
+        /// The Apple Music playlists kept up to date (what each is made from, not its tracks). Optional for the same reason as above.
+        var autoPlaylists: [AutoPlaylistRecord]?
         /// The weather home place and the trips (where you were, for the weather). Optional for the same reason as above: restoring an
         /// archive without it leaves the current ones alone. Not the downloaded weather, which can be fetched again.
         var weatherLocations: WeatherLocationBook?
@@ -153,6 +155,11 @@ enum NativeBackupFormat {
         let lastfmArtist: String; let lastfmTrack: String; let appleArtist: String; let appleTrack: String
         let sameTrack: Bool; let decidedAt: Date
     }
+    struct AutoPlaylistRecord: Codable {
+        let id: UUID; let name: String; let playlistPersistentID: String
+        let recipeKind: String; let recipeData: Data; let sourceSummary: String
+        let isEnabled: Bool; let createdAt: Date
+    }
     struct AlbumEditionMatchRecord: Codable {
         let artist: String; let title: String
         let matchMode: String?; let canonicalArtist: String?; let canonicalAlbum: String?; let manualTracklist: [String]?
@@ -189,6 +196,7 @@ enum NativeBackupEngine {
         var tagRules = 0
         var albumEditionMatches = 0
         var weatherTrips = 0
+        var autoPlaylists = 0
 
         var description: String {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
@@ -197,6 +205,7 @@ enum NativeBackupEngine {
             if tagRules > 0 { text += " · \(tagRules) tag rules" }
             if albumEditionMatches > 0 { text += " · \(albumEditionMatches) editions counted separately" }
             if weatherTrips > 0 { text += " · \(weatherTrips) weather trips" }
+            if autoPlaylists > 0 { text += " · \(autoPlaylists) automatic playlists" }
             return text
         }
     }
@@ -283,6 +292,7 @@ enum NativeBackupEngine {
         try restoreLovedAuditDecisions(archive.lovedAuditDecisions, context: context, save: false)
         try restoreTagRules(archive.tagRules, context: context, save: false)
         try restoreAlbumEditionMatches(archive.albumEditionMatches, context: context, save: false)
+        try restoreAutoPlaylists(archive.autoPlaylists, context: context, save: false)
         restoreWeatherLocations(archive.weatherLocations)
 
         UserDefaults.standard.set(archive.theme, forKey: AppearancePreference.storageKey)
@@ -332,6 +342,31 @@ enum NativeBackupEngine {
             ))
         }
         if save { try context.save() }
+    }
+
+    /// Replaces the automatic playlists with the archive's; `nil` (an older archive) leaves the current ones alone. A restored playlist
+    /// keeps its Music ID (which still works on the same Mac), and is refreshed from scratch on the next sync.
+    static func restoreAutoPlaylists(_ records: [NativeBackupFormat.AutoPlaylistRecord]?, context: ModelContext, save: Bool = true) throws {
+        guard let records else { return }
+        for item in try context.fetch(FetchDescriptor<AutoPlaylist>()) { context.delete(item) }
+        var seen = Set<UUID>()
+        for record in records {
+            guard seen.insert(record.id).inserted else { continue }
+            context.insert(AutoPlaylist(
+                id: record.id, name: record.name, playlistPersistentID: record.playlistPersistentID, recipeKind: record.recipeKind,
+                recipeData: record.recipeData, sourceSummary: record.sourceSummary, isEnabled: record.isEnabled, createdAt: record.createdAt
+            ))
+        }
+        if save { try context.save() }
+    }
+
+    static func autoPlaylistRecords(context: ModelContext) throws -> [NativeBackupFormat.AutoPlaylistRecord] {
+        try context.fetch(FetchDescriptor<AutoPlaylist>(sortBy: [SortDescriptor(\.createdAt)])).map {
+            NativeBackupFormat.AutoPlaylistRecord(
+                id: $0.id, name: $0.name, playlistPersistentID: $0.playlistPersistentID, recipeKind: $0.recipeKind,
+                recipeData: $0.recipeData, sourceSummary: $0.sourceSummary, isEnabled: $0.isEnabled, createdAt: $0.createdAt
+            )
+        }
     }
 
     /// Replaces the editions counted on their own with the archive's; `nil` (an older archive) leaves the current ones alone.
@@ -395,12 +430,13 @@ enum NativeBackupEngine {
         let editionMatches = try context.fetch(FetchDescriptor<AlbumEditionMatch>()).map {
             NativeBackupFormat.AlbumEditionMatchRecord(artist: $0.artist, title: $0.title, matchMode: $0.matchResolutionMode?.rawValue, canonicalArtist: $0.canonicalArtist, canonicalAlbum: $0.canonicalAlbum, manualTracklist: $0.manualTracklist, countsSeparately: $0.countsSeparately)
         }
+        let autoPlaylists = try autoPlaylistRecords(context: context)
         let trips = WeatherTripStore.load()
         let weatherBook: WeatherLocationBook? = WeatherSettings.place() == nil && trips.isEmpty ? nil : WeatherLocationBook(home: WeatherSettings.place(), trips: trips)
         let username = try context.fetch(FetchDescriptor<SyncState>()).first?.username
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         let theme = UserDefaults.standard.string(forKey: AppearancePreference.storageKey) ?? AppearancePreference.dark.rawValue
-        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, weatherLocations: weatherBook, theme: theme, images: images)
+        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
     }
 
     private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
@@ -417,7 +453,7 @@ enum NativeBackupEngine {
     }
 
     private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
-        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0)
+        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0)
     }
 
     private static func findOrCreateArtist(named name: String, context: ModelContext) throws -> Artist {

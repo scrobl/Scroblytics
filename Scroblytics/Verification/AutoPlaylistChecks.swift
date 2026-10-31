@@ -457,6 +457,9 @@ enum AutoPlaylistChecks {
         spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
         let query = AutoPlaylistRecipe.query(spec)
         check("a Query recipe survives saving", AutoPlaylistRecipe(kind: query.kind, data: try query.encodedData()) == query && query.kind == "query")
+        let recent = AutoPlaylistRecipe.mostRecentMostOften(MostRecentMostOftenPlaylistRecipe(windowDays: 90, minPlays: 5, sort: .velocity, rowLimit: 50))
+        check("a Most Recent, Most Often recipe survives saving", AutoPlaylistRecipe(kind: recent.kind, data: try recent.encodedData()) == recent && recent.kind == "mostRecentMostOften")
+        check("…and describes itself", MostRecentMostOftenPlaylistRecipe(windowDays: 90, minPlays: 5, sort: .velocity, rowLimit: 50).summary == "Most Recent, Most Often · discovered in the last 90 days · 5+ plays · by speed · 50 rows" && MostRecentMostOftenPlaylistRecipe(windowDays: 30, minPlays: 1, sort: .plays, rowLimit: 0).summary.hasSuffix("by plays · all rows"))
         check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
         let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
         check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
@@ -710,6 +713,36 @@ enum AutoPlaylistChecks {
 
         let sameSongs = Set(chartTracks.map { songKey($0.artist, $0.track) }).symmetricDifference(Set(queryTracks.map { songKey($0.artist, $0.track) })).count
         print("  songs in one list but not the other (ties at the cut-off can differ): \(sameSongs)")
+
+        // Most Recent, Most Often: the tracks first played in the last 90 days with at least 5 plays, by speed
+        let now = Date()
+        let mrmo = MostRecentMostOftenPlaylistRecipe(windowDays: 90, minPlays: 5, sort: .velocity, rowLimit: 50)
+        let mrmoTracks = try await AutoPlaylistSources.tracks(for: .mostRecentMostOften(mrmo), container: container, popularity: nil)
+        let all = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+        var firstPlay: [String: Date] = [:], total: [String: Int] = [:], albumCounts: [String: [String: Int]] = [:]
+        for play in all {
+            let key = "\(play.artistName)\u{0}\(play.trackName)"
+            if firstPlay[key].map({ play.playedAt < $0 }) ?? true { firstPlay[key] = play.playedAt }
+            total[key, default: 0] += 1
+            albumCounts[key, default: [:]][play.albumName, default: 0] += 1
+        }
+        let eligibleCount = firstPlay.keys.filter { key in
+            guard let first = firstPlay[key], let plays = total[key] else { return false }
+            return plays >= mrmo.minPlays && now.timeIntervalSince(first) <= Double(mrmo.windowDays) * 86_400
+        }.count
+        let allEligible = mrmoTracks.allSatisfy { track in
+            let key = "\(track.artist)\u{0}\(track.track)"
+            guard let first = firstPlay[key], let plays = total[key] else { return false }
+            return plays >= mrmo.minPlays && now.timeIntervalSince(first) <= Double(mrmo.windowDays) * 86_400
+        }
+        let albumsRight = mrmoTracks.allSatisfy { track in
+            let counts = albumCounts["\(track.artist)\u{0}\(track.track)"] ?? [:]
+            return (counts[track.album] ?? 0) == (counts.values.max() ?? 0)
+        }
+        print("  Most Recent, Most Often: \(mrmoTracks.count) tracks (\(eligibleCount) tracks qualify in all)")
+        check("Most Recent, Most Often: every track qualifies by an independent count (first played in the window, enough plays)", allEligible)
+        check("Most Recent, Most Often: the right number of tracks", mrmoTracks.count == min(mrmo.rowLimit, eligibleCount), "\(mrmoTracks.count) vs \(min(mrmo.rowLimit, eligibleCount))")
+        check("Most Recent, Most Often: each track carries its most-played album", albumsRight)
 
         // The same chart for artists: the playlist holds the tracks of the top artists
         let artistTracks = try await AutoPlaylistSources.tracks(

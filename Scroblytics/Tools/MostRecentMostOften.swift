@@ -93,6 +93,20 @@ enum MostRecentMostOftenEngine {
         return MostRecentMostOften(rows: rows, recencyWindowDays: recencyWindowDays, minPlays: minPlays, sort: sort)
     }
 
+    /// The first `limit` rows (0 = all), as the tool's list shows them.
+    static func limited(_ rows: [MostRecentMostOftenRow], to limit: Int) -> [MostRecentMostOftenRow] {
+        limit == 0 ? rows : Array(rows.prefix(limit))
+    }
+
+    /// The tool's list as playlist tracks: each row's track with the album it was played on most.
+    @MainActor
+    static func playlistTracks(rows: [MostRecentMostOftenRow], scrobbles: [ScrobbleSnapshot], lookup: [String: String]) -> [AppleMusicPlaylistTrack] {
+        rows.map { row in
+            let album = ImageResolutionEngine.resolvedTrackArtwork(artist: row.artist, track: row.title, scrobbles: scrobbles, lookup: lookup).album ?? ""
+            return AppleMusicPlaylistTrack(artist: row.artist, track: row.title, album: album)
+        }
+    }
+
     /// The equivalent condition set for "Advanced" — same thresholds, handed to Query as an ordinary,
     /// further-editable spec rather than a second filter representation.
     static func spec(recencyWindowDays: Int, minPlays: Int) -> QuerySpec {

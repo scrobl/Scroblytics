@@ -160,7 +160,9 @@ struct MostRecentMostOftenView: View {
             if let data, !data.rows.isEmpty {
                 AppleMusicPlaylistExportButton(
                     defaultPlaylistName: "Most Recent, Most Often",
-                    tracks: { playlistTracks(for: data.rows) }
+                    tracks: { playlistTracks(for: data.rows) },
+                    recipe: .mostRecentMostOften(MostRecentMostOftenPlaylistRecipe(windowDays: windowDays, minPlays: minPlays, sort: sort, rowLimit: options.rowLimit)),
+                    recipeSummary: MostRecentMostOftenPlaylistRecipe(windowDays: windowDays, minPlays: minPlays, sort: sort, rowLimit: options.rowLimit).summary
                 )
             }
             Button("Advanced") {
@@ -195,7 +197,7 @@ struct MostRecentMostOftenView: View {
                 MostRecentMostOftenEngine.compute(scrobbles: all, recencyWindowDays: windowDays, minPlays: minPlays, sort: sort)
             }.value
             if let computed {
-                let rows = options.rowLimit == 0 ? computed.rows : Array(computed.rows.prefix(options.rowLimit))
+                let rows = MostRecentMostOftenEngine.limited(computed.rows, to: options.rowLimit)
                 let limited = MostRecentMostOften(
                     rows: rows,
                     recencyWindowDays: computed.recencyWindowDays,

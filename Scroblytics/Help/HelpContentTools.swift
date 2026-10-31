@@ -36,6 +36,7 @@ extension HelpContent {
             summary: "New discoveries that you play a lot.",
             blocks: [
                 .paragraph("Tracks first played within a window that already have a minimum number of plays, ranked by **velocity** (plays per day since the first play) or plays. See [Most Recent, Most Often](help://metrics-velocity). Each row has a small daily-plays line, and a headline names your #1."),
+                .paragraph("**Create Apple Music Playlist** makes a playlist of the rows the list shows (so the Rows limit applies), in the order shown; turn on **Keep this playlist updated after each sync** and it follows the tool from then on ([Auto-Updating Playlists](help://tool-auto-playlists))."),
             ]
         ),
         HelpArticle(

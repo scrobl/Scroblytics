@@ -15,20 +15,35 @@ struct TopChartsPlaylistRecipe: Codable, Equatable, Sendable {
     }
 }
 
+/// Most Recent, Most Often with its thresholds, ordering and row limit (0 = all).
+struct MostRecentMostOftenPlaylistRecipe: Codable, Equatable, Sendable {
+    var windowDays: Int
+    var minPlays: Int
+    var sort: MostRecentMostOftenSort
+    var rowLimit: Int
+
+    var summary: String {
+        "Most Recent, Most Often · discovered in the last \(windowDays) days · \(minPlays)+ plays · by \(sort == .velocity ? "speed" : "plays") · \(rowLimit == 0 ? "all rows" : "\(rowLimit) rows")"
+    }
+}
+
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
 /// again have one: a list built from a random walk or from one answer of Last.fm would give a different list every time.
 enum AutoPlaylistRecipe: Equatable, Sendable {
     case topCharts(TopChartsPlaylistRecipe)
     /// A Query whose rows are tracks.
     case query(QuerySpec)
+    case mostRecentMostOften(MostRecentMostOftenPlaylistRecipe)
 
     static let topChartsKind = "topCharts"
     static let queryKind = "query"
+    static let mostRecentMostOftenKind = "mostRecentMostOften"
 
     var kind: String {
         switch self {
         case .topCharts: Self.topChartsKind
         case .query: Self.queryKind
+        case .mostRecentMostOften: Self.mostRecentMostOftenKind
         }
     }
 
@@ -36,6 +51,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         switch self {
         case .topCharts(let recipe): try JSONEncoder().encode(recipe)
         case .query(let spec): try spec.encoded()
+        case .mostRecentMostOften(let recipe): try JSONEncoder().encode(recipe)
         }
     }
 
@@ -48,6 +64,9 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case Self.queryKind:
             guard let spec = try? QuerySpec.decode(data) else { return nil }
             self = .query(spec)
+        case Self.mostRecentMostOftenKind:
+            guard let recipe = try? JSONDecoder().decode(MostRecentMostOftenPlaylistRecipe.self, from: data) else { return nil }
+            self = .mostRecentMostOften(recipe)
         default:
             return nil
         }
@@ -98,6 +117,14 @@ enum AutoPlaylistSources {
             do { validated = try spec.validate(against: QueryFieldRegistry.standard) } catch { throw SourceError.invalidQuery("\(error)") }
             let (result, _) = try await QueryHeadlessRunner.run(validated, container: container, popularity: popularity, history: history)
             return queryTracks(result)
+        case .mostRecentMostOften(let tool):
+            let all = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+            let computed = await Task.detached(priority: .utility) {
+                MostRecentMostOftenEngine.compute(scrobbles: all, recencyWindowDays: tool.windowDays, minPlays: tool.minPlays, sort: tool.sort)
+            }.value
+            let rows = MostRecentMostOftenEngine.limited(computed?.rows ?? [], to: tool.rowLimit)
+            let lookup = (try? ImageResolutionEngine.imageLookup(context: container.mainContext)) ?? [:]
+            return MostRecentMostOftenEngine.playlistTracks(rows: rows, scrobbles: all, lookup: lookup)
         }
     }
 

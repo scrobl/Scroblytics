@@ -85,6 +85,17 @@ struct EntityTracksPlaylistRecipe: Codable, Equatable, Sendable {
     }
 }
 
+/// Missing Data's list of tracks lacking one thing (a release date, a length…), in the tool's order and row limit (0 = all). The label is kept
+/// for the description.
+struct MissingDataPlaylistRecipe: Codable, Equatable, Sendable {
+    var fieldID: String
+    var fieldLabel: String
+    var sort: MissingDataSort
+    var rowLimit: Int
+
+    var summary: String { "Missing Data · tracks missing \(fieldLabel.lowercased()) · \(sort.label.lowercased()) · \(rowLimit == 0 ? "all rows" : "\(rowLimit) rows")" }
+}
+
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
 /// again have one: a list built from a random walk or from one answer of Last.fm would give a different list every time.
 enum AutoPlaylistRecipe: Equatable, Sendable {
@@ -96,6 +107,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     case flaggedTracks(FlaggedTracksPlaylistRecipe)
     case goalRemaining(GoalPlaylistRecipe)
     case entityTracks(EntityTracksPlaylistRecipe)
+    case missingData(MissingDataPlaylistRecipe)
 
     static let topChartsKind = "topCharts"
     static let queryKind = "query"
@@ -104,6 +116,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     static let flaggedTracksKind = "flaggedTracks"
     static let goalRemainingKind = "goalRemaining"
     static let entityTracksKind = "entityTracks"
+    static let missingDataKind = "missingData"
 
     var kind: String {
         switch self {
@@ -114,6 +127,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .flaggedTracks: Self.flaggedTracksKind
         case .goalRemaining: Self.goalRemainingKind
         case .entityTracks: Self.entityTracksKind
+        case .missingData: Self.missingDataKind
         }
     }
 
@@ -127,6 +141,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .flaggedTracks(let recipe): recipe.summary
         case .goalRemaining: "Goal · still to hear"
         case .entityTracks(let recipe): recipe.summary(periodLabel: DateRangePresets.label(forID: recipe.rangeID) ?? recipe.rangeID)
+        case .missingData(let recipe): recipe.summary
         }
     }
 
@@ -139,6 +154,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .flaggedTracks(let recipe): try JSONEncoder().encode(recipe)
         case .goalRemaining(let recipe): try JSONEncoder().encode(recipe)
         case .entityTracks(let recipe): try JSONEncoder().encode(recipe)
+        case .missingData(let recipe): try JSONEncoder().encode(recipe)
         }
     }
 
@@ -166,6 +182,9 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case Self.entityTracksKind:
             guard let recipe = try? JSONDecoder().decode(EntityTracksPlaylistRecipe.self, from: data) else { return nil }
             self = .entityTracks(recipe)
+        case Self.missingDataKind:
+            guard let recipe = try? JSONDecoder().decode(MissingDataPlaylistRecipe.self, from: data) else { return nil }
+            self = .missingData(recipe)
         default:
             return nil
         }
@@ -182,6 +201,7 @@ enum AutoPlaylistSources {
         case invalidQuery(String)
         case notTracks
         case unsupportedOrder
+        case unknownField
 
         var errorDescription: String? {
             switch self {
@@ -190,6 +210,7 @@ enum AutoPlaylistSources {
             case .invalidQuery(let reason): "The query can't run: \(reason)"
             case .notTracks: "The query doesn't list tracks."
             case .unsupportedOrder: "This list is in an order a refresh can't reproduce."
+            case .unknownField: "Missing Data no longer has the field this playlist was made from."
             }
         }
     }
@@ -253,6 +274,18 @@ enum AutoPlaylistSources {
             )
             let ordered = SubListSorting.sorted(entries, by: list.sort, ascendingOverride: list.ascending, trackOrderIndex: [:])
             return SubListSorting.playlistTracks(ordered, artist: list.artist, album: list.album)
+        case .missingData(let missing):
+            guard let field = MissingDataField.all.first(where: { $0.id == missing.fieldID }) else { throw SourceError.unknownField }
+            let all = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+            let loaded = await QuerySnapshotReader.loadAll(container: container)
+            let snapshots = QuerySnapshots(
+                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, images: loaded.images,
+                turnoverGroups: TurnoverGroupCache()
+            )
+            let computed = await Task.detached(priority: .utility) {
+                MissingDataEngine.compute(field: field, target: .track, scrobbles: all, snapshots: snapshots)
+            }.value
+            return MissingDataEngine.playlistTracks(MissingDataEngine.visible(computed?.rows ?? [], sort: missing.sort, rowLimit: missing.rowLimit))
         }
     }
 

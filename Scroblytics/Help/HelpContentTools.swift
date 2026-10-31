@@ -184,6 +184,7 @@ extension HelpContent {
                     "**Advanced** opens the equivalent query (confirmed missing only).",
                 ]),
                 .paragraph("**Merged Editions** is different: it lists album names that are counted together with other editions of their album although they have tracks of their own. Each row says how many of the tracks you played under that name aren’t on the album’s tracklist (3 or more). Click a row to open **Fix album match…** and turn on **Count this edition on its own**, or press **Keep Merged** if the merge is what you want; the row then leaves the list for good. Rows marked “Not yet checked” need their tracklist looked up (**Resolve Now**)."),
+                .paragraph("For a list of **Tracks**, **Create Apple Music Playlist** makes a playlist of the rows shown (so the order and Rows limit apply). Turn on **Keep this playlist updated after each sync** in its dialog and the playlist shrinks as you fix things, so what is left in it is what still needs fixing ([Auto-Updating Playlists](help://tool-auto-playlists)). Once nothing is missing the playlist is left as it was rather than emptied."),
             ]
         ),
         HelpArticle(
@@ -255,7 +256,7 @@ extension HelpContent {
                     "**The list is empty now**: the playlist is left as it was rather than emptied, because an empty list usually means something didn’t load.",
                     "**The playlist changed in Music during the refresh** or **didn’t match afterwards**: nothing is lost; the next refresh puts it right.",
                 ]),
-                .paragraph("Lists that can be run again can be kept up to date: Top Charts, a Query of tracks, Most Recent, Most Often, Chart Toppers, Flagged Tracks, a goal’s tracks still to hear and an artist’s Tracks list. The option isn’t offered for a Rabbit Hole path, Similar Sounds or the Loved Status Audit. The list of playlists (not their tracks) is included in [backups](help://data-backup); after a restore each is refreshed from scratch. Everything happens on your Mac: Scroblytics talks to Music through its own scripting, and nothing is sent anywhere. See [What leaves your Mac](help://what-leaves-your-mac)."),
+                .paragraph("Lists that can be run again can be kept up to date: Top Charts, a Query of tracks, Most Recent, Most Often, Chart Toppers, Flagged Tracks, a goal’s tracks still to hear, Missing Data’s list of tracks and an artist’s Tracks list. The option isn’t offered for a Rabbit Hole path, Similar Sounds or the Loved Status Audit. The list of playlists (not their tracks) is included in [backups](help://data-backup); after a restore each is refreshed from scratch. Everything happens on your Mac: Scroblytics talks to Music through its own scripting, and nothing is sent anywhere. See [What leaves your Mac](help://what-leaves-your-mac)."),
             ]
         ),
         HelpArticle(

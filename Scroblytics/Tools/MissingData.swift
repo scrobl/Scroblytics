@@ -202,6 +202,16 @@ enum MissingDataEngine {
         return MissingDataResult(field: field, target: target, rows: rows, universeCount: result.universeCount)
     }
 
+    /// The first `rowLimit` rows (0 = all) in the chosen order: what the tool shows, and what a playlist made from it holds.
+    static func visible(_ rows: [MissingDataRow], sort: MissingDataSort, rowLimit: Int) -> [MissingDataRow] {
+        let ordered = sorted(rows, by: sort)
+        return rowLimit == 0 ? ordered : Array(ordered.prefix(rowLimit))
+    }
+
+    static func playlistTracks(_ rows: [MissingDataRow]) -> [AppleMusicPlaylistTrack] {
+        rows.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.name, album: $0.album ?? "") }
+    }
+
     /// Cheap in-memory re-ordering, applied at render time — no re-run of `compute`. Ties always break
     /// alphabetically so ordering never depends on iteration order.
     static func sorted(_ rows: [MissingDataRow], by sort: MissingDataSort) -> [MissingDataRow] {

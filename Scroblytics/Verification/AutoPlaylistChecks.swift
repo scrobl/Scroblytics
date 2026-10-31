@@ -544,6 +544,17 @@ enum AutoPlaylistChecks {
         check("an artist's tracks recipe survives saving", AutoPlaylistRecipe(kind: entityList.kind, data: try entityList.encodedData()) == entityList && entityList.kind == "entityTracks")
         check("…and describes itself, with the period's name", entityList.summary == "Artist A · tracks played in 2025 · recently played, reversed" && AutoPlaylistRecipe.entityTracks(EntityTracksPlaylistRecipe(artist: "Artist A", album: "Album X", rangeID: "last30", metric: .scrobbles, sort: .mostPlayed, ascending: nil)).summary == "Artist A – Album X · tracks played in Last 30 days · most played", entityList.summary)
         check("period names come from the preset IDs", DateRangePresets.label(forID: "year-1999") == "1999" && DateRangePresets.label(forID: "ytd") == "Year to date" && DateRangePresets.label(forID: "nope") == nil)
+        let missingRecipe = MissingDataPlaylistRecipe(fieldID: "duration", fieldLabel: "Duration", sort: .plays, rowLimit: 100)
+        let missingList = AutoPlaylistRecipe.missingData(missingRecipe)
+        check("a Missing Data recipe survives saving", AutoPlaylistRecipe(kind: missingList.kind, data: try missingList.encodedData()) == missingList && missingList.kind == "missingData")
+        check("…and describes itself", missingRecipe.summary == "Missing Data · tracks missing duration · play count · 100 rows", missingRecipe.summary)
+        func missingRow(_ artist: String, _ name: String, plays: Int, album: String?) -> MissingDataRow {
+            MissingDataRow(id: QueryEntityID(target: .track, artist: artist, name: name), target: .track, artist: artist, name: name, bucket: .missing, imageURL: nil, album: album, plays: plays, lastPlayed: nil)
+        }
+        let missingRows = [missingRow("Artist A", "Song B", plays: 2, album: "Album X"), missingRow("Artist B", "Song A", plays: 9, album: nil), missingRow("Artist C", "Song C", plays: 5, album: nil)]
+        let missingVisible = MissingDataEngine.visible(missingRows, sort: .plays, rowLimit: 2)
+        check("missing data: the row limit applies after sorting", missingVisible.map(\.name) == ["Song A", "Song C"], "\(missingVisible.map(\.name))")
+        check("missing data: the playlist has each row's album, empty when there is none", MissingDataEngine.playlistTracks(Array(missingRows.prefix(2))).map(\.album) == ["Album X", ""])
         check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
         let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
         check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
@@ -896,6 +907,17 @@ enum AutoPlaylistChecks {
             check("Artist tracks: every track the artist played that year, most played first", listed.count == theirs.count && zip(listedCounts, listedCounts.dropFirst()).allSatisfy { $0 >= $1 } && listedCounts.allSatisfy { $0 > 0 }, "\(listed.count) vs \(theirs.count)")
             let alphabetical = try await AutoPlaylistSources.tracks(for: .entityTracks(EntityTracksPlaylistRecipe(artist: artistName, album: nil, rangeID: "year-\(year)", metric: .scrobbles, sort: .alphabetical, ascending: false)), container: container, popularity: nil)
             check("Artist tracks: A–Z reversed is Z–A, the same tracks", alphabetical.count == listed.count && zip(alphabetical, alphabetical.dropFirst()).allSatisfy { $0.track.localizedStandardCompare($1.track) != .orderedAscending })
+        }
+
+        // Missing Data: tracks with no length, against the stored lengths themselves
+        do {
+            let lengths = DurationEngine.loadSnapshot(context: container.mainContext).secondsLookup
+            let missingDuration = try await AutoPlaylistSources.tracks(for: .missingData(MissingDataPlaylistRecipe(fieldID: "duration", fieldLabel: "Duration", sort: .plays, rowLimit: 0)), container: container, popularity: nil)
+            let withLength = missingDuration.filter { (lengths[DurationEngine.cacheKey(artist: $0.artist, track: $0.track)] ?? 0) > 0 }.count
+            let limited = try await AutoPlaylistSources.tracks(for: .missingData(MissingDataPlaylistRecipe(fieldID: "duration", fieldLabel: "Duration", sort: .plays, rowLimit: 25)), container: container, popularity: nil)
+            print("  Missing Data: \(missingDuration.count) tracks without a length, \(withLength) of them with a stored length")
+            check("Missing Data: no listed track has a stored length", withLength == 0, "\(withLength)")
+            check("Missing Data: the row limit takes the first of the same order", limited.count == min(25, missingDuration.count) && zip(limited, missingDuration).allSatisfy { $0.artist == $1.artist && $0.track == $1.track })
         }
 
         // The same chart for artists: the playlist holds the tracks of the top artists

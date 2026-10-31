@@ -100,8 +100,7 @@ struct MissingDataView: View {
     /// what "shown" means, so both read this instead of `data.rows` (the full, unsliced bucketed set).
     private var visibleRows: [MissingDataRow] {
         guard let data else { return [] }
-        let sorted = MissingDataEngine.sorted(data.rows, by: options.sort)
-        return options.rowLimit == 0 ? sorted : Array(sorted.prefix(options.rowLimit))
+        return MissingDataEngine.visible(data.rows, sort: options.sort, rowLimit: options.rowLimit)
     }
 
     var body: some View {
@@ -276,7 +275,9 @@ struct MissingDataView: View {
             if !visibleRows.isEmpty, options.target == .track {
                 AppleMusicPlaylistExportButton(
                     defaultPlaylistName: "Missing \(field.label)",
-                    tracks: { playlistTracks(for: visibleRows) }
+                    tracks: { playlistTracks(for: visibleRows) },
+                    recipe: .missingData(MissingDataPlaylistRecipe(fieldID: field.id, fieldLabel: field.label, sort: options.sort, rowLimit: options.rowLimit)),
+                    recipeSummary: MissingDataPlaylistRecipe(fieldID: field.id, fieldLabel: field.label, sort: options.sort, rowLimit: options.rowLimit).summary
                 )
             }
             if let data, data.field.resolverKind != nil, !data.rows.isEmpty {
@@ -324,7 +325,7 @@ struct MissingDataView: View {
     }
 
     private func playlistTracks(for rows: [MissingDataRow]) -> [AppleMusicPlaylistTrack] {
-        rows.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.name, album: $0.album ?? "") }
+        MissingDataEngine.playlistTracks(rows)
     }
 
     private func recompute() async {

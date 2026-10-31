@@ -30,6 +30,30 @@ final class AutoPlaylistScheduler {
     /// What has changed since the last round started: the plays (a sync added or removed some) and the loved tracks.
     private var scrobblesChanged = false
     private var lovedChanged = false
+    /// A value a list can be made from changed (popularity, tags, lengths, tempos, release dates, flags, edits…), apart from the plays.
+    private var lookupsChanged = false
+    /// A sync (or its loved-tracks check) is under way; a round for changed lookups waits for it, since the sync starts its own.
+    var syncIsRunning = false
+    /// How long the lookups stay quiet before a round for them starts: a first warm of a big library saves every few seconds for an hour.
+    var lookupQuietPeriod: Duration = .seconds(120)
+    private var quietTask: Task<Void, Never>?
+
+    /// The kinds of stored data a list can depend on, besides the plays.
+    static let lookupEntities: Set<String> = [
+        "TrackDurationCacheEntry", "TrackBPMCacheEntry", "TrackReleaseDateCacheEntry", "PopularityCacheEntry", "EntityCommunityTagCacheEntry",
+        "UserEntityTagCacheEntry", "FlaggedTrack", "LovedTrackEntry", "Track", "Album", "AlbumEditionMatch", "LibraryPresenceEntry",
+    ]
+
+    /// Whether a save of the database touched stored data a list can depend on.
+    static func isRelevantSave(_ note: Notification) -> Bool {
+        // The lists of changed records sit under the keys "inserted", "updated" and "deleted", which are plain strings in the notification:
+        // looking them up with `ModelContext.NotificationKey` finds nothing.
+        let names: Set<String> = ["inserted", "updated", "deleted"]
+        return (note.userInfo ?? [:]).contains { key, value in
+            guard let name = (key.base as? String) ?? (key.base as? ModelContext.NotificationKey)?.rawValue, names.contains(name) else { return false }
+            return (value as? [PersistentIdentifier])?.contains { lookupEntities.contains($0.entityName) } ?? false
+        }
+    }
 
     /// Records that a sync changed the plays and/or the loved tracks, for the next round to take into account.
     func noteChanges(scrobbles: Bool = false, loved: Bool = false) {
@@ -37,11 +61,30 @@ final class AutoPlaylistScheduler {
         lovedChanged = lovedChanged || loved
     }
 
+    /// Stored data a list may depend on was saved. Once it has been quiet for a while, and no sync is running, the playlists whose lists
+    /// changed are refreshed. Saves made by a round itself (a ranking by time listened saves the lengths it works out) don't count.
+    func lookupsDidChange(container: ModelContainer, backend: PlaylistBackend = AppleMusicPlaylistBackend(), trackProvider: TrackProvider? = nil) {
+        guard !isRefreshing else { return }
+        guard ((try? container.mainContext.fetchCount(FetchDescriptor<AutoPlaylist>())) ?? 0) > 0 else { return }
+        lookupsChanged = true
+        quietTask?.cancel()
+        let quiet = lookupQuietPeriod
+        quietTask = Task { [weak self] in
+            try? await Task.sleep(for: quiet)
+            guard !Task.isCancelled, let self else { return }
+            // A sync that is running ends with a round of its own, which takes these changes along.
+            guard !self.syncIsRunning else { return }
+            await self.refreshAll(container: container, reason: "after lookups", backend: backend, trackProvider: trackProvider)
+        }
+    }
+
     /// Whether a playlist's list could give a different answer than at its last refresh: the plays or the loved tracks changed, or a day
     /// has gone by (a list of the last 30 days, or of tracks first played in a window, moves on without any new plays), or the last
     /// refresh didn't go through (Music was closed) or never happened. Anything else would only find the same list and the same playlist.
-    static func needsRefresh(_ list: AutoPlaylist, scrobblesChanged: Bool, lovedChanged: Bool, now: Date, calendar: Calendar = .current) -> Bool {
-        if scrobblesChanged || lovedChanged { return true }
+    static func needsRefresh(
+        _ list: AutoPlaylist, scrobblesChanged: Bool, lovedChanged: Bool, lookupsChanged: Bool = false, now: Date, calendar: Calendar = .current
+    ) -> Bool {
+        if scrobblesChanged || lovedChanged || lookupsChanged { return true }
         guard let last = list.lastRefreshAt else { return true }
         if list.status.isProblem || list.status == .neverRun { return true }
         return !calendar.isDate(last, inSameDayAs: now)
@@ -58,12 +101,13 @@ final class AutoPlaylistScheduler {
         defer { isRefreshing = false }
         repeat {
             rerunRequested = false
-            let (plays, loved) = (scrobblesChanged, lovedChanged)
+            let (plays, loved, lookups) = (scrobblesChanged, lovedChanged, lookupsChanged)
             scrobblesChanged = false
             lovedChanged = false
+            lookupsChanged = false
             let context = container.mainContext
             let enabled = (try? context.fetch(FetchDescriptor<AutoPlaylist>(sortBy: [SortDescriptor(\.createdAt)])))?.filter(\.isEnabled) ?? []
-            let lists = everything ? enabled : enabled.filter { Self.needsRefresh($0, scrobblesChanged: plays, lovedChanged: loved, now: now) }
+            let lists = everything ? enabled : enabled.filter { Self.needsRefresh($0, scrobblesChanged: plays, lovedChanged: loved, lookupsChanged: lookups, now: now) }
             guard !lists.isEmpty else { return }
             let provider = trackProvider ?? { [popularity] recipe in
                 try await AutoPlaylistSources.tracks(for: recipe, container: container, popularity: popularity)
@@ -189,7 +233,15 @@ extension View {
                 // Posted only when the sync changed the plays.
                 AutoPlaylistScheduler.shared.noteChanges(scrobbles: true)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidStart)) { _ in AutoPlaylistScheduler.shared.syncIsRunning = true }
+            .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidStop)) { _ in AutoPlaylistScheduler.shared.syncIsRunning = false }
+            .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidFail)) { _ in AutoPlaylistScheduler.shared.syncIsRunning = false }
+            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { note in
+                guard AutoPlaylistScheduler.isRelevantSave(note) else { return }
+                AutoPlaylistScheduler.shared.lookupsDidChange(container: container)
+            }
             .onReceive(NotificationCenter.default.publisher(for: .lovedTracksSyncDidFinish)) { note in
+                AutoPlaylistScheduler.shared.syncIsRunning = false
                 AutoPlaylistScheduler.shared.noteChanges(loved: (note.object as? Bool) ?? false)
                 #if DEBUG
                 TestProfile.log("AUTOPLAYLISTS refresh requested")

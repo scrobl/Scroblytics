@@ -708,6 +708,61 @@ enum AutoPlaylistChecks {
             check("Refresh All Now runs everything regardless", calls.count == 3)
         }
 
+        // Stored values a list can be made from change (popularity, tags, lengths, flags…)
+        do {
+            func needsWithLookups(_ item: AutoPlaylist) -> Bool {
+                AutoPlaylistScheduler.needsRefresh(item, scrobblesChanged: false, lovedChanged: false, lookupsChanged: true, now: Date(timeIntervalSince1970: 1_800_014_400))
+            }
+            let settled = AutoPlaylist(name: "L", recipeKind: "topCharts", recipeData: Data(), sourceSummary: "s")
+            settled.lastStatus = AutoPlaylistStatus.upToDate.rawValue
+            settled.lastRefreshAt = Date(timeIntervalSince1970: 1_800_014_400 - 60)
+            check("a change in stored lookups makes a settled playlist due", needsWithLookups(settled))
+
+            // Which saves count: a flag or a length yes, the playlists' own records no
+            let container = try ModelContainer(for: AutoPlaylist.self, FlaggedTrack.self, TrackDurationCacheEntry.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            let context = ModelContext(container)
+            final class Saves: @unchecked Sendable { var notes: [Notification] = []; let lock = NSLock() }
+            let saves = Saves()
+            let token = NotificationCenter.default.addObserver(forName: ModelContext.didSave, object: context, queue: nil) { note in saves.lock.withLock { saves.notes.append(note) } }
+            context.insert(AutoPlaylist(name: "Mine", recipeKind: "topCharts", recipeData: Data(), sourceSummary: "s"))
+            try context.save()
+            context.insert(FlaggedTrack(artist: "Artist A", track: "Song 1", album: nil, flaggedAt: Date()))
+            try context.save()
+            NotificationCenter.default.removeObserver(token)
+            let notes = saves.lock.withLock { saves.notes }
+            check("saving a playlist record is not a change in what lists are made of, saving a flag is", notes.count == 2 && !AutoPlaylistScheduler.isRelevantSave(notes[0]) && AutoPlaylistScheduler.isRelevantSave(notes[1]), "\(notes.count)")
+
+            // A burst of saves makes one round after a quiet moment, not one each, and not while a sync is running
+            let appContainer = try makeContainer()
+            let music = makeMusic()
+            let item = try insert(appContainer, name: "A", recipe: recipeList(4))
+            item.lastStatus = AutoPlaylistStatus.upToDate.rawValue
+            item.lastRefreshAt = Date()
+            item.playlistPersistentID = "PID"
+            music.with { $0.playlists["PID"] = .init(name: "A", tracks: ids([1, 2, 3, 4]), smart: false) }
+            let calls = Counter()
+            let provider: AutoPlaylistScheduler.TrackProvider = { _ in calls.bump(); return wanted([1, 2, 3, 4]) }
+            let scheduler = AutoPlaylistScheduler()
+            scheduler.lookupQuietPeriod = .milliseconds(150)
+            for _ in 0..<5 {
+                scheduler.lookupsDidChange(container: appContainer, backend: music, trackProvider: provider)
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            check("nothing runs while the saves keep coming", calls.count == 0)
+            try await Task.sleep(for: .milliseconds(500))
+            check("a burst of saves makes one round once it goes quiet", calls.count == 1, "\(calls.count)")
+            scheduler.syncIsRunning = true
+            scheduler.lookupsDidChange(container: appContainer, backend: music, trackProvider: provider)
+            try await Task.sleep(for: .milliseconds(450))
+            check("while a sync is running the round waits for the sync's own", calls.count == 1, "\(calls.count)")
+            scheduler.syncIsRunning = false
+            let none = try makeContainer()
+            let noneCalls = Counter()
+            scheduler.lookupsDidChange(container: none, backend: music, trackProvider: { _ in noneCalls.bump(); return [] })
+            try await Task.sleep(for: .milliseconds(450))
+            check("with no automatic playlists a save schedules nothing", noneCalls.count == 0)
+        }
+
         // The status line under the toolbar: how many playlists are left, then nothing
         do {
             let container = try makeContainer()

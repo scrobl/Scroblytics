@@ -851,7 +851,7 @@ struct GoalsView: View {
         whole > 0 ? "\(Int((Double(part) / Double(whole) * 100).rounded()))%" : "0%"
     }
 
-    static func dayLabel(_ date: Date) -> String {
+    nonisolated static func dayLabel(_ date: Date) -> String {
         let sameYear = Calendar.current.isDate(date, equalTo: .now, toGranularity: .year)
         return date.formatted(sameYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year())
     }

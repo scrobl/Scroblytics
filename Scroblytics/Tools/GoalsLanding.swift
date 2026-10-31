@@ -117,7 +117,7 @@ struct GoalCard: View {
     let goal: ListeningGoal
     let analysis: GoalAnalysis?
     /// The goal as a card to share (its burn-down and plan; the forecasts belong to the goal's own page).
-    let shareCard: () -> ShareCard?
+    let shareCard: @MainActor () -> ShareCard?
     let onOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void

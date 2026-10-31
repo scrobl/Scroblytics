@@ -102,7 +102,7 @@ Earlier versions are available in this repository's history.
 
 ## Contact
 
-Questions about this policy: Scroblytics@proton.me
+Questions about this policy: scroblytics@tutamail.com
 
 *Scroblytics is an independent project. It is not affiliated with, endorsed by or sponsored by Apple, Last.fm, Deezer, GetSongBPM,
 MusicBrainz, Anthropic, OpenAI or Google. Product and service names belong to their owners.*

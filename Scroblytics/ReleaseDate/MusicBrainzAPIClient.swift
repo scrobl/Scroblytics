@@ -31,7 +31,7 @@ actor MusicBrainzAPIClient {
     /// MusicBrainz asks for an application name/version plus a contact (email or URL) so it can reach
     /// the operator instead of blocking; anonymous-looking traffic is throttled harder. Replace the
     /// email with the project's URL if the app is ever released.
-    private static let userAgent = "Scroblytics/1.0 ( Scroblytics@proton.me )"
+    private static let userAgent = "Scroblytics/1.0 ( scroblytics@tutamail.com )"
 
     private let session: URLSession
     private let decoder = JSONDecoder()

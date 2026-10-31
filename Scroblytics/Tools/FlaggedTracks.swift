@@ -67,6 +67,26 @@ enum FlaggedTracksEngine {
         }
     }
 
+    /// The rows the tool lists: those matching the search (artist, track or album) and, if asked, only loved ones, sorted, then the first
+    /// `rowLimit` (0 = all). The screen and the playlist made from it both use this.
+    static func visible(
+        _ rows: [FlaggedTrackRow], searchText: String, lovedOnly: Bool, sort: FlaggedTracksSort, rowLimit: Int, isLoved: (String, String) -> Bool
+    ) -> [FlaggedTrackRow] {
+        let filtered = rows.filter {
+            (searchText.isEmpty
+                || $0.track.localizedCaseInsensitiveContains(searchText)
+                || $0.artist.localizedCaseInsensitiveContains(searchText)
+                || ($0.album?.localizedCaseInsensitiveContains(searchText) ?? false))
+                && (!lovedOnly || isLoved($0.artist, $0.track))
+        }
+        let ordered = sorted(filtered, by: sort)
+        return rowLimit == 0 ? ordered : Array(ordered.prefix(rowLimit))
+    }
+
+    static func playlistTracks(_ rows: [FlaggedTrackRow]) -> [AppleMusicPlaylistTrack] {
+        rows.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.track, album: $0.album ?? "") }
+    }
+
     static func sorted(_ rows: [FlaggedTrackRow], by sort: FlaggedTracksSort) -> [FlaggedTrackRow] {
         rows.sorted { lhs, rhs in
             switch sort {
@@ -90,7 +110,7 @@ enum FlaggedTracksEngine {
 }
 
 @ModelActor
-private actor FlaggedTracksDataReader {
+actor FlaggedTracksDataReader {
     func fetch() throws -> [FlaggedTrackSnapshot] {
         try modelContext.fetch(FetchDescriptor<FlaggedTrack>()).map {
             FlaggedTrackSnapshot(artist: $0.artist, track: $0.track, album: $0.album, flaggedAt: $0.flaggedAt)

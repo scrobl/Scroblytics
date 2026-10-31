@@ -39,6 +39,21 @@ struct ChartToppersPlaylistRecipe: Codable, Equatable, Sendable {
     }
 }
 
+/// Flagged Tracks as the tool lists them: the search, the loved-only switch, the ordering and the row limit (0 = all).
+struct FlaggedTracksPlaylistRecipe: Codable, Equatable, Sendable {
+    var sort: FlaggedTracksSort
+    var rowLimit: Int
+    var lovedOnly: Bool
+    var searchText: String
+
+    var summary: String {
+        var text = "Flagged Tracks · \(sort.label.lowercased())"
+        if lovedOnly { text += " · loved only" }
+        if !searchText.isEmpty { text += " · matching “\(searchText)”" }
+        return text + " · \(rowLimit == 0 ? "all rows" : "\(rowLimit) rows")"
+    }
+}
+
 /// The list an automatic playlist is made from, saved with it so each refresh can run the same list again. Only lists that can be run
 /// again have one: a list built from a random walk or from one answer of Last.fm would give a different list every time.
 enum AutoPlaylistRecipe: Equatable, Sendable {
@@ -47,11 +62,13 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
     case query(QuerySpec)
     case mostRecentMostOften(MostRecentMostOftenPlaylistRecipe)
     case chartToppers(ChartToppersPlaylistRecipe)
+    case flaggedTracks(FlaggedTracksPlaylistRecipe)
 
     static let topChartsKind = "topCharts"
     static let queryKind = "query"
     static let mostRecentMostOftenKind = "mostRecentMostOften"
     static let chartToppersKind = "chartToppers"
+    static let flaggedTracksKind = "flaggedTracks"
 
     var kind: String {
         switch self {
@@ -59,6 +76,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .query: Self.queryKind
         case .mostRecentMostOften: Self.mostRecentMostOftenKind
         case .chartToppers: Self.chartToppersKind
+        case .flaggedTracks: Self.flaggedTracksKind
         }
     }
 
@@ -69,6 +87,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .query: "Query"
         case .mostRecentMostOften(let recipe): recipe.summary
         case .chartToppers(let recipe): recipe.summary
+        case .flaggedTracks(let recipe): recipe.summary
         }
     }
 
@@ -78,6 +97,7 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case .query(let spec): try spec.encoded()
         case .mostRecentMostOften(let recipe): try JSONEncoder().encode(recipe)
         case .chartToppers(let recipe): try JSONEncoder().encode(recipe)
+        case .flaggedTracks(let recipe): try JSONEncoder().encode(recipe)
         }
     }
 
@@ -96,6 +116,9 @@ enum AutoPlaylistRecipe: Equatable, Sendable {
         case Self.chartToppersKind:
             guard let recipe = try? JSONDecoder().decode(ChartToppersPlaylistRecipe.self, from: data) else { return nil }
             self = .chartToppers(recipe)
+        case Self.flaggedTracksKind:
+            guard let recipe = try? JSONDecoder().decode(FlaggedTracksPlaylistRecipe.self, from: data) else { return nil }
+            self = .flaggedTracks(recipe)
         default:
             return nil
         }
@@ -159,6 +182,16 @@ enum AutoPlaylistSources {
                 entity: chart.entity, metric: chart.metric, period: chart.period, yearRange: chart.period == .year ? chart.yearRange : 0
             )
             return ChartToppersReader.playlistTracks(periods: periods)
+        case .flaggedTracks(let flagged):
+            let flags = try await offMain { try await FlaggedTracksDataReader(modelContainer: container).fetch() }
+            let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+            let rows = await Task.detached(priority: .utility) { FlaggedTracksEngine.rows(flags: flags, scrobbles: scrobbles) }.value
+            let loved = LovedTracksEngine.lovedSet(context: container.mainContext)
+            let visible = FlaggedTracksEngine.visible(
+                rows, searchText: flagged.searchText, lovedOnly: flagged.lovedOnly, sort: flagged.sort, rowLimit: flagged.rowLimit,
+                isLoved: { loved.contains(TextNormalization.lovedKey(artist: $0, track: $1)) }
+            )
+            return FlaggedTracksEngine.playlistTracks(visible)
         }
     }
 

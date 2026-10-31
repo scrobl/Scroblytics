@@ -25,15 +25,14 @@ struct FlaggedTracksView: View {
     @State private var errorMessage: String?
 
     private var visibleRows: [FlaggedTrackRow] {
-        let filtered = rows.filter {
-            (searchText.isEmpty
-                || $0.track.localizedCaseInsensitiveContains(searchText)
-                || $0.artist.localizedCaseInsensitiveContains(searchText)
-                || ($0.album?.localizedCaseInsensitiveContains(searchText) ?? false))
-                && (!options.lovedOnly || lovedTracksStore.isLoved(artist: $0.artist, track: $0.track))
-        }
-        let sorted = FlaggedTracksEngine.sorted(filtered, by: options.sort)
-        return options.rowLimit == 0 ? sorted : Array(sorted.prefix(options.rowLimit))
+        FlaggedTracksEngine.visible(
+            rows, searchText: searchText, lovedOnly: options.lovedOnly, sort: options.sort, rowLimit: options.rowLimit,
+            isLoved: { lovedTracksStore.isLoved(artist: $0, track: $1) }
+        )
+    }
+
+    private var playlistRecipe: AutoPlaylistRecipe {
+        .flaggedTracks(FlaggedTracksPlaylistRecipe(sort: options.sort, rowLimit: options.rowLimit, lovedOnly: options.lovedOnly, searchText: searchText))
     }
 
     var body: some View {
@@ -120,9 +119,10 @@ struct FlaggedTracksView: View {
                 .font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary)
             Spacer()
             if !visibleRows.isEmpty {
-                AppleMusicPlaylistExportButton(defaultPlaylistName: "Flagged Tracks") {
-                    visibleRows.map { AppleMusicPlaylistTrack(artist: $0.artist, track: $0.track, album: $0.album ?? "") }
-                }
+                AppleMusicPlaylistExportButton(
+                    defaultPlaylistName: "Flagged Tracks", tracks: { FlaggedTracksEngine.playlistTracks(visibleRows) },
+                    recipe: playlistRecipe, recipeSummary: playlistRecipe.summary
+                )
             }
             Button("Clear All", role: .destructive) { isConfirmingClear = true }.disabled(rows.isEmpty)
             Button("Refresh", systemImage: "arrow.clockwise") { Task { await reload() } }

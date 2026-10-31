@@ -191,7 +191,7 @@ extension HelpContent {
             title: "Flagged Tracks",
             summary: "A hand-picked list of tracks.",
             blocks: [
-                .paragraph("Right-click a track anywhere and choose **Flag Track**. This tool lists them with a filter, Sort (Recently Flagged, Most Played, Recently Played, Artist, Track), a “Loved only” toggle, **Remove Flag** per row, **Clear All** (asks first, cannot be undone) and export to an Apple Music playlist. Flags live only on your Mac and are included in [backups](help://data-backup). The Query field **Flagged** matches by artist and title regardless of album."),
+                .paragraph("Right-click a track anywhere and choose **Flag Track**. This tool lists them with a filter, Sort (Recently Flagged, Most Played, Recently Played, Artist, Track), a “Loved only” toggle, **Remove Flag** per row, **Clear All** (asks first, cannot be undone) and export to an Apple Music playlist (turn on **Keep this playlist updated after each sync** in its dialog and it follows the list as you flag and unflag: [Auto-Updating Playlists](help://tool-auto-playlists)). Flags live only on your Mac and are included in [backups](help://data-backup). The Query field **Flagged** matches by artist and title regardless of album."),
             ]
         ),
         HelpArticle(

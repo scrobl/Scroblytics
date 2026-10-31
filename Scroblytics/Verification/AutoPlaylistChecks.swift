@@ -472,6 +472,28 @@ enum AutoPlaylistChecks {
             period("2001", [entry("artist a", "SONG 1")]), period("2002", []), period("2003", [entry("Artist C", "Song 3")]),
         ])
         check("Chart Toppers: each period's number one, a track once however many periods it won, empty periods skipped", toppersTracks.map(\.track) == ["Song 1", "Song 2", "Song 3"], "\(toppersTracks.map(\.track))")
+        let flaggedRecipe = FlaggedTracksPlaylistRecipe(sort: .mostPlayed, rowLimit: 25, lovedOnly: true, searchText: "live")
+        let flagged = AutoPlaylistRecipe.flaggedTracks(flaggedRecipe)
+        check("a Flagged Tracks recipe survives saving", AutoPlaylistRecipe(kind: flagged.kind, data: try flagged.encodedData()) == flagged && flagged.kind == "flaggedTracks")
+        check("…and describes itself", flaggedRecipe.summary == "Flagged Tracks · most played · loved only · matching “live” · 25 rows" && FlaggedTracksPlaylistRecipe(sort: .recentlyFlagged, rowLimit: 0, lovedOnly: false, searchText: "").summary == "Flagged Tracks · recently flagged · all rows")
+        func flaggedRow(_ artist: String, _ track: String, album: String?, plays: Int, flagged day: Int, last: Int?) -> FlaggedTrackRow {
+            FlaggedTrackRow(id: "\(artist)\(track)", artist: artist, track: track, album: album, flaggedAt: Date(timeIntervalSince1970: Double(day) * 86_400), playCount: plays, lastPlayed: last.map { Date(timeIntervalSince1970: Double($0) * 86_400) }, imageURL: nil)
+        }
+        let flaggedRows = [
+            flaggedRow("Artist A", "Song 1", album: "Album X", plays: 5, flagged: 1, last: 10), flaggedRow("Artist B", "Song 2 (Live)", album: nil, plays: 9, flagged: 3, last: 4),
+            flaggedRow("Artist C", "Song 3", album: "Live Album", plays: 2, flagged: 2, last: nil), flaggedRow("Artist D", "Song 4", album: "Album Y", plays: 7, flagged: 4, last: 8),
+        ]
+        let lovedPairs: Set<String> = ["Artist A|Song 1", "Artist B|Song 2 (Live)"]
+        func visible(_ search: String, loved: Bool, _ sort: FlaggedTracksSort, limit: Int) -> [String] {
+            FlaggedTracksEngine.visible(flaggedRows, searchText: search, lovedOnly: loved, sort: sort, rowLimit: limit, isLoved: { lovedPairs.contains("\($0)|\($1)") }).map(\.track)
+        }
+        check("flagged: by default newest flag first", visible("", loved: false, .recentlyFlagged, limit: 0) == ["Song 4", "Song 2 (Live)", "Song 3", "Song 1"])
+        check("flagged: most played first", visible("", loved: false, .mostPlayed, limit: 0) == ["Song 2 (Live)", "Song 4", "Song 1", "Song 3"])
+        check("flagged: the search reads the title and the album", visible("live", loved: false, .recentlyFlagged, limit: 0) == ["Song 2 (Live)", "Song 3"])
+        check("flagged: loved only", visible("", loved: true, .artist, limit: 0) == ["Song 1", "Song 2 (Live)"])
+        check("flagged: the row limit applies after sorting", visible("", loved: false, .mostPlayed, limit: 2) == ["Song 2 (Live)", "Song 4"])
+        let flaggedTracks = FlaggedTracksEngine.playlistTracks(Array(flaggedRows.prefix(2)))
+        check("flagged: the playlist has each row's album, empty when there is none", flaggedTracks.map(\.album) == ["Album X", ""] && flaggedTracks.map(\.artist) == ["Artist A", "Artist B"])
         check("an unknown kind or damaged data is not a recipe", AutoPlaylistRecipe(kind: "other", data: Data()) == nil && AutoPlaylistRecipe(kind: "topCharts", data: Data("x".utf8)) == nil && AutoPlaylistRecipe(kind: "query", data: Data("x".utf8)) == nil)
         let list = AutoPlaylist(name: "L", recipeKind: chart.kind, recipeData: try chart.encodedData(), sourceSummary: "s")
         check("a saved playlist gives its recipe back", AutoPlaylistRecipe(playlist: list) == chart)
@@ -770,6 +792,16 @@ enum AutoPlaylistChecks {
         check("Chart Toppers: each year's list is in non-increasing order", sortedWithin)
         check("Chart Toppers: the number ones' plays equal an independent count (all but a few merged spellings)", winners.isEmpty || Double(countsMatch) / Double(winners.count) >= 0.9, "\(countsMatch) of \(winners.count)")
         check("Chart Toppers: the playlist is the winners, each song once", toppersList.count == Set(toppersList.map { songKey($0.artist, $0.track) }).count && toppersList.count <= winners.count)
+
+        // Flagged Tracks, newest flag first, against the flagged table itself
+        let flaggedAll = try container.mainContext.fetch(FetchDescriptor<FlaggedTrack>())
+        let flaggedTracks = try await AutoPlaylistSources.tracks(for: .flaggedTracks(FlaggedTracksPlaylistRecipe(sort: .recentlyFlagged, rowLimit: 0, lovedOnly: false, searchText: "")), container: container, popularity: nil)
+        let flaggedExpected = flaggedAll.sorted { $0.flaggedAt > $1.flaggedAt }
+        print("  Flagged Tracks: \(flaggedAll.count) flagged, \(flaggedTracks.count) in the playlist")
+        check("Flagged Tracks: every flagged track, newest flag first", flaggedTracks.count == flaggedAll.count && zip(flaggedTracks, flaggedExpected).allSatisfy { $0.artist == $1.artist && $0.track == $1.track })
+        let flaggedLoved = try await AutoPlaylistSources.tracks(for: .flaggedTracks(FlaggedTracksPlaylistRecipe(sort: .recentlyFlagged, rowLimit: 0, lovedOnly: true, searchText: "")), container: container, popularity: nil)
+        let lovedSet = LovedTracksEngine.lovedSet(context: container.mainContext)
+        check("Flagged Tracks: loved only keeps exactly the loved ones", flaggedLoved.count == flaggedAll.filter { lovedSet.contains(TextNormalization.lovedKey(artist: $0.artist, track: $0.track)) }.count)
 
         // The same chart for artists: the playlist holds the tracks of the top artists
         let artistTracks = try await AutoPlaylistSources.tracks(

@@ -248,7 +248,7 @@ extension HelpContent {
                     "**Replaces your edits.** Anything you add to or reorder in the playlist by hand is undone at the next refresh that changes it. Make a copy in Music if you want to keep a version.",
                 ]),
                 .heading("The list of playlists"),
-                .paragraph("Each row shows what the playlist is made from, how its last refresh went (up to date, updated, or what needs attention), when it was refreshed and when it last changed. **Refresh Now** runs it straight away (even when it is switched off), **Show in Music** selects it in Music, the switch stops the refreshes without forgetting the playlist, and **Stop Updating…** forgets it (the playlist stays in Music exactly as it is). **Refresh All Now** runs every playlist that is switched on."),
+                .paragraph("Each row shows what the playlist is made from, with the icon and colour of its source (Top Charts, Query, a goal, Flagged Tracks…) and an orange triangle on the icon when it needs attention, how its last refresh went (up to date, updated, or what needs attention), when it was refreshed and when it last changed. **Refresh Now** runs it straight away (even when it is switched off), **Show in Music** selects it in Music, the switch stops the refreshes without forgetting the playlist, and **Stop Updating…** forgets it (the playlist stays in Music exactly as it is). **Refresh All Now** runs every playlist that is switched on."),
                 .heading("When something needs attention"),
                 .bullets([
                     "**Music isn’t open** or **isn’t allowed**: open Music, or allow Scroblytics to control it in System Settings › Privacy & Security › Automation.",

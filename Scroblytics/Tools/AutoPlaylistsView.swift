@@ -127,9 +127,8 @@ struct AutoPlaylistRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: status.isProblem ? "exclamationmark.triangle.fill" : (status == .neverRun ? "circle.dashed" : "checkmark.circle.fill"))
-                    .foregroundStyle(status.isProblem ? .orange : (status == .neverRun ? Color.secondary : .green))
+            HStack(alignment: .center, spacing: 12) {
+                sourceTile
                 VStack(alignment: .leading, spacing: 2) {
                     Text(list.name).font(AppTypography.contentTitle).lineLimit(1)
                     Text(list.sourceSummary).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(2)
@@ -184,9 +183,66 @@ struct AutoPlaylistRow: View {
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.4), lineWidth: 1) }
+        .background(style.color.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(style.color.opacity(0.35), lineWidth: 1) }
         .opacity(list.isEnabled ? 1 : 0.6)
     }
+
+    private var style: AutoPlaylistSourceStyle { AutoPlaylistSourceStyle.of(kind: list.recipeKind) }
+
+    /// The icon of what the playlist is made from, in that source's colour. A badge on it says when the playlist needs attention; the
+    /// status line says what is wrong.
+    private var sourceTile: some View {
+        RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(style.color.opacity(0.16))
+            .frame(width: 38, height: 38)
+            .overlay { Image(systemName: style.symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(style.color) }
+            .overlay(alignment: .topTrailing) {
+                if status.isProblem {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .padding(1)
+                        .background(Circle().fill(.background))
+                        .offset(x: 5, y: -5)
+                }
+            }
+            .help(status.isProblem ? "\(style.name) · needs attention" : style.name)
+            .accessibilityElement()
+            .accessibilityLabel(status.isProblem ? "\(style.name), needs attention" : style.name)
+    }
+}
+
+/// What a playlist is made from, shown as an icon and a colour: the icon of the tool or tab the list comes from, and a colour for each that
+/// is none of the colours the app uses for status (green, orange, red).
+struct AutoPlaylistSourceStyle {
+    let symbol: String
+    let color: Color
+    let name: String
+
+    private static func toolSymbol(_ kind: ToolDescriptor.Kind, fallback: String) -> String {
+        ToolDescriptor.all.first { $0.id == kind }?.systemImage ?? fallback
+    }
+
+    static func of(kind: String) -> AutoPlaylistSourceStyle {
+        switch kind {
+        case AutoPlaylistRecipe.topChartsKind: .init(symbol: "chart.bar.fill", color: .blue, name: "Top Charts")
+        case AutoPlaylistRecipe.queryKind: .init(symbol: toolSymbol(.query, fallback: "line.3.horizontal.decrease.circle"), color: .indigo, name: "Query")
+        case AutoPlaylistRecipe.mostRecentMostOftenKind: .init(symbol: toolSymbol(.mostRecentMostOften, fallback: "chart.line.uptrend.xyaxis"), color: .teal, name: "Most Recent, Most Often")
+        case AutoPlaylistRecipe.chartToppersKind: .init(symbol: toolSymbol(.chartToppers, fallback: "trophy.fill"), color: .yellow, name: "Chart Toppers")
+        case AutoPlaylistRecipe.flaggedTracksKind: .init(symbol: toolSymbol(.flaggedTracks, fallback: "flag.fill"), color: .brown, name: "Flagged Tracks")
+        case AutoPlaylistRecipe.goalRemainingKind: .init(symbol: toolSymbol(.goals, fallback: "target"), color: .mint, name: "Goal")
+        case AutoPlaylistRecipe.entityTracksKind: .init(symbol: "person.fill", color: .cyan, name: "Artist page")
+        case AutoPlaylistRecipe.missingDataKind: .init(symbol: toolSymbol(.missingData, fallback: "questionmark.circle"), color: .purple, name: "Missing Data")
+        default: .init(symbol: "music.note.list", color: .gray, name: "Playlist")
+        }
+    }
+
+    /// Every kind of list that can be kept up to date.
+    static let allKinds = [
+        AutoPlaylistRecipe.topChartsKind, AutoPlaylistRecipe.queryKind, AutoPlaylistRecipe.mostRecentMostOftenKind, AutoPlaylistRecipe.chartToppersKind,
+        AutoPlaylistRecipe.flaggedTracksKind, AutoPlaylistRecipe.goalRemainingKind, AutoPlaylistRecipe.entityTracksKind, AutoPlaylistRecipe.missingDataKind,
+    ]
 }
 
 /// The words on a row, as pure functions so they can be checked.

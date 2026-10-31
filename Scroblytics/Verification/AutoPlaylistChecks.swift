@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftData
+import SwiftUI
 
 #if DEBUG
 /// A stand-in for Music that keeps its library and playlists in memory and records every call it gets, so the rules of
@@ -890,6 +891,14 @@ enum AutoPlaylistChecks {
         let keptTracks = music.tracks(of: list.playlistPersistentID)
         try AutoPlaylistStore.stopUpdating(list, context: context)
         check("Stop Updating forgets the list and leaves the playlist in Music as it is", try context.fetch(FetchDescriptor<AutoPlaylist>()).isEmpty && music.with { $0.playlists.count } == 1 && music.tracks(of: music.with { Array($0.playlists.keys) }[0]) == keptTracks)
+
+        // The icon and colour of each source
+        let styles = AutoPlaylistSourceStyle.allKinds.map { AutoPlaylistSourceStyle.of(kind: $0) }
+        check("every kind of list has its own icon, colour and name", Set(styles.map(\.symbol)).count == styles.count && Set(styles.map { "\($0.color)" }).count == styles.count && Set(styles.map(\.name)).count == styles.count, "\(styles.map(\.name))")
+        let statusColors: [Color] = [.green, .orange, .red]
+        check("none of them is a status colour (green, orange, red)", styles.allSatisfy { style in !statusColors.contains(style.color) })
+        check("an unknown kind gets a plain playlist icon", AutoPlaylistSourceStyle.of(kind: "future").symbol == "music.note.list" && AutoPlaylistSourceStyle.of(kind: "future").name == "Playlist")
+        check("the tools' icons are the ones on the Tools page", AutoPlaylistSourceStyle.of(kind: "goalRemaining").symbol == ToolDescriptor.all.first { $0.id == .goals }?.systemImage && AutoPlaylistSourceStyle.of(kind: "query").symbol == ToolDescriptor.query.systemImage)
 
         // The words on a row
         let row = AutoPlaylist(name: "R", recipeKind: "topCharts", recipeData: Data(), sourceSummary: "s")

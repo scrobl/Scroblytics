@@ -152,8 +152,8 @@ enum LayoutSnapshots {
                 status.report(.artwork, remaining: 40, total: 100)
                 await render(BackgroundWorkStrip(store: status), width: 700, scheme: scheme, name: "status-mixed")
                 // The tool's rows in the states a person meets
-                func row(_ name: String, _ summary: String, _ outcome: AutoPlaylistOutcome?, enabled: Bool = true) -> AutoPlaylist {
-                    let list = AutoPlaylist(name: name, playlistPersistentID: "PID", recipeKind: "topCharts", recipeData: Data(), sourceSummary: summary, isEnabled: enabled)
+                func row(_ name: String, _ summary: String, _ outcome: AutoPlaylistOutcome?, enabled: Bool = true, kind: String = "topCharts") -> AutoPlaylist {
+                    let list = AutoPlaylist(name: name, playlistPersistentID: "PID", recipeKind: kind, recipeData: Data(), sourceSummary: summary, isEnabled: enabled)
                     if let outcome { list.record(outcome, at: Date().addingTimeInterval(-5_400)) }
                     return list
                 }
@@ -164,6 +164,16 @@ enum LayoutSnapshots {
                     ("missing", row("Last 30 Days", "Top tracks · Last 30 days · by time listened · 50 rows", AutoPlaylistOutcome(status: .playlistMissing, playlistID: "PID"))),
                     ("off", row("Old favourites", "Saved query · Old favourites", AutoPlaylistOutcome(status: .upToDate, playlistID: "PID", trackCount: 40), enabled: false)),
                 ]
+                // One row for each kind of source
+                let kindRows = VStack(spacing: 10) {
+                    ForEach(Array(AutoPlaylistSourceStyle.allKinds.enumerated()), id: \.offset) { index, kind in
+                        AutoPlaylistRow(
+                            list: row("Playlist \(index + 1)", "Summary of what this playlist is made from, \(kind)", index == 3 ? AutoPlaylistOutcome(status: .playlistMissing, playlistID: "PID") : updated, kind: kind),
+                            isRefreshing: false, onRefresh: {}, onShow: {}, onMakeAgain: {}, onStop: {}, onToggle: {}
+                        )
+                    }
+                }.padding(16)
+                await render(kindRows, width: 700, scheme: scheme, name: "rows-kinds")
                 for (key, list) in rows {
                     for width in [700, 460] as [CGFloat] {
                         await render(AutoPlaylistRow(list: list, isRefreshing: false, onRefresh: {}, onShow: {}, onMakeAgain: {}, onStop: {}, onToggle: {}).padding(16), width: width, scheme: scheme, name: "row-\(key)-\(Int(width))")

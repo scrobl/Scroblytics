@@ -330,6 +330,8 @@ struct GoalCard: View {
                 figure(a.remainingNow.formatted(), "to hear")
             default:
                 figure(a.remainingNow.formatted(), "to hear")
+                // Progress made today; it starts again at zero each morning, so a quiet day shows 0 rather than nothing.
+                figure(a.heardToday.formatted(), "heard today", tint: a.heardToday > 0 ? status.color : nil)
                 figure((a.daysLeft + 1).formatted(), "days left")
                 figure(String(format: "%.1f", a.requiredPerDay), "a day needed")
             }
@@ -337,9 +339,9 @@ struct GoalCard: View {
         }
     }
 
-    private func figure(_ value: String, _ label: String) -> some View {
+    private func figure(_ value: String, _ label: String, tint: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(value).font(AppTypography.contentTitle.monospacedDigit())
+            Text(value).font(AppTypography.contentTitle.monospacedDigit()).foregroundStyle(tint ?? Color.primary)
             Text(label).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
         }
     }

@@ -310,6 +310,8 @@ struct GoalAnalysis: Sendable {
     let membersNow: Int
     let remainingNow: Int
     let heardNow: Int
+    /// The tracks of the goal heard for the first time since it started on today's date: the progress made today.
+    let heardToday: Int
     /// The loved tracks not yet heard, most recently loved first.
     let remaining: [GoalLove]
     let habits: GoalHabits
@@ -454,6 +456,7 @@ enum GoalEngine {
         var remainingDelta = [Int](repeating: 0, count: todayIndex + 2)
         var memberDelta = [Int](repeating: 0, count: todayIndex + 2)
         var remaining: [(love: GoalLove, joined: Int)] = []
+        var heardToday = 0
         for (i, love) in tracks.enumerated() {
             let joined = min(max(love.lovedAt.map { dayIndex($0, from: startDay, calendar: calendar) } ?? 0, 0), todayIndex)
             memberDelta[joined] += 1
@@ -462,6 +465,7 @@ enum GoalEngine {
                 if done >= joined {
                     remainingDelta[joined] += 1
                     remainingDelta[done] -= 1
+                    if done == todayIndex, daysUntilStart == 0 { heardToday += 1 }
                 }
             } else {
                 remainingDelta[joined] += 1
@@ -540,7 +544,7 @@ enum GoalEngine {
             joinsOnPlay: joinsOnPlay, daysUntilStart: daysUntilStart, todayIndex: todayIndex, deadlineIndex: deadlineIndex,
             daysLeft: max(0, deadlineIndex - todayIndex), actual: actual, members: members, plan: plan,
             baselineAtStart: baseline, membersNow: membersNow, remainingNow: remainingNow,
-            heardNow: membersNow - remainingNow, remaining: remainingTracks, habits: habits,
+            heardNow: membersNow - remainingNow, heardToday: heardToday, remaining: remainingTracks, habits: habits,
             lookbackDays: lookback, completedIndex: completedIndex, startDay: startDay,
             bulkLoves: bulkLoves, bulkLoveDays: bulkDays.sorted()
         )

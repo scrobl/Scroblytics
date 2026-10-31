@@ -59,6 +59,23 @@ enum GoalsChecks {
             check("loved tracks that belong to the goal grow as loves are added", analysis.members == [8, 8, 8, 8, 8, 9, 9, 9, 10, 10, 10], "\(analysis.members)")
             check("a track heard before it was loved is never owed", analysis.actual[4] == analysis.actual[5])
             check("the counts add up", analysis.baselineAtStart == 8 && analysis.membersNow == 10 && analysis.remainingNow == 3 && analysis.heardNow == 7)
+            check("nothing heard on day 10 yet: no progress today", analysis.heardToday == 0, "\(analysis.heardToday)")
+
+            // Today (day 10, before the clock reads noon): Song 6 and Song 7 are heard for the first time (Song 7 twice), Song 1 and
+            // Song 10 were heard on earlier days, and Song 11 is loved today and heard today. Song 8 is still to hear.
+            var todaysPlays = plays
+            func playToday(_ track: String, hour: Int = 10) {
+                todaysPlays.append(ScrobbleSnapshot(artistName: "Artist A", albumName: "", trackName: track, imageURL: nil, playedAt: at(10, hour: hour)))
+            }
+            playToday("Song 6"); playToday("Song 7", hour: 9); playToday("Song 7", hour: 11); playToday("Song 1"); playToday("Song 10"); playToday("Song 11")
+            todaysPlays.sort { $0.playedAt < $1.playedAt }
+            let withToday = GoalEngine.analyze(goal: goal, loves: loves + [love(11, on: 10)], plays: todaysPlays, now: now, calendar: calendar)
+            check("tracks heard for the first time today are the progress made today (each once, however often it was played)", withToday.heardToday == 3, "\(withToday.heardToday)")
+            check("…and the burn-down agrees: two fewer left (Songs 6 and 7); the track loved and heard today nets out", withToday.remainingNow == analysis.remainingNow - 2 && withToday.actual[9] == analysis.actual[9], "\(withToday.remainingNow) \(withToday.actual)")
+            let tomorrow = GoalEngine.analyze(goal: goal, loves: loves + [love(11, on: 10)], plays: todaysPlays, now: at(11), calendar: calendar)
+            check("the next day starts again at zero", tomorrow.heardToday == 0, "\(tomorrow.heardToday)")
+            let notStarted = ListeningGoal(title: "Later", start: at(20, hour: 9), deadline: at(50, hour: 20), lookbackDays: 30)
+            check("a goal that has not started has no progress today", GoalEngine.analyze(goal: notStarted, loves: loves, plays: todaysPlays, now: now, calendar: calendar).heardToday == 0)
             check("the straight plan runs from the starting tracks to nothing at the end of the deadline day",
                   abs(analysis.plan[0] - 8.0 * 30.0 / 31.0) < 1e-9 && abs(analysis.plan[30]) < 1e-9 && analysis.plan.count == 31)
             check("the unheard tracks are listed", analysis.remaining.map(\.track) == ["Song 6", "Song 7", "Song 8"], "\(analysis.remaining.map(\.track))")
@@ -650,6 +667,15 @@ enum GoalsChecks {
                 }
                 let expectedRemaining = keys.subtracting(played)
                 let a = result.analysis
+                // Independent: the loved tracks whose first play since the start was today
+                var firstSince: [String: Date] = [:]
+                for play in plays where play.playedAt >= start && play.playedAt <= now {
+                    let key = TextNormalization.lovedKey(artist: play.artistName, track: play.trackName)
+                    if keys.contains(key), firstSince[key] == nil { firstSince[key] = play.playedAt }
+                }
+                let todayCount = firstSince.values.filter { calendar.isDate($0, inSameDayAs: now) }.count
+                print("      heard today: \(a.heardToday) (independent count \(todayCount))")
+                check("\(days) days: the tracks heard today are those whose first play since the start was today", a.heardToday == todayCount, "\(a.heardToday) vs \(todayCount)")
                 print(String(format: "  since %d days ago: %d heard, %d to hear, needed %@ a day, 'habits' %@ by the deadline (%.2f s)",
                              days, a.heardNow, a.remainingNow, result.neededPerDay.map { String(format: "%.1f", $0) } ?? "n/a",
                              result.forecasts[.habits].map { String(format: "%.0f%%", $0.chanceByDeadline * 100) } ?? "n/a", took))

@@ -754,6 +754,27 @@ enum AutoPlaylistChecks {
             check("saving a track length names only the length, which no screen reloads for", laterNotes.count == 3 && laterNotes[2].savedEntityNames == ["TrackDurationCacheEntry"] && !laterNotes[2].savedAnyEntity(in: ["Scrobble", "Artist", "Album", "Track"]), "\(laterNotes.map(\.savedEntityNames))")
             check("a notification that is not a save names nothing", Notification(name: .NSSystemClockDidChange).savedEntityNames.isEmpty)
 
+            // A save made on a background thread (the sync's own) reaches the app on the main thread, once, and only when it is relevant
+            final class Received: @unchecked Sendable {
+                private let lock = NSLock()
+                private var items: [Bool] = []
+                func add(_ onMain: Bool) { lock.withLock { items.append(onMain) } }
+                var values: [Bool] { lock.withLock { items } }
+            }
+            let received = Received()
+            let subscription = AutoPlaylistScheduler.relevantSavePublisher().sink { received.add(Thread.isMainThread) }
+            let backgroundContainer = try ModelContainer(for: AutoPlaylist.self, FlaggedTrack.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            try await Task.detached {
+                let backgroundContext = ModelContext(backgroundContainer)
+                backgroundContext.insert(AutoPlaylist(name: "Mine", recipeKind: "topCharts", recipeData: Data(), sourceSummary: "s"))
+                try backgroundContext.save()
+                backgroundContext.insert(FlaggedTrack(artist: "Artist A", track: "Song 1", album: nil, flaggedAt: Date()))
+                try backgroundContext.save()
+            }.value
+            try await Task.sleep(for: .milliseconds(300))
+            subscription.cancel()
+            check("a save made on a background thread is passed on once, on the main thread, and only when it is relevant", received.values == [true], "\(received.values)")
+
             // A burst of saves makes one round after a quiet moment, not one each, and not while a sync is running
             let appContainer = try makeContainer()
             let music = makeMusic()

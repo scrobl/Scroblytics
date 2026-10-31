@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Observation
 import SwiftData
@@ -39,14 +40,25 @@ final class AutoPlaylistScheduler {
     private var quietTask: Task<Void, Never>?
 
     /// The kinds of stored data a list can depend on, besides the plays.
-    static let lookupEntities: Set<String> = [
+    nonisolated static let lookupEntities: Set<String> = [
         "TrackDurationCacheEntry", "TrackBPMCacheEntry", "TrackReleaseDateCacheEntry", "PopularityCacheEntry", "EntityCommunityTagCacheEntry",
         "UserEntityTagCacheEntry", "FlaggedTrack", "LovedTrackEntry", "Track", "Album", "AlbumEditionMatch", "LibraryPresenceEntry",
     ]
 
     /// Whether a save of the database touched stored data a list can depend on.
-    static func isRelevantSave(_ note: Notification) -> Bool {
+    nonisolated static func isRelevantSave(_ note: Notification) -> Bool {
         note.savedAnyEntity(in: lookupEntities)
+    }
+
+    /// A signal, on the main thread, for each save by any context that touched stored data a list can depend on. Built here, outside the
+    /// main actor, because the filter runs on whichever thread the save is posted from (the sync's own, for one): a closure written in a
+    /// view would be tied to the main actor and stop the app when called from another thread.
+    nonisolated static func relevantSavePublisher() -> AnyPublisher<Void, Never> {
+        NotificationCenter.default.publisher(for: ModelContext.didSave)
+            .filter { isRelevantSave($0) }
+            .map { _ in () }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
     }
 
     /// Records that a sync changed the plays and/or the loved tracks, for the next round to take into account.
@@ -230,8 +242,9 @@ extension View {
             .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidStart)) { _ in AutoPlaylistScheduler.shared.syncIsRunning = true }
             .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidStop)) { _ in AutoPlaylistScheduler.shared.syncIsRunning = false }
             .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidFail)) { _ in AutoPlaylistScheduler.shared.syncIsRunning = false }
-            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { note in
-                guard AutoPlaylistScheduler.isRelevantSave(note) else { return }
+            // A save by any context, including the sync's own on a background thread: only the relevant ones are passed on, and on the main
+            // thread, since SwiftUI runs this action on whichever thread the notification is posted from.
+            .onReceive(AutoPlaylistScheduler.relevantSavePublisher()) {
                 AutoPlaylistScheduler.shared.lookupsDidChange(container: container)
             }
             .onReceive(NotificationCenter.default.publisher(for: .lovedTracksSyncDidFinish)) { note in

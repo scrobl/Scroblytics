@@ -27,6 +27,8 @@ enum ReleaseYearAuditChecks {
             parseChecks(check)
             engineChecks(check)
             try await storeChecks(check)
+            decisionChecks(check)
+            try await actionChecks(check)
             HeadlessTask.finish(failures)
         }
     }
@@ -97,6 +99,7 @@ enum ReleaseYearAuditChecks {
             album("Artist A", "Agree", "2001-05-05"), album("Artist A", "One Off", "2003-01-01"), album("Artist A", "Far Off", "2021-01-01", .detectedUnrecorded),
             album("Artist A", "Compilation", "2004-06-01"), album("Artist A", "Undated", nil), album("Artist B", "Edition Album", "1995"),
             album("Artist C", "Shared Title", "1980"), album("Artist A", "Mine", "1971", .manual),
+            album("Various Artists", "Now Hits", "2003"), album("Artist D", "Green River", "1968"),
         ]
         var music: [AppleMusicTrackYear] = []
         music += ["x", "y", "z"].map { track($0, "Artist A", "Agree", 2001) }
@@ -106,18 +109,20 @@ enum ReleaseYearAuditChecks {
         music += [track("x", "Artist A", "Undated", 1999)]
         music += [track("x", "Artist B", "Edition Album (Deluxe Edition)", 1995)]
         music += [track("x", "Artist C", "Shared Title", 1980, albumArtist: "Various Artists")]   // album artist differs: matched by its track artist
-        music += [track("x", "Someone", "Mine", 1971, albumArtist: "Various Artists")]           // neither artist matches: matched by its unique title
+        music += [track("x", "Someone", "Now Hits", 2003, albumArtist: "")]                      // a compilation with no album artist in Music: matched by its title
+        music += [track("x", "Artist E", "Green River", 2006)]                                    // another artist's album with the same title: NOT a match
+        music += [track("x", "Artist A", "Mine", 1971)]
         music += [track("x", "Artist Z", "Not Scrobbled", 2010)]
         let report = ReleaseYearAudit.compare(music: music, albums: albums, trackOverrides: [:])
         func row(_ title: String) -> ReleaseYearAudit.AlbumRow? { report.rows.first { $0.scroblytics.title == title } }
 
-        check("every album in both is matched once, and the one never scrobbled is counted as unmatched", report.matched == 8 && report.unmatchedMusicAlbums == 1 && report.musicAlbums == 9, "\(report.matched) \(report.unmatchedMusicAlbums) \(report.musicAlbums)")
+        check("every album in both is matched once; the one never scrobbled and the same-titled album of another artist are not", report.matched == 9 && report.unmatchedMusicAlbums == 2 && report.musicAlbums == 11, "\(report.matched) \(report.unmatchedMusicAlbums) \(report.musicAlbums)")
         check("an album whose tracks agree with Scroblytics is the same, with nothing differing", row("Agree")?.category == .same && row("Agree")?.trackDifferences.isEmpty == true)
         check("a year apart is off by one, in either direction", row("One Off")?.category == .offByOne && row("One Off")?.gap == 1)
         check("a reissue date is a real difference with its gap, and its tracks all differ", row("Far Off")?.category == .differs && row("Far Off")?.gap == 50 && row("Far Off")?.trackDifferences.count == 2)
         check("an album with no date in Scroblytics is its own kind", row("Undated")?.category == .scroblyticsUndated)
         check("an edition suffix does not stop an album matching", row("Edition Album")?.category == .same && row("Edition Album")?.matchedBy == .albumArtist)
-        check("a different album artist is matched through the track's artist, and a lone title by itself", row("Shared Title")?.matchedBy == .trackArtist && row("Mine")?.matchedBy == .titleOnly)
+        check("a different album artist is matched through the track's artist; a compilation by its title; another artist's same title not at all", row("Shared Title")?.matchedBy == .trackArtist && row("Now Hits")?.matchedBy == .titleOnly && row("Green River")?.musicAlbum == nil, "\(String(describing: row("Green River")))")
         let compilation = row("Compilation")
         check("a compilation's years are read: modal, range, how many, and no year is left out", compilation?.musicYear == 1953 && compilation?.musicEarliest == 1953 && compilation?.musicLatest == 2004 && compilation?.musicDistinctYears == 2 && compilation?.musicVaries == true)
         check("…and the album year here (2004) disagrees with its most common track year (1953), but only the 2 older tracks differ", compilation?.category == .differs && compilation?.trackDifferences.map(\.name).sorted() == ["old", "older"] && compilation?.trackDifferences.allSatisfy { !$0.ownDate } == true)
@@ -131,6 +136,13 @@ enum ReleaseYearAuditChecks {
         check("a track with its own date that matches Music is no longer a difference; one that doesn't is, marked as its own", own?.trackDifferences.map(\.name).sorted() == ["older", "same"] && own?.trackDifferences.first { $0.name == "same" }?.ownDate == true && own?.trackDifferences.first { $0.name == "same" }?.scroblyticsYear == 1999)
         check("an album date doesn't change with a track date: the album-level category stays", own?.category == compilation?.category)
         check("with nothing in Music, nothing is compared", ReleaseYearAudit.compare(music: [], albums: albums).rows.isEmpty)
+
+        // One Scroblytics album is compared once, however many of Music's albums look like it.
+        let dupAlbums = [album("Artist A", "Dup", "2000")]
+        let dupMusic = [track("x", "Artist A", "Dup", 2000), track("y", "Artist A", "Dup", 2000), track("z", "Artist A", "Dup", 1990, albumArtist: "Various Artists")]
+        let dup = ReleaseYearAudit.compare(music: dupMusic, albums: dupAlbums)
+        check("two of Music's albums matching one of yours: the better match is the one compared, the other is left unmatched", dup.rows.count == 1 && dup.rows[0].matchedBy == .albumArtist && dup.rows[0].trackCount == 2 && dup.rows[0].category == .same && dup.unmatchedMusicAlbums == 1, "\(dup.rows.count) \(dup.unmatchedMusicAlbums)")
+        check("every album in a report appears once", Set(report.rows.map(\.albumKey)).count == report.rows.count && Set(withOwn.rows.map(\.albumKey)).count == withOwn.rows.count)
     }
 
     // MARK: - The Scroblytics side, from a store
@@ -165,7 +177,172 @@ enum ReleaseYearAuditChecks {
         check("only the dates set on tracks are read, by the key a track's page saves under", loaded.trackOverrides == [TextNormalization.lovedKey(artist: "Artist A", track: "Song"): "1953"], "\(loaded.trackOverrides)")
     }
 
+    // MARK: - Decisions and the lists
+
+    private static func sampleReport() -> ReleaseYearAudit.Report {
+        let albums = [
+            album("Artist A", "Agree", "2001"), album("Artist A", "One Off", "2003"), album("Artist A", "Far Off", "2021-01-01", .detectedUnrecorded),
+            album("Artist A", "Mine", "1971", .manual), album("Artist A", "Compilation", "2004"), album("Artist B", "Late", "2010", .deezer),
+        ]
+        var music: [AppleMusicTrackYear] = []
+        music += [track("x", "Artist A", "Agree", 2001)]
+        music += [track("x", "Artist A", "One Off", 2002)]
+        music += [track("x", "Artist A", "Far Off", 1971)]
+        music += [track("x", "Artist A", "Mine", 1969)]
+        music += [track("a", "Artist A", "Compilation", 1953), track("b", "Artist A", "Compilation", 1953), track("c", "Artist A", "Compilation", 1980)]
+        music += [track("x", "Artist B", "Late", 2009)]
+        return ReleaseYearAudit.compare(music: music, albums: albums)
+    }
+
+    private static func decisionChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let sample = sampleReport()
+        func titles(_ filter: ReleaseYearAudit.Filter, _ decisions: [String: ReleaseYearAudit.Decision] = [:]) -> Set<String> {
+            Set(ReleaseYearAudit.listed(sample.rows, filter: filter, decisions: decisions).map(\.scroblytics.title))
+        }
+        check("the lists hold only albums that disagree, never ones that agree", titles(.all) == ["One Off", "Far Off", "Mine", "Compilation", "Late"], "\(titles(.all))")
+        check("a year apart and 2+ years are told apart", titles(.offByOne) == ["One Off", "Late"] && titles(.differs) == ["Far Off", "Mine", "Compilation"])
+        check("your own dates are listed on their own, and so are the compilations", titles(.yourDates) == ["Mine"] && titles(.musicVaries) == ["Compilation"])
+        let key = { (title: String) in sample.rows.first { $0.scroblytics.title == title }!.albumKey }
+        let row = sample.rows.first { $0.scroblytics.title == "One Off" }!
+        let keep = ReleaseYearAudit.Decision(albumKey: key("One Off"), verdict: .keepMine, scroblyticsYear: 2003, musicYear: 2002)
+        check("an album you kept leaves every list", ReleaseYearAudit.isDecided(row, decisions: [keep.albumKey: keep]) && !titles(.all, [keep.albumKey: keep]).contains("One Off") && !titles(.offByOne, [keep.albumKey: keep]).contains("One Off"))
+        let staleSelf = ReleaseYearAudit.Decision(albumKey: key("One Off"), verdict: .keepMine, scroblyticsYear: 2004, musicYear: 2002)
+        let staleMusic = ReleaseYearAudit.Decision(albumKey: key("One Off"), verdict: .keepMine, scroblyticsYear: 2003, musicYear: 2001)
+        check("it comes back when either year has changed since", !ReleaseYearAudit.isDecided(row, decisions: [keep.albumKey: staleSelf]) && !ReleaseYearAudit.isDecided(row, decisions: [keep.albumKey: staleMusic]) && titles(.all, [keep.albumKey: staleMusic]).contains("One Off"))
+        let used = ReleaseYearAudit.Decision(albumKey: key("One Off"), verdict: .usedApple, scroblyticsYear: 2003, musicYear: 2002)
+        check("a record of having used Music's year doesn't hide an album that differs again", !ReleaseYearAudit.isDecided(row, decisions: [used.albumKey: used]))
+        check("an album's key is its artist and normalized title", key("Agree") == ReleaseYearAudit.albumKey(artistKey: "artist a", normalizedTitle: "agree") && Set(sample.rows.map(\.albumKey)).count == sample.rows.count)
+    }
+
+    // MARK: - Changing a date, and undoing it
+
+    @MainActor
+    private static func actionChecks(_ emit: (String, Bool, String) -> Void) async throws {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { emit(label, ok, detail) }
+        let container = try ModelContainer(for: Schema([Artist.self, Album.self, Track.self, ReleaseYearDecision.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = ModelContext(container)
+        let artist = Artist(normalizedName: "artist a", name: "Artist A")
+        context.insert(artist)
+        func insert(_ title: String, override: String?, detected: String?) {
+            let row = Album(identityKey: TextNormalization.albumIdentityKey(artist: "artist a", album: title), title: title, normalizedTitle: TextNormalization.normalizeAlbumName(title), artist: artist)
+            row.releaseDateOverride = override
+            row.releaseDateDetected = detected
+            context.insert(row)
+        }
+        insert("One Off", override: nil, detected: "2003")
+        insert("Far Off", override: "1999", detected: "2021-01-01")
+        insert("Compilation", override: nil, detected: "2004")
+        insert("Mine", override: nil, detected: "1971")
+        insert("Late", override: nil, detected: "2010")
+        try context.save()
+        func stored(_ title: String) -> Album? { ReleaseDateEngine.albumRow(context: context, artist: "Artist A", album: title) }
+        func report() async -> ReleaseYearAudit.Report {
+            let loaded = await ReleaseYearAuditStoreReader(modelContainer: container).load()
+            return ReleaseYearAudit.compare(music: sampleMusic(), albums: loaded.albums, trackOverrides: [:])
+        }
+        func rows(_ titles: [String], from r: ReleaseYearAudit.Report) -> [ReleaseYearAudit.AlbumRow] { titles.compactMap { t in r.rows.first { $0.scroblytics.title == t } } }
+        let before = await report()
+        let oneOff = rows(["One Off"], from: before)
+
+        // Use Apple Music's year.
+        var result = try ReleaseYearAuditActions.useAppleYear(oneOff, context: context)
+        check("using Music's year sets the album's own date to it, once", result == .init(applied: 1, skipped: 0, skippedVaries: 0) && stored("One Off")?.releaseDateOverride == "2002")
+        var decisions = try context.fetch(FetchDescriptor<ReleaseYearDecision>())
+        check("…and remembers the date it replaced (none: the detected date showed) and both years", decisions.count == 1 && decisions[0].verdict == "usedApple" && decisions[0].previousOverride == nil && decisions[0].scroblyticsYear == 2003 && decisions[0].musicYear == 2002)
+        let after = await report()
+        check("the album now agrees with Music, and is manual in Scroblytics", after.rows.first { $0.scroblytics.title == "One Off" }?.category == .same && after.rows.first { $0.scroblytics.title == "One Off" }?.scroblytics.origin == .manual)
+        try ReleaseYearAuditActions.undo(decisions[0], context: context)
+        let remaining = try context.fetch(FetchDescriptor<ReleaseYearDecision>())
+        check("undoing puts the earlier date back (none) and removes the record", stored("One Off")?.releaseDateOverride == nil && stored("One Off")?.releaseDateDetected == "2003" && remaining.isEmpty)
+
+        // A date that had been set by hand comes back as it was.
+        let farOff = rows(["Far Off"], from: before)
+        check("an album you had given a date of your own is in the list", farOff.count == 1 && farOff[0].scroblytics.year == 1999)
+        _ = try ReleaseYearAuditActions.useAppleYear(farOff, context: context)
+        decisions = try context.fetch(FetchDescriptor<ReleaseYearDecision>())
+        check("its earlier date is what is remembered", stored("Far Off")?.releaseDateOverride == "1971" && decisions.first?.previousOverride == "1999")
+        // …but not if you have changed it again since.
+        stored("Far Off")?.releaseDateOverride = "1972"
+        try context.save()
+        try ReleaseYearAuditActions.undo(decisions[0], context: context)
+        check("undoing leaves a date you changed after that alone", stored("Far Off")?.releaseDateOverride == "1972")
+
+        // Bulk: an album whose tracks span years is skipped.
+        let both = rows(["One Off", "Compilation", "Late"], from: await report())
+        result = try ReleaseYearAuditActions.useAppleYear(both, skipVaries: true, context: context)
+        check("a bulk change skips an album whose Music tracks span several years, and says so", result.applied == 2 && result.skippedVaries == 1 && stored("Compilation")?.releaseDateOverride == nil && stored("Late")?.releaseDateOverride == "2009")
+        let single = rows(["Compilation"], from: await report())
+        result = try ReleaseYearAuditActions.useAppleYear(single, context: context)
+        check("one album chosen by hand is changed even though its Music tracks span years (to the most common year)", result.applied == 1 && stored("Compilation")?.releaseDateOverride == "1953")
+
+        // Keep Scroblytics.
+        let mine = rows(["Mine"], from: await report())
+        result = try ReleaseYearAuditActions.keepMine(mine, context: context)
+        let kept = try context.fetch(FetchDescriptor<ReleaseYearDecision>()).first { $0.album == "Mine" }
+        check("keeping Scroblytics’ date changes no date and remembers both years", result.applied == 1 && stored("Mine")?.releaseDateOverride == nil && kept?.verdict == "keepMine" && kept?.scroblyticsYear == 1971 && kept?.musicYear == 1969)
+        let count = try context.fetch(FetchDescriptor<ReleaseYearDecision>()).filter { $0.album == "Mine" }.count
+        _ = try ReleaseYearAuditActions.keepMine(mine, context: context)
+        check("deciding the same album again replaces the earlier decision", try context.fetch(FetchDescriptor<ReleaseYearDecision>()).filter { $0.album == "Mine" }.count == count)
+        if let kept { try ReleaseYearAuditActions.undo(kept, context: context) }
+        check("removing a keep-mine decision changes no date", stored("Mine")?.releaseDateOverride == nil && stored("Mine")?.releaseDateDetected == "1971")
+        check("an album with no year in Music, or no row to change, is skipped rather than guessed", try ReleaseYearAuditActions.useAppleYear([], context: context) == .init())
+
+        // The backup.
+        try context.save()
+        _ = try ReleaseYearAuditActions.keepMine(mine, context: context)
+        let document = try NativeBackupEngine.makeDocument(context: context)
+        let (archive, summary) = try NativeBackupEngine.inspect(document: document)
+        let have = try context.fetch(FetchDescriptor<ReleaseYearDecision>()).count
+        check("the backup holds the decisions and says so", archive.releaseYearDecisions?.count == have && have > 0 && summary.description.contains("release-year decisions"), summary.description)
+        for item in try context.fetch(FetchDescriptor<ReleaseYearDecision>()) { context.delete(item) }
+        try context.save()
+        try NativeBackupEngine.restoreReleaseYearDecisions(archive.releaseYearDecisions, context: context)
+        let restored = try context.fetch(FetchDescriptor<ReleaseYearDecision>())
+        check("restoring brings them back with their years", restored.count == have && restored.contains { $0.album == "Mine" && $0.scroblyticsYear == 1971 && $0.musicYear == 1969 })
+        try NativeBackupEngine.restoreReleaseYearDecisions(nil, context: context)
+        check("an older backup (no field) leaves the decisions alone", try context.fetch(FetchDescriptor<ReleaseYearDecision>()).count == have)
+        try NativeBackupEngine.restoreReleaseYearDecisions([], context: context)
+        check("a backup with none clears them", try context.fetch(FetchDescriptor<ReleaseYearDecision>()).isEmpty)
+    }
+
+    /// Music's tracks for the action checks: the same albums as `sampleReport`.
+    private static func sampleMusic() -> [AppleMusicTrackYear] {
+        var music: [AppleMusicTrackYear] = []
+        music += [track("x", "Artist A", "One Off", 2002)]
+        music += [track("x", "Artist A", "Far Off", 1971)]
+        music += [track("x", "Artist A", "Mine", 1969)]
+        music += [track("a", "Artist A", "Compilation", 1953), track("b", "Artist A", "Compilation", 1953), track("c", "Artist A", "Compilation", 1980)]
+        music += [track("x", "Artist A", "Late", 2009)]
+        return music
+    }
+
     // MARK: - The real library, read-only
+
+    /// On a store COPY only: use Music's year for every album that disagrees, check they then agree, undo every decision, and check
+    /// every album date is back exactly as it was.
+    @MainActor
+    private static func applyAndUndo(container: ModelContainer, music: [AppleMusicTrackYear], report: ReleaseYearAudit.Report) async throws {
+        let context = container.mainContext
+        func dates() throws -> [String: String] {
+            Dictionary(try context.fetch(FetchDescriptor<Album>()).map { ($0.identityKey, "\($0.releaseDateOverride ?? "-")|\($0.releaseDateDetected ?? "-")|\($0.releaseDateSource ?? "-")") }, uniquingKeysWith: { first, _ in first })
+        }
+        let before = try dates()
+        let open = ReleaseYearAudit.listed(report.rows, filter: .all, decisions: [:])
+        let result = try ReleaseYearAuditActions.useAppleYear(open, skipVaries: true, context: context)
+        let changed = try dates().filter { before[$0.key] != $0.value }.count
+        print("APPLY: \(open.count) listed; applied \(result.applied), skipped (tracks span years) \(result.skippedVaries), couldn't \(result.skipped); album rows that changed \(changed)")
+        let loaded = await ReleaseYearAuditStoreReader(modelContainer: container).load()
+        let after = ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides)
+        let nowAgree = open.filter { row in after.rows.first { $0.albumKey == row.albumKey }?.category == .same }.count
+        print("APPLY: of those, now agreeing with Music: \(nowAgree) (expected \(result.applied)); disagreements left: \(after.disagreements) (was \(report.disagreements))")
+        let others = after.rows.filter { row in !open.contains { $0.albumKey == row.albumKey } }
+        let othersBefore = report.rows.filter { row in !open.contains { $0.albumKey == row.albumKey } }
+        print("APPLY: albums that were not listed are unchanged: \(others.map { "\($0.albumKey)|\($0.scroblytics.date ?? "-")" } == othersBefore.map { "\($0.albumKey)|\($0.scroblytics.date ?? "-")" })")
+        for decision in try context.fetch(FetchDescriptor<ReleaseYearDecision>()) { try ReleaseYearAuditActions.undo(decision, context: context) }
+        let restored = try dates()
+        print("UNDO: every album's override, detected date and source back as before: \(restored == before); decisions left \(try context.fetch(FetchDescriptor<ReleaseYearDecision>()).count)")
+    }
 
     @MainActor
     private static func dump(container: ModelContainer) async throws {
@@ -175,6 +352,11 @@ enum ReleaseYearAuditChecks {
         print("Music: \(report.musicTracks) tracks in \(report.musicAlbums) albums (\(report.musicTracksWithoutYear) tracks with no year); Scroblytics: \(loaded.albums.count) albums, \(loaded.trackOverrides.count) track dates")
         print("matched albums: \(report.matched); not matched: \(report.unmatchedMusicAlbums)")
         for category in ReleaseYearAudit.Category.allCases { print("  \(category.rawValue): \(report.count(category))") }
+        let dupes = Dictionary(grouping: report.rows, by: \.albumKey).filter { $0.value.count > 1 }
+        print("Scroblytics albums matched by more than one Music album: \(dupes.count)")
+        for (_, group) in dupes.sorted(by: { $0.key < $1.key }).prefix(8) {
+            print("   \(group[0].scroblytics.artist) — \(group[0].scroblytics.title): " + group.map { "[Music: \($0.musicArtist) — \($0.musicAlbum), \($0.trackCount) tracks, \($0.musicYear.map(String.init) ?? "-"), by \($0.matchedBy.rawValue)]" }.joined(separator: " "))
+        }
         print("music tracks vary within the album: \(report.rows.filter(\.musicVaries).count)")
         print("albums with a track differing: \(report.albumsWithTrackDifferences); tracks differing: \(report.trackDifferences)")
         let uniform = report.rows.filter { !$0.musicVaries }
@@ -185,6 +367,9 @@ enum ReleaseYearAuditChecks {
         var matchedBy: [String: Int] = [:]
         for row in report.rows { matchedBy[row.matchedBy.rawValue, default: 0] += 1 }
         print("matched by: \(matchedBy.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))")
+        if ProcessInfo.processInfo.environment["SCROBLYTICS_RELEASEYEAR_DUMP_APPLY"] != nil {
+            try await applyAndUndo(container: container, music: music, report: report)
+        }
         HeadlessTask.finish(0)
     }
 }

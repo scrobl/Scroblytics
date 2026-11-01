@@ -13,6 +13,10 @@ enum LayoutSnapshots {
             snapshotAskEngine(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_RELEASEYEAR"] {
+            snapshotReleaseYearRows(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_DATEOPS"] {
             snapshotDateOperators(into: folder)
             return
@@ -123,6 +127,54 @@ enum LayoutSnapshots {
     }
 
     /// `SCROBLYTICS_LAYOUT_SNAPSHOT_UPDATES=<folder>`: the "update available" strip at several widths and the Settings › Updates section.
+    @MainActor
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_RELEASEYEAR=<folder>`: the Release Year Audit's rows (a year apart, a reissue date, your own date,
+    /// a compilation, a long name) at three widths, light and dark.
+    private static func snapshotReleaseYearRows(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            func album(_ artist: String, _ title: String, _ date: String, _ origin: AlbumDateOrigin, detected: String? = nil) -> AuditAlbum {
+                AuditAlbum(title: title, artist: artist, artistKey: artist.lowercased(), normalizedTitle: title.lowercased(), date: date, origin: origin, detected: detected ?? (origin == .manual ? nil : date))
+            }
+            func row(_ a: AuditAlbum, music: Int, tracks: Int, span: (Int, Int)? = nil, category: ReleaseYearAudit.Category) -> ReleaseYearAudit.AlbumRow {
+                ReleaseYearAudit.AlbumRow(
+                    musicArtist: a.artist, musicAlbum: a.title, trackCount: tracks, scroblytics: a, musicYear: music,
+                    musicEarliest: span?.0 ?? music, musicLatest: span?.1 ?? music, musicDistinctYears: span == nil ? 1 : 4,
+                    category: category, matchedBy: .albumArtist, trackDifferences: []
+                )
+            }
+            let rows = [
+                row(album("Artist A", "Back In Black Sabbath Sessions", "2007-04-30", .musicBrainz), music: 2006, tracks: 12, category: .offByOne),
+                row(album("Artist B", "A Reissue Whose Date Was Detected As The Reissue Not The Original Album", "2021-01-01", .detectedUnrecorded), music: 1971, tracks: 10, category: .differs),
+                row(album("Artist C", "Chosen By Hand", "1986", .manual, detected: "1987-03-02"), music: 1987, tracks: 9, category: .offByOne),
+                row(album("Artist D", "Greatest Hits", "1972", .musicBrainzInferred), music: 1965, tracks: 18, span: (1965, 1970), category: .differs),
+                row(album("Artist E", "Deezer Said So", "2010-06-01", .deezer), music: 2009, tracks: 11, category: .offByOne),
+            ]
+            for scheme in ["dark", "light"] {
+                for width: CGFloat in [1400, 1200, 700, 440] {
+                    let list = VStack(alignment: .leading, spacing: 1) {
+                        if width >= ReleaseYearAuditRowView.wideMinimumWidth { ReleaseYearAuditHeaderView() }
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in ReleaseYearAuditRowView(row: row, isWide: width >= ReleaseYearAuditRowView.wideMinimumWidth) }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    let host = NSHostingView(rootView: list.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: scheme == "dark" ? .darkAqua : .aqua)
+                    window.contentView = host
+                    for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                    window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "releaseyear-\(Int(width))-\(scheme).png"))
+                    }
+                }
+            }
+            print("RELEASEYEAR snapshots written to \(folder)")
+            exit(0)
+        }
+    }
+
     @MainActor
     /// `SCROBLYTICS_LAYOUT_SNAPSHOT_DATEOPS=<folder>`: Query's condition rows for the date operators (in the last, not in the last, day of
     /// week) at a narrow and a wide width, light and dark.

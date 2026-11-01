@@ -55,11 +55,15 @@ struct AuditAlbum: Sendable, Hashable {
     let artist: String
     let artistKey: String
     let normalizedTitle: String
-    /// "YYYY", "YYYY-MM" or "YYYY-MM-DD".
+    /// "YYYY", "YYYY-MM" or "YYYY-MM-DD": your own date if you set one, else the detected one.
     let date: String?
     let origin: AlbumDateOrigin
+    /// The detected date, even when your own shows instead (the date editor shows it).
+    var detected: String? = nil
 
     var year: Int? { date.flatMap(ReleaseDateEngine.year(of:)) }
+    /// The date you set yourself, if any.
+    var override: String? { origin == .manual ? date : nil }
 }
 
 /// One track of the Apple Music library with the year Music holds for it (nil when Music has none).
@@ -101,7 +105,8 @@ enum ReleaseYearAudit {
     }
 
     struct AlbumRow: Identifiable, Sendable {
-        var id: String { "\(scroblytics.artistKey)\u{0}\(scroblytics.normalizedTitle)" }
+        var id: String { albumKey }
+        var albumKey: String { ReleaseYearAudit.albumKey(artistKey: scroblytics.artistKey, normalizedTitle: scroblytics.normalizedTitle) }
         let musicArtist: String
         let musicAlbum: String
         let trackCount: Int
@@ -157,6 +162,41 @@ enum ReleaseYearAudit {
         return counts.filter { $0.value == top }.keys.min()
     }
 
+    /// The album's identity in a decision: its artist and normalized title, as Scroblytics knows them.
+    static func albumKey(artistKey: String, normalizedTitle: String) -> String { "\(artistKey)\u{1F}\(normalizedTitle)" }
+
+    /// A decision about an album, as the list needs it.
+    struct Decision: Sendable, Hashable {
+        enum Verdict: String, Sendable { case keepMine, usedApple }
+        let albumKey: String
+        let verdict: Verdict
+        let scroblyticsYear: Int
+        let musicYear: Int
+    }
+
+    /// Whether you have already settled this album: "keep Scroblytics" holds only while both years are still the ones it was made against, so
+    /// a change on either side asks again.
+    static func isDecided(_ row: AlbumRow, decisions: [String: Decision]) -> Bool {
+        guard let decision = decisions[row.albumKey], decision.verdict == .keepMine else { return false }
+        return decision.scroblyticsYear == row.scroblytics.year && decision.musicYear == row.musicYear
+    }
+
+    enum Filter: String, Codable, CaseIterable, Sendable {
+        case all, offByOne, differs, yourDates, musicVaries
+    }
+
+    /// The albums a filter lists: those that disagree and that you haven't settled.
+    static func listed(_ rows: [AlbumRow], filter: Filter, decisions: [String: Decision]) -> [AlbumRow] {
+        let open = rows.filter { ($0.category == .offByOne || $0.category == .differs) && !isDecided($0, decisions: decisions) }
+        switch filter {
+        case .all: return open
+        case .offByOne: return open.filter { $0.category == .offByOne }
+        case .differs: return open.filter { $0.category == .differs }
+        case .yourDates: return open.filter { $0.scroblytics.origin == .manual }
+        case .musicVaries: return open.filter(\.musicVaries)
+        }
+    }
+
     private struct Key: Hashable {
         let artist: String
         let title: String
@@ -181,21 +221,48 @@ enum ReleaseYearAudit {
             groups[key, default: []].append(track)
         }
 
-        var rows: [AlbumRow] = []
+        // Which Scroblytics album each of Music's albums is. Matching by album title alone is only for compilations (a "Various
+        // Artists" album on both sides, whose tracks have no one artist): for any other album a shared title proves nothing.
+        struct Candidate {
+            let key: Key
+            let tracks: [AppleMusicTrackYear]
+            let album: AuditAlbum
+            let how: Match
+        }
+        var candidates: [Candidate] = []
         var unmatched = 0
         for key in order {
             let tracks = groups[key] ?? []
             var found = byKey[key].map { ($0, Match.albumArtist) }
             if found == nil {
-                // The album artist may be "Various Artists" or spelled otherwise; a track's own artist is how it was scrobbled.
+                // The album artist may be spelled otherwise; a track's own artist is how it was scrobbled.
                 for track in tracks {
                     let k = Key(artist: TextNormalization.artistIdentityKey(track.artist), title: key.title)
                     if let album = byKey[k] { found = (album, .trackArtist); break }
                 }
             }
-            if found == nil, let only = byTitle[key.title], only.count == 1 { found = (only[0], .titleOnly) }
+            if found == nil, let only = byTitle[key.title], only.count == 1,
+               TextNormalization.isCompilationArtist(only[0].artist), tracks.contains(where: { $0.albumArtist.isEmpty || TextNormalization.isCompilationArtist($0.albumArtist) }) {
+                found = (only[0], .titleOnly)
+            }
             guard let (album, how) = found else { unmatched += 1; continue }
+            candidates.append(Candidate(key: key, tracks: tracks, album: album, how: how))
+        }
 
+        // Each Scroblytics album is compared once: if several of Music's albums matched it, the best match (by the artist, then
+        // by how many tracks it has) is the one; the rest are counted with the unmatched.
+        func rank(_ how: Match) -> Int { how == .albumArtist ? 0 : (how == .trackArtist ? 1 : 2) }
+        var best: [String: Candidate] = [:]
+        for candidate in candidates {
+            let id = albumKey(artistKey: candidate.album.artistKey, normalizedTitle: candidate.album.normalizedTitle)
+            if let current = best[id], (rank(current.how), -current.tracks.count) <= (rank(candidate.how), -candidate.tracks.count) { unmatched += 1; continue }
+            if best[id] != nil { unmatched += 1 }
+            best[id] = candidate
+        }
+
+        var rows: [AlbumRow] = []
+        for candidate in candidates where best[albumKey(artistKey: candidate.album.artistKey, normalizedTitle: candidate.album.normalizedTitle)]?.key == candidate.key {
+            let (tracks, album, how) = (candidate.tracks, candidate.album, candidate.how)
             let years = tracks.compactMap(\.year)
             let modal = modalYear(years)
             let albumYear = album.year
@@ -230,7 +297,8 @@ actor ReleaseYearAuditStoreReader {
             let date = album.releaseDateOverride.flatMap { $0.isEmpty ? nil : $0 } ?? album.releaseDateDetected
             albums.append(AuditAlbum(
                 title: album.title, artist: artist, artistKey: TextNormalization.artistIdentityKey(artist), normalizedTitle: album.normalizedTitle,
-                date: date, origin: AlbumDateOrigin.of(override: album.releaseDateOverride, detected: album.releaseDateDetected, recorded: album.releaseDateSource)
+                date: date, origin: AlbumDateOrigin.of(override: album.releaseDateOverride, detected: album.releaseDateDetected, recorded: album.releaseDateSource),
+                detected: album.releaseDateDetected
             ))
         }
         var overrides: [String: String] = [:]

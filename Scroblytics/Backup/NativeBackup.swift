@@ -104,6 +104,8 @@ enum NativeBackupFormat {
         var dismissedLibraryGaps: [DismissedLibraryGapRecord]?
         /// Loved Status Audit decisions ("same track" / "different tracks"). Optional for the same reason as above.
         var lovedAuditDecisions: [LovedAuditDecisionRecord]?
+        /// Release Year Audit decisions. Optional for the same reason as above.
+        var releaseYearDecisions: [ReleaseYearDecisionRecord]?
         /// Tag Management playlist rules. Optional for the same reason as above.
         var tagRules: [TagRuleRecord]?
         /// Editions counted on their own, with their match decisions. Optional for the same reason as above.
@@ -155,6 +157,10 @@ enum NativeBackupFormat {
         let lastfmArtist: String; let lastfmTrack: String; let appleArtist: String; let appleTrack: String
         let sameTrack: Bool; let decidedAt: Date
     }
+    struct ReleaseYearDecisionRecord: Codable {
+        let albumKey: String; let artist: String; let album: String; let verdict: String
+        let scroblyticsYear: Int; let musicYear: Int; let previousOverride: String?; let decidedAt: Date
+    }
     struct AutoPlaylistRecord: Codable {
         let id: UUID; let name: String; let playlistPersistentID: String
         let recipeKind: String; let recipeData: Data; let sourceSummary: String
@@ -193,6 +199,7 @@ enum NativeBackupEngine {
         let savedQueries: Int
         var dismissedLibraryGaps = 0
         var lovedAuditDecisions = 0
+        var releaseYearDecisions = 0
         var tagRules = 0
         var albumEditionMatches = 0
         var weatherTrips = 0
@@ -202,6 +209,7 @@ enum NativeBackupEngine {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
             if dismissedLibraryGaps > 0 { text += " · \(dismissedLibraryGaps) confirmed library gaps" }
             if lovedAuditDecisions > 0 { text += " · \(lovedAuditDecisions) loved-audit decisions" }
+            if releaseYearDecisions > 0 { text += " · \(releaseYearDecisions) release-year decisions" }
             if tagRules > 0 { text += " · \(tagRules) tag rules" }
             if albumEditionMatches > 0 { text += " · \(albumEditionMatches) editions counted separately" }
             if weatherTrips > 0 { text += " · \(weatherTrips) weather trips" }
@@ -290,6 +298,7 @@ enum NativeBackupEngine {
         }
         try restoreDismissedLibraryGaps(archive.dismissedLibraryGaps, context: context, save: false)
         try restoreLovedAuditDecisions(archive.lovedAuditDecisions, context: context, save: false)
+        try restoreReleaseYearDecisions(archive.releaseYearDecisions, context: context, save: false)
         try restoreTagRules(archive.tagRules, context: context, save: false)
         try restoreAlbumEditionMatches(archive.albumEditionMatches, context: context, save: false)
         try restoreAutoPlaylists(archive.autoPlaylists, context: context, save: false)
@@ -339,6 +348,21 @@ enum NativeBackupEngine {
             context.insert(LovedAuditDecision(
                 pairKey: key, lastfmArtist: record.lastfmArtist, lastfmTrack: record.lastfmTrack,
                 appleArtist: record.appleArtist, appleTrack: record.appleTrack, sameTrack: record.sameTrack, decidedAt: record.decidedAt
+            ))
+        }
+        if save { try context.save() }
+    }
+
+    /// Replaces the Release Year Audit decisions with the archive's; `nil` (an older archive) leaves the current ones alone.
+    static func restoreReleaseYearDecisions(_ records: [NativeBackupFormat.ReleaseYearDecisionRecord]?, context: ModelContext, save: Bool = true) throws {
+        guard let records else { return }
+        for item in try context.fetch(FetchDescriptor<ReleaseYearDecision>()) { context.delete(item) }
+        var seen = Set<String>()
+        for record in records {
+            guard seen.insert(record.albumKey).inserted else { continue }
+            context.insert(ReleaseYearDecision(
+                albumKey: record.albumKey, artist: record.artist, album: record.album, verdict: record.verdict,
+                scroblyticsYear: record.scroblyticsYear, musicYear: record.musicYear, previousOverride: record.previousOverride, decidedAt: record.decidedAt
             ))
         }
         if save { try context.save() }
@@ -424,6 +448,9 @@ enum NativeBackupEngine {
         let auditDecisions = try context.fetch(FetchDescriptor<LovedAuditDecision>()).map {
             NativeBackupFormat.LovedAuditDecisionRecord(lastfmArtist: $0.lastfmArtist, lastfmTrack: $0.lastfmTrack, appleArtist: $0.appleArtist, appleTrack: $0.appleTrack, sameTrack: $0.sameTrack, decidedAt: $0.decidedAt)
         }
+        let yearDecisions = try context.fetch(FetchDescriptor<ReleaseYearDecision>()).map {
+            NativeBackupFormat.ReleaseYearDecisionRecord(albumKey: $0.albumKey, artist: $0.artist, album: $0.album, verdict: $0.verdict, scroblyticsYear: $0.scroblyticsYear, musicYear: $0.musicYear, previousOverride: $0.previousOverride, decidedAt: $0.decidedAt)
+        }
         let tagRules = try context.fetch(FetchDescriptor<TagPlaylistRule>()).map {
             NativeBackupFormat.TagRuleRecord(id: $0.id, playlistPersistentID: $0.playlistPersistentID, playlistName: $0.playlistName, tags: $0.tags, mirrorRemovals: $0.mirrorRemovals, createdAt: $0.createdAt, lastAppliedAt: $0.lastAppliedAt)
         }
@@ -436,7 +463,7 @@ enum NativeBackupEngine {
         let username = try context.fetch(FetchDescriptor<SyncState>()).first?.username
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         let theme = UserDefaults.standard.string(forKey: AppearancePreference.storageKey) ?? AppearancePreference.dark.rawValue
-        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
+        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, releaseYearDecisions: yearDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
     }
 
     private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
@@ -453,7 +480,7 @@ enum NativeBackupEngine {
     }
 
     private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
-        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0)
+        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, releaseYearDecisions: archive.releaseYearDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0)
     }
 
     private static func findOrCreateArtist(named name: String, context: ModelContext) throws -> Artist {

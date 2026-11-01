@@ -128,6 +128,7 @@ struct ScroblyticsApp: App {
             LibraryPresenceCheck.self,
             LibraryGapDismissal.self,
             LovedAuditDecision.self,
+            ReleaseYearDecision.self,
             AlbumEditionMatch.self,
             TagPlaylistRule.self,
             AutoPlaylist.self,

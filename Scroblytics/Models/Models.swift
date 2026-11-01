@@ -616,6 +616,37 @@ final class LovedAuditDecision {
     }
 }
 
+/// What a person decided about an album whose release year differs between Scroblytics and Apple Music (Release Year Audit).
+/// "keepMine" is remembered for exactly the two years it was made against: if either changes, the album is asked about again.
+/// "usedApple" records that the album's own date was set to Music's year, and what it was before, so it can be undone.
+@Model
+final class ReleaseYearDecision {
+    /// `ReleaseYearAudit.albumKey(...)`: the album's artist and normalized title.
+    @Attribute(.unique) var albumKey: String
+    var artist: String
+    var album: String
+    /// "keepMine" | "usedApple"
+    var verdict: String
+    /// The year Scroblytics showed when the decision was made.
+    var scroblyticsYear: Int
+    /// The year Apple Music had (the most common among the album's tracks).
+    var musicYear: Int
+    /// For "usedApple": the album's own date before it was set (nil: it had none, and the detected date showed).
+    var previousOverride: String?
+    var decidedAt: Date
+
+    init(albumKey: String, artist: String, album: String, verdict: String, scroblyticsYear: Int, musicYear: Int, previousOverride: String?, decidedAt: Date) {
+        self.albumKey = albumKey
+        self.artist = artist
+        self.album = album
+        self.verdict = verdict
+        self.scroblyticsYear = scroblyticsYear
+        self.musicYear = musicYear
+        self.previousOverride = previousOverride
+        self.decidedAt = decidedAt
+    }
+}
+
 /// The last Library Gaps run — a single row. Kept apart from the per-track rows so a run that changes nothing
 /// writes one row, not eleven thousand.
 @Model

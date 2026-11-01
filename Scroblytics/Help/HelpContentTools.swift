@@ -23,6 +23,7 @@ extension HelpContent {
                     ["[Missing Data](help://tool-missing-data)", "Items lacking dates, images, lengths or a match", "Optional: Music app"],
                     ["[Flagged Tracks](help://tool-flagged)", "Your hand-picked list", "Nothing"],
                     ["[Loved Status Audit](help://tool-loved-audit)", "Last.fm loves vs Apple Music favorites", "Music app permission"],
+                    ["[Release Year Audit](help://tool-release-year-audit)", "Albums whose release year differs from Apple Music’s", "Music app permission"],
                     ["[Library Gaps](help://tool-library-gaps)", "Scrobbled tracks missing from your Music library", "Music app permission"],
                     ["[Tag Management](help://tool-tag-management)", "Bulk add/remove Last.fm tags", "Track Actions (**writes to Last.fm**)"],
                     ["[Collage Generator](help://tool-collage)", "A shareable image of your top items", "Nothing"],
@@ -207,6 +208,31 @@ extension HelpContent {
                 .paragraph("Music’s Favorite Songs list can hold entries that are not tracks in your library: songs you favorited from the Apple Music catalogue without adding them (labelled “Apple Music catalogue”), and leftover entries for tracks that were later renamed or replaced (labelled “leftover entry”). Music often doesn’t show the leftovers, so you can’t un-favorite them there, and they keep appearing here as favorites with no match. The **Not in library** filter lists them (also counted in the headline). **Remove from Favorites…** on a row, or **Remove all N…** under that filter, un-favorites exactly those entries in Apple Music **after you confirm** the list. Nothing in your library changes. A leftover entry can’t be favorited again (Music doesn’t show it); a catalogue favorite can be favorited again from the song in Music. Each entry is found by Music’s own ID and left alone if its name or artist has changed since the list was read."),
                 .heading("Loved, no scrobbles"),
                 .paragraph("Last.fm keeps your loves as plain artist-and-title text, apart from your scrobbles. If you later edit a scrobble’s title or artist, or delete its plays, the old love stays under the old name. This filter lists every loved track whose exact artist and title no scrobble uses (editions such as “Remastered” are ignored), whatever Apple Music says about it, so you can find those stale loves. Fix one on Last.fm by unloving the old spelling and loving the right one (Profile › Library › Loved Tracks on last.fm). A “Same track” decision doesn’t change this list, because the Last.fm name still has no plays."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-release-year-audit",
+            title: "Release Year Audit",
+            summary: "Compare your album release years with Apple Music’s, see where each date came from, and choose which to keep.",
+            blocks: [
+                .paragraph("Reads the year Music holds for every track in your library (about a second; it needs the Music permission, and Music must already be open) and compares it with the release dates in Scroblytics. Only the **year** is compared. It never changes Music or Last.fm: the only thing it can change is an album’s own release date in Scroblytics, the same date you can set from the album’s page or in [Missing Data](help://tool-missing-data)."),
+                .heading("What is compared"),
+                .paragraph("Music keeps a year on each track, not on an album, so an album’s Music year is the **most common year among its tracks** (the earliest if two years tie). It is matched to the Scroblytics album by artist and album name (a compilation by its title alone, since its tracks have no one artist); editions such as “Deluxe” or “Remastered” match the plain album, and an album that is in Music but has never been scrobbled has nothing to compare. A same-titled album by a different artist is never matched. A Scroblytics album date is your own date if you set one, otherwise the detected one."),
+                .heading("The list"),
+                .bullets([
+                    "Each row shows both years and **where the Scroblytics date came from**: **Manual** (you set it), **MusicBrainz** or **Deezer** (recorded when the date was detected), **MusicBrainz (inferred)** for an older date known only to the year or month (only MusicBrainz gives those), or **Detected (source not recorded)** for an older full date that could have come from either. A gap badge says how many years later or earlier Scroblytics is.",
+                    "The filters are **All**, **A year apart**, **2+ years**, **Your own dates**, and **Compilations** (albums whose tracks have several different years in Music: a greatest-hits set, a rarities collection, where one year for the album is a guess).",
+                    "The headline counts the albums that agree, are a year apart and differ by more, and where the differing dates came from.",
+                ]),
+                .heading("Deciding"),
+                .bullets([
+                    "**Use Apple Music’s** sets the album’s own release date to Music’s year. Neither side is right by default: Music’s year is sometimes a reissue and Scroblytics’ is sometimes the original, so it is always your choice.",
+                    "**Keep Scroblytics** settles the album as it is. It leaves the list, and comes back only if either year changes.",
+                    "**Edit…** opens the usual date editor for a different date, and clicking the album opens its page.",
+                    "**Use Apple Music’s year for all…** and **Keep Scroblytics for all…** apply to everything the current filter lists, after a confirmation that names the albums. The bulk change skips albums whose Music tracks span several years.",
+                    "**Decisions** lists what you have settled. **Remove** on a kept album asks about it again; **Undo** on one you used Apple Music’s year for puts the earlier date back, unless you have changed it since. Decisions are in your [backups](help://data-backup).",
+                ]),
+                .paragraph("A date you set from here is a year only (for example 2006), so it replaces a fuller detected date. Tracks you have given a release date of their own are compared separately on the album’s page, in its **Released** column."),
             ]
         ),
         HelpArticle(

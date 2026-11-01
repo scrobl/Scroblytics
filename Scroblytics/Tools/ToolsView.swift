@@ -202,6 +202,8 @@ struct ToolsView: View {
             MissingDataView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
         case .lovedStatusAudit:
             LovedStatusAuditView(modelContainer: modelContainer, navigation: navigation)
+        case .releaseYearAudit:
+            ReleaseYearAuditView(modelContainer: modelContainer, navigation: navigation)
         case .libraryGaps:
             LibraryGapsView(modelContainer: modelContainer, navigation: navigation)
         case .tagManagement:
@@ -240,7 +242,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
     let id: Kind
     let name: String
     let summary: String
@@ -279,6 +281,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .lovedStatusAudit, name: "Loved Status Audit",
             summary: "See where your loved tracks on Last.fm and favorites in Apple Music disagree.",
             systemImage: "heart.text.square", category: "Organize"
+        ),
+        ToolDescriptor(
+            id: .releaseYearAudit, name: "Release Year Audit",
+            summary: "Find albums whose release year here differs from Apple Music’s, see where each date came from, and choose which to keep.",
+            systemImage: "calendar.badge.exclamationmark", category: "Organize"
         ),
         ToolDescriptor(
             id: .libraryGaps, name: "Library Gaps",

@@ -73,6 +73,8 @@ struct AppleMusicTrackYear: Sendable, Hashable {
     let albumArtist: String
     let album: String
     let year: Int?
+    /// Music's `persistent ID` for the track, which is how a change finds it again ("" when the read didn't include it).
+    var persistentID: String = ""
 }
 
 /// Compares the release years Scroblytics holds with the ones in the Apple Music library, album by album and track by track. Only the
@@ -92,6 +94,42 @@ enum ReleaseYearAudit {
 
     enum Match: String, Sendable {
         case albumArtist, trackArtist, titleOnly
+    }
+
+    /// One of an album's tracks in Music, with the year Scroblytics shows for it when that is a date set on the track itself.
+    struct MusicTrackRef: Sendable, Hashable {
+        let persistentID: String
+        let name: String
+        let artist: String
+        let musicYear: Int?
+        /// A date you set on the track (its year); nil when it just shows its album's.
+        let ownYear: Int?
+    }
+
+    /// A change to the year Music holds for one track.
+    struct MusicYearUpdate: Sendable, Hashable {
+        let persistentID: String
+        let name: String
+        let artist: String
+        let album: String
+        /// The year Music has now (nil: none), which must still be what it is when the change is made.
+        let from: Int?
+        let to: Int
+    }
+
+    /// The Music years to change so they follow Scroblytics, for one album: each track gets the year Scroblytics shows for it (its own
+    /// date, else the album's `albumYear`). An album whose tracks span several years in Music is a compilation, whose years are real
+    /// data, so there only the tracks you set a date on are brought into line, never the rest to one album year.
+    static func musicUpdates(for row: AlbumRow, albumYear: Int?) -> [MusicYearUpdate] {
+        let target = albumYear ?? row.scroblytics.year
+        var updates: [MusicYearUpdate] = []
+        for track in row.musicTracks where !track.persistentID.isEmpty {
+            let wanted: Int?
+            if row.musicVaries { wanted = track.ownYear } else { wanted = track.ownYear ?? target }
+            guard let wanted, wanted != track.musicYear else { continue }
+            updates.append(MusicYearUpdate(persistentID: track.persistentID, name: track.name, artist: track.artist, album: row.musicAlbum, from: track.musicYear, to: wanted))
+        }
+        return updates
     }
 
     /// A track whose year in Music differs from the year Scroblytics shows for it: its own date if you set one, else its album's.
@@ -119,6 +157,8 @@ enum ReleaseYearAudit {
         let category: Category
         let matchedBy: Match
         let trackDifferences: [TrackDifference]
+        /// Every track of the album in Music (see `musicUpdates`).
+        var musicTracks: [MusicTrackRef] = []
 
         /// The album's tracks do not share one year in Music (a compilation, a greatest-hits set).
         var musicVaries: Bool { musicDistinctYears > 1 }
@@ -172,6 +212,25 @@ enum ReleaseYearAudit {
         let verdict: Verdict
         let scroblyticsYear: Int
         let musicYear: Int
+        /// Which tracks differed when it was decided (`tracksSignature`); empty when none did.
+        var tracksSignature: String = ""
+    }
+
+    /// A track's own date that was set from Music's year, and what it was, so it can be put back.
+    struct TrackChange: Codable, Sendable, Equatable {
+        let key: String
+        let previous: String?
+        let applied: String
+    }
+
+    /// A short fingerprint of which of an album's tracks differ from Music and how, so a decision about them holds only while that stays true.
+    /// Deterministic (FNV-1a), unlike `hashValue`, which changes with every launch. Empty when no track differs.
+    static func tracksSignature(_ differences: [TrackDifference]) -> String {
+        guard !differences.isEmpty else { return "" }
+        let text = differences.map { "\($0.artist.lowercased())|\($0.name.lowercased())|\($0.musicYear)|\($0.scroblyticsYear)" }.sorted().joined(separator: "\n")
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
+        return String(hash, radix: 16)
     }
 
     /// Whether you have already settled this album: "keep Scroblytics" holds only while both years are still the ones it was made against, so
@@ -179,6 +238,13 @@ enum ReleaseYearAudit {
     static func isDecided(_ row: AlbumRow, decisions: [String: Decision]) -> Bool {
         guard let decision = decisions[row.albumKey], decision.verdict == .keepMine else { return false }
         return decision.scroblyticsYear == row.scroblytics.year && decision.musicYear == row.musicYear
+            && decision.tracksSignature == tracksSignature(row.trackDifferences)
+    }
+
+    /// The compilations that need a look: Music's tracks have several years and some of them differ from what Scroblytics shows, whether or
+    /// not the album's own year agrees. The albums not yet settled.
+    static func compilations(_ rows: [AlbumRow], decisions: [String: Decision]) -> [AlbumRow] {
+        rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty && !isDecided($0, decisions: decisions) }
     }
 
     enum Filter: String, Codable, CaseIterable, Sendable {
@@ -187,13 +253,14 @@ enum ReleaseYearAudit {
 
     /// The albums a filter lists: those that disagree and that you haven't settled.
     static func listed(_ rows: [AlbumRow], filter: Filter, decisions: [String: Decision]) -> [AlbumRow] {
+        if filter == .musicVaries { return compilations(rows, decisions: decisions) }
         let open = rows.filter { ($0.category == .offByOne || $0.category == .differs) && !isDecided($0, decisions: decisions) }
         switch filter {
         case .all: return open
         case .offByOne: return open.filter { $0.category == .offByOne }
         case .differs: return open.filter { $0.category == .differs }
         case .yourDates: return open.filter { $0.scroblytics.origin == .manual }
-        case .musicVaries: return open.filter(\.musicVaries)
+        case .musicVaries: return compilations(rows, decisions: decisions)
         }
     }
 
@@ -202,8 +269,29 @@ enum ReleaseYearAudit {
         let title: String
     }
 
-    /// `trackOverrides` are the dates set on individual tracks, by `TextNormalization.lovedKey`.
-    static func compare(music: [AppleMusicTrackYear], albums: [AuditAlbum], trackOverrides: [String: String] = [:]) -> Report {
+    /// How a track is found when Music and Scroblytics spell its title differently: its artist and normalized title.
+    static func trackIndexKey(artist: String, title: String) -> String {
+        trackIndexKey(artist: artist, normalizedTitle: TextNormalization.normalizeTrackTitle(title))
+    }
+
+    /// The same key from a title already normalized: what a stored track holds, which is what the audit's changes look a track up by.
+    static func trackIndexKey(artist: String, normalizedTitle: String) -> String {
+        "\(TextNormalization.artistIdentityKey(artist))\u{1F}\(normalizedTitle)"
+    }
+
+    /// The tracks Scroblytics has a row for (every track you have played), by saved key and by `trackIndexKey`. A track of Music's that is
+    /// in neither was never played, so there is nothing of it here to change and it is left out of the track comparison.
+    struct KnownTracks: Sendable {
+        var identityKeys: Set<String> = []
+        var indexKeys: Set<String> = []
+    }
+
+    /// `trackOverrides` are the dates set on individual tracks, by `TextNormalization.lovedKey`; `trackOverrideIndex` the same dates by
+    /// `trackIndexKey`, for a track whose spelling differs between Music and the scrobbles. `knownTracks` nil: every track counts.
+    static func compare(
+        music: [AppleMusicTrackYear], albums: [AuditAlbum], trackOverrides: [String: String] = [:], trackOverrideIndex: [String: String] = [:],
+        knownTracks: KnownTracks? = nil
+    ) -> Report {
         var byKey: [Key: AuditAlbum] = [:]
         var byTitle: [String: [AuditAlbum]] = [:]
         for album in albums {
@@ -269,15 +357,24 @@ enum ReleaseYearAudit {
             var differences: [TrackDifference] = []
             for track in tracks {
                 guard let musicYear = track.year else { continue }
-                let own = trackOverrides[TextNormalization.lovedKey(artist: track.artist, track: track.name)].flatMap(ReleaseDateEngine.year(of:))
+                let savedKey = TextNormalization.lovedKey(artist: track.artist, track: track.name)
+                let indexKey = trackIndexKey(artist: track.artist, title: track.name)
+                if let knownTracks, !knownTracks.identityKeys.contains(savedKey), !knownTracks.indexKeys.contains(indexKey) { continue }
+                let ownDate = trackOverrides[savedKey] ?? trackOverrideIndex[indexKey]
+                let own = ownDate.flatMap(ReleaseDateEngine.year(of:))
                 guard let shown = own ?? albumYear, shown != musicYear else { continue }
                 differences.append(TrackDifference(name: track.name, artist: track.artist, musicYear: musicYear, scroblyticsYear: shown, ownDate: own != nil))
             }
             let first = tracks[0]
+            let refs = tracks.map { track -> MusicTrackRef in
+                let ownDate = trackOverrides[TextNormalization.lovedKey(artist: track.artist, track: track.name)]
+                    ?? trackOverrideIndex[trackIndexKey(artist: track.artist, title: track.name)]
+                return MusicTrackRef(persistentID: track.persistentID, name: track.name, artist: track.artist, musicYear: track.year, ownYear: ownDate.flatMap(ReleaseDateEngine.year(of:)))
+            }
             rows.append(AlbumRow(
                 musicArtist: first.albumArtist.isEmpty ? first.artist : first.albumArtist, musicAlbum: first.album, trackCount: tracks.count,
                 scroblytics: album, musicYear: modal, musicEarliest: years.min(), musicLatest: years.max(), musicDistinctYears: Set(years).count,
-                category: category(scroblytics: albumYear, music: modal), matchedBy: how, trackDifferences: differences
+                category: category(scroblytics: albumYear, music: modal), matchedBy: how, trackDifferences: differences, musicTracks: refs
             ))
         }
         return Report(
@@ -290,7 +387,14 @@ enum ReleaseYearAudit {
 /// Reads what the comparison needs from the Scroblytics store: every album's date with its origin, and the dates set on tracks.
 @ModelActor
 actor ReleaseYearAuditStoreReader {
-    func load() -> (albums: [AuditAlbum], trackOverrides: [String: String]) {
+    struct Loaded: Sendable {
+        let albums: [AuditAlbum]
+        let trackOverrides: [String: String]
+        let trackOverrideIndex: [String: String]
+        let known: ReleaseYearAudit.KnownTracks
+    }
+
+    func load() -> Loaded {
         var albums: [AuditAlbum] = []
         for album in (try? modelContext.fetch(FetchDescriptor<Album>())) ?? [] {
             guard let artist = album.artist?.name else { continue }
@@ -302,10 +406,16 @@ actor ReleaseYearAuditStoreReader {
             ))
         }
         var overrides: [String: String] = [:]
-        let tracks = (try? modelContext.fetch(FetchDescriptor<Track>(predicate: #Predicate { $0.releaseDateOverride != nil }))) ?? []
-        for track in tracks {
-            if let date = track.releaseDateOverride, !date.isEmpty { overrides[track.identityKey] = date }
+        var index: [String: String] = [:]
+        var known = ReleaseYearAudit.KnownTracks()
+        for track in (try? modelContext.fetch(FetchDescriptor<Track>())) ?? [] {
+            known.identityKeys.insert(track.identityKey)
+            let key = track.artist.map { ReleaseYearAudit.trackIndexKey(artist: $0.name, normalizedTitle: track.normalizedTitle) }
+            if let key { known.indexKeys.insert(key) }
+            guard let date = track.releaseDateOverride, !date.isEmpty else { continue }
+            overrides[track.identityKey] = date
+            if let key { index[key] = date }
         }
-        return (albums, overrides)
+        return Loaded(albums: albums, trackOverrides: overrides, trackOverrideIndex: index, known: known)
     }
 }

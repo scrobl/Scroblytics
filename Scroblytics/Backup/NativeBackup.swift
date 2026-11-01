@@ -160,6 +160,8 @@ enum NativeBackupFormat {
     struct ReleaseYearDecisionRecord: Codable {
         let albumKey: String; let artist: String; let album: String; let verdict: String
         let scroblyticsYear: Int; let musicYear: Int; let previousOverride: String?; let decidedAt: Date
+        /// Optional, and last, so archives from before tracks were compared decode unchanged.
+        var tracksSignature: String? = nil; var albumChanged: Bool? = nil; var trackChangesJSON: Data? = nil
     }
     struct AutoPlaylistRecord: Codable {
         let id: UUID; let name: String; let playlistPersistentID: String
@@ -362,7 +364,8 @@ enum NativeBackupEngine {
             guard seen.insert(record.albumKey).inserted else { continue }
             context.insert(ReleaseYearDecision(
                 albumKey: record.albumKey, artist: record.artist, album: record.album, verdict: record.verdict,
-                scroblyticsYear: record.scroblyticsYear, musicYear: record.musicYear, previousOverride: record.previousOverride, decidedAt: record.decidedAt
+                scroblyticsYear: record.scroblyticsYear, musicYear: record.musicYear, previousOverride: record.previousOverride, decidedAt: record.decidedAt,
+                tracksSignature: record.tracksSignature, albumChanged: record.albumChanged, trackChangesJSON: record.trackChangesJSON
             ))
         }
         if save { try context.save() }
@@ -449,7 +452,7 @@ enum NativeBackupEngine {
             NativeBackupFormat.LovedAuditDecisionRecord(lastfmArtist: $0.lastfmArtist, lastfmTrack: $0.lastfmTrack, appleArtist: $0.appleArtist, appleTrack: $0.appleTrack, sameTrack: $0.sameTrack, decidedAt: $0.decidedAt)
         }
         let yearDecisions = try context.fetch(FetchDescriptor<ReleaseYearDecision>()).map {
-            NativeBackupFormat.ReleaseYearDecisionRecord(albumKey: $0.albumKey, artist: $0.artist, album: $0.album, verdict: $0.verdict, scroblyticsYear: $0.scroblyticsYear, musicYear: $0.musicYear, previousOverride: $0.previousOverride, decidedAt: $0.decidedAt)
+            NativeBackupFormat.ReleaseYearDecisionRecord(albumKey: $0.albumKey, artist: $0.artist, album: $0.album, verdict: $0.verdict, scroblyticsYear: $0.scroblyticsYear, musicYear: $0.musicYear, previousOverride: $0.previousOverride, decidedAt: $0.decidedAt, tracksSignature: $0.tracksSignature, albumChanged: $0.albumChanged, trackChangesJSON: $0.trackChangesJSON)
         }
         let tagRules = try context.fetch(FetchDescriptor<TagPlaylistRule>()).map {
             NativeBackupFormat.TagRuleRecord(id: $0.id, playlistPersistentID: $0.playlistPersistentID, playlistName: $0.playlistName, tags: $0.tags, mirrorRemovals: $0.mirrorRemovals, createdAt: $0.createdAt, lastAppliedAt: $0.lastAppliedAt)

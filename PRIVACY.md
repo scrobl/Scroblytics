@@ -20,7 +20,8 @@ comfortable with that. The same information is available inside the app under **
 - **Your Music library.** With your permission the app reads your Music app through macOS's scripting interface for features
   such as matching albums, auditing loved tracks, finding gaps and exporting playlists. That information is not sent anywhere.
   The app changes Music only when you ask it to: *Create Apple Music Playlist* (which creates a playlist, or adds tracks to one
-  you pick, from tracks already in your library) and the Loved Status Audit's *Remove from Favorites…* (after you confirm).
+  you pick, from tracks already in your library), the Loved Status Audit's *Remove from Favorites…* (after you confirm), and the
+  Release Year Audit's *Update Apple Music* (which changes the Year of the tracks it lists, after you confirm).
 - **Shared images and text.** The Share button makes an image or text on your Mac. It contains your name only if you turn that
   on, and your Last.fm profile picture only if you also turn that on. Nothing is sent anywhere by the app, and what you copy,
   save or send from the Share menu is your choice. If you turn the picture on, the app asks Last.fm for its address (an ordinary

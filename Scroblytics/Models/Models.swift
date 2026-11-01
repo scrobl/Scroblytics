@@ -634,8 +634,16 @@ final class ReleaseYearDecision {
     /// For "usedApple": the album's own date before it was set (nil: it had none, and the detected date showed).
     var previousOverride: String?
     var decidedAt: Date
+    /// For "keepMine": which of the album's tracks differed from Music when it was decided (`ReleaseYearAudit.tracksSignature`); the album comes
+    /// back if that changes. nil: none differed.
+    var tracksSignature: String?
+    /// For "usedApple": whether the album's own date was changed (nil counts as yes). False when only its tracks' dates were.
+    var albumChanged: Bool?
+    /// For "usedApple": the tracks' own dates that were set (`ReleaseYearAudit.TrackChange`, as JSON), so they can be put back.
+    var trackChangesJSON: Data?
 
-    init(albumKey: String, artist: String, album: String, verdict: String, scroblyticsYear: Int, musicYear: Int, previousOverride: String?, decidedAt: Date) {
+    init(albumKey: String, artist: String, album: String, verdict: String, scroblyticsYear: Int, musicYear: Int, previousOverride: String?, decidedAt: Date,
+         tracksSignature: String? = nil, albumChanged: Bool? = nil, trackChangesJSON: Data? = nil) {
         self.albumKey = albumKey
         self.artist = artist
         self.album = album
@@ -644,6 +652,9 @@ final class ReleaseYearDecision {
         self.musicYear = musicYear
         self.previousOverride = previousOverride
         self.decidedAt = decidedAt
+        self.tracksSignature = tracksSignature
+        self.albumChanged = albumChanged
+        self.trackChangesJSON = trackChangesJSON
     }
 }
 

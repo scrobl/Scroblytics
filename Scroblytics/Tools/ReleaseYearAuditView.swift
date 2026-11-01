@@ -34,14 +34,23 @@ struct ReleaseYearAuditView: View {
     /// A change waiting for the person's confirmation.
     enum BulkRequest: Identifiable {
         case useApple([ReleaseYearAudit.AlbumRow])
+        case useAppleTracks([ReleaseYearAudit.AlbumRow])
         case keepMine([ReleaseYearAudit.AlbumRow])
 
         var id: String {
             switch self {
             case .useApple(let rows): "use-\(rows.count)"
+            case .useAppleTracks(let rows): "tracks-\(rows.count)"
             case .keepMine(let rows): "keep-\(rows.count)"
             }
         }
+    }
+
+    /// A change to Music's years that is waiting for the person's yes.
+    struct MusicOffer: Identifiable {
+        let id = UUID()
+        let updates: [ReleaseYearAudit.MusicYearUpdate]
+        let albums: Int
     }
 
     private static let toolId = "releaseYearAudit"
@@ -59,6 +68,12 @@ struct ReleaseYearAuditView: View {
     @State private var showingDecisions = false
     @State private var bulk: BulkRequest?
     @State private var editing: ReleaseYearAudit.AlbumRow?
+    /// Scroblytics' years brought to Music, once the person says yes.
+    @State private var musicOffer: MusicOffer?
+    @State private var isWritingMusic = false
+    /// How far a change to Music has got, and the task doing it (so it can be stopped).
+    @State private var musicProgress: (done: Int, total: Int)?
+    @State private var musicTask: Task<Void, Never>?
     /// The list's width, which decides between the columns (with a header) and the stacked rows.
     @State private var listWidth: CGFloat = 1100
     @Query(sort: \ReleaseYearDecision.decidedAt, order: .reverse) private var decisions: [ReleaseYearDecision]
@@ -66,12 +81,12 @@ struct ReleaseYearAuditView: View {
     private var decisionMap: [String: ReleaseYearAudit.Decision] {
         Dictionary(decisions.compactMap { d -> (String, ReleaseYearAudit.Decision)? in
             guard let verdict = ReleaseYearAudit.Decision.Verdict(rawValue: d.verdict) else { return nil }
-            return (d.albumKey, .init(albumKey: d.albumKey, verdict: verdict, scroblyticsYear: d.scroblyticsYear, musicYear: d.musicYear))
+            return (d.albumKey, .init(albumKey: d.albumKey, verdict: verdict, scroblyticsYear: d.scroblyticsYear, musicYear: d.musicYear, tracksSignature: d.tracksSignature ?? ""))
         }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Changes whenever a decision is added, removed or restored from a backup.
-    private var decisionSignature: [String] { decisions.map { "\($0.albumKey)|\($0.verdict)|\($0.scroblyticsYear)|\($0.musicYear)" } }
+    private var decisionSignature: [String] { decisions.map { "\($0.albumKey)|\($0.verdict)|\($0.scroblyticsYear)|\($0.musicYear)|\($0.tracksSignature ?? "")|\($0.trackChangesJSON?.count ?? 0)" } }
 
     private var visibleRows: [ReleaseYearAudit.AlbumRow] {
         guard let report else { return [] }
@@ -108,8 +123,33 @@ struct ReleaseYearAuditView: View {
             ReleaseDateEditView(
                 target: .album(artist: row.scroblytics.artist, album: row.scroblytics.title),
                 detectedDate: row.scroblytics.detected, currentOverride: row.scroblytics.override,
-                modelContext: modelContext, onSaved: { Task { await recompute() } }
+                modelContext: modelContext, onSaved: { Task { await recompute(); offerMusicUpdate(forAlbum: row.albumKey) } }
             )
+        }
+        // While Music is being changed, nothing else can be used.
+        .sheet(isPresented: Binding(get: { isWritingMusic }, set: { _ in })) {
+            VStack(spacing: 14) {
+                ProgressView().controlSize(.large)
+                Text("Updating Apple Music…").font(.headline)
+                if let progress = musicProgress {
+                    Text("\(progress.done.formatted()) of \(progress.total.formatted()) tracks").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Button("Stop") { musicTask?.cancel() }
+                    .help("Stops after the track being changed. What was already changed stays changed.")
+            }
+            .padding(32)
+            .frame(minWidth: 340)
+            .interactiveDismissDisabled()
+        }
+        .confirmationDialog(
+            "Update Apple Music too?", isPresented: Binding(get: { musicOffer != nil }, set: { if !$0 { musicOffer = nil } }), titleVisibility: .visible
+        ) {
+            Button("Update Apple Music") {
+                if let offer = musicOffer { musicOffer = nil; musicTask = Task { await writeToMusic(offer) } }
+            }
+            Button("Not now", role: .cancel) { musicOffer = nil }
+        } message: {
+            Text(musicOfferMessage)
         }
         .confirmationDialog(
             bulkTitle, isPresented: Binding(get: { bulk != nil }, set: { if !$0 { bulk = nil } }), titleVisibility: .visible
@@ -117,6 +157,8 @@ struct ReleaseYearAuditView: View {
             switch bulk {
             case .useApple(let rows)?:
                 Button("Use Apple Music’s year") { bulk = nil; apply(.useApple(rows)) }
+            case .useAppleTracks(let rows)?:
+                Button("Use Apple Music’s years for the tracks") { bulk = nil; apply(.useAppleTracks(rows)) }
             case .keepMine(let rows)?:
                 Button("Keep Scroblytics") { bulk = nil; apply(.keepMine(rows)) }
             case nil:
@@ -220,8 +262,7 @@ struct ReleaseYearAuditView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(decision.album).font(AppTypography.contentTitle).lineLimit(1)
                                 Text(decision.artist).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
-                                Text(used ? "Used Apple Music’s \(String(decision.musicYear)) (was \(String(decision.scroblyticsYear)))"
-                                          : "Kept Scroblytics’ \(String(decision.scroblyticsYear)); Apple Music has \(String(decision.musicYear))")
+                                Text(ReleaseYearAuditActions.summary(of: decision))
                                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                                 if !used, isStale(decision) {
                                     Text("The years have changed since, so it is being asked about again.")
@@ -303,8 +344,8 @@ struct ReleaseYearAuditView: View {
     private func counts(_ report: ReleaseYearAudit.Report) -> some View {
         Label("\(report.count(.offByOne).formatted()) a year apart", systemImage: "plusminus.circle.fill").foregroundStyle(.orange)
         Label("\(report.count(.differs).formatted()) differ by 2+ years", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-        Label("\(report.rows.filter(\.musicVaries).count.formatted()) compilations", systemImage: "square.stack.3d.up").foregroundStyle(.secondary)
-            .help("Albums whose tracks have several different years in Music: a greatest-hits set, a rarities collection.")
+        Label("\(report.rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty }.count.formatted()) compilations", systemImage: "square.stack.3d.up").foregroundStyle(.secondary)
+            .help("Albums whose tracks have several different years in Music (a greatest-hits set, a rarities collection) and some of whose tracks show a different year here.")
     }
 
     /// "Detected (source not recorded) 133 · Manual 40 …" for the albums that differ.
@@ -339,8 +380,13 @@ struct ReleaseYearAuditView: View {
         let rows = visibleRows
         if !rows.isEmpty {
             HStack(spacing: 8) {
-                Button { bulk = .useApple(rows) } label: { Label("Use Apple Music’s year for all \(rows.count.formatted())…", systemImage: "arrow.down.circle") }
-                    .help("Sets each album’s own release date to the year in Music, after you confirm. Albums whose Music tracks span several years are skipped.")
+                if options.filter == .musicVaries {
+                    Button { bulk = .useAppleTracks(rows) } label: { Label("Use Apple Music’s years for the tracks of all \(rows.count.formatted())…", systemImage: "arrow.down.circle") }
+                        .help("Sets the tracks’ own release dates to the years in Music, after you confirm. A track you gave a date of your own is never changed.")
+                } else {
+                    Button { bulk = .useApple(rows) } label: { Label("Use Apple Music’s year for all \(rows.count.formatted())…", systemImage: "arrow.down.circle") }
+                        .help("Sets each album’s own release date to the year in Music, after you confirm. Albums whose Music tracks span several years are skipped.")
+                }
                 Button { bulk = .keepMine(rows) } label: { Label("Keep Scroblytics for all \(rows.count.formatted())…", systemImage: "hand.raised") }
                     .help("Settles every album listed, after you confirm. Each comes back if either year changes.")
             }
@@ -352,6 +398,7 @@ struct ReleaseYearAuditView: View {
     private var bulkTitle: String {
         switch bulk {
         case .useApple(let rows)?: rows.count == 1 ? "Use Apple Music’s year for this album?" : "Use Apple Music’s year for \(rows.count.formatted()) albums?"
+        case .useAppleTracks(let rows)?: rows.count == 1 ? "Use Apple Music’s years for this album’s tracks?" : "Use Apple Music’s years for the tracks of \(rows.count.formatted()) albums?"
         case .keepMine(let rows)?: rows.count == 1 ? "Keep Scroblytics’ date for this album?" : "Keep Scroblytics’ date for \(rows.count.formatted()) albums?"
         case nil: ""
         }
@@ -369,6 +416,10 @@ struct ReleaseYearAuditView: View {
             var text = lines(rows) + "\n\nThis sets each album’s own release date in Scroblytics to Music’s year (the most common year among its tracks). Nothing changes in Music."
             if varies > 0 { text += " \(varies.formatted()) \(varies == 1 ? "album whose" : "albums whose") Music tracks span several years \(varies == 1 ? "is" : "are") skipped." }
             return text + " You can undo any of them from Decisions."
+        case .useAppleTracks(let rows)?:
+            var text = rows.prefix(10).map { "• \($0.scroblytics.artist) — \($0.scroblytics.title): \($0.trackDifferences.count) \($0.trackDifferences.count == 1 ? "track" : "tracks")" }.joined(separator: "\n")
+            if rows.count > 10 { text += "\n…and \(rows.count - 10) more" }
+            return text + "\n\nThis sets each of those tracks’ own release date in Scroblytics to the year Music holds for it. A track you gave a date of your own, and a track you have never played, is left alone. Nothing changes in Music. You can undo any of them from Decisions."
         case .keepMine(let rows)?:
             return lines(rows) + "\n\nNothing changes in Scroblytics or Music. These albums leave the list until either year changes."
         case nil:
@@ -398,6 +449,7 @@ struct ReleaseYearAuditView: View {
                     ReleaseYearAuditRowView(
                         row: row, isWide: isWide,
                         onUseApple: { apply(.useApple([row])) },
+                        onUseTracks: { apply(.useAppleTracks([row])) },
                         onKeepMine: { apply(.keepMine([row])) },
                         onEdit: { editing = row },
                         onOpen: { navigation.goToAlbum(AlbumIdentity(artist: row.scroblytics.artist, name: row.scroblytics.title)) }
@@ -440,9 +492,46 @@ struct ReleaseYearAuditView: View {
         guard let music else { return }
         let loaded = await ReleaseYearAuditStoreReader(modelContainer: modelContainer).load()
         let next = await Task.detached(priority: .userInitiated) {
-            ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides)
+            ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides, trackOverrideIndex: loaded.trackOverrideIndex, knownTracks: loaded.known)
         }.value
         report = next
+    }
+
+    // MARK: Updating Music too
+
+    /// After you keep Scroblytics' date (or edit it by hand), offers to make the years in Music match. Nothing happens in Music unless you say yes.
+    private func offerMusicUpdate(for rows: [ReleaseYearAudit.AlbumRow]) {
+        let updates = rows.flatMap { ReleaseYearAudit.musicUpdates(for: $0, albumYear: nil) }
+        guard !updates.isEmpty else { return }
+        musicOffer = MusicOffer(updates: updates, albums: rows.filter { !ReleaseYearAudit.musicUpdates(for: $0, albumYear: nil).isEmpty }.count)
+    }
+
+    private func offerMusicUpdate(forAlbum key: String) {
+        guard let row = report?.rows.first(where: { $0.albumKey == key }) else { return }
+        offerMusicUpdate(for: [row])
+    }
+
+    private var musicOfferMessage: String {
+        guard let offer = musicOffer else { return "" }
+        var lines = offer.updates.prefix(8).map { "• \($0.name) — \($0.album): \($0.from.map(String.init) ?? "no year") → \($0.to)" }
+        if offer.updates.count > 8 { lines.append("…and \(offer.updates.count - 8) more") }
+        let tracks = offer.updates.count
+        let time = AppleMusicYearWriter.estimate(tracks: tracks).map { " This takes \($0); you can stop it." } ?? ""
+        return lines.joined(separator: "\n") + "\n\nThis changes the Year of \(tracks.formatted()) \(tracks == 1 ? "track" : "tracks") on \(offer.albums.formatted()) \(offer.albums == 1 ? "album" : "albums") in your Apple Music library to match Scroblytics. It changes nothing else in Music. A track whose name or year in Music has changed since it was read is left alone, and Music may refuse a streaming track it can’t edit. Music has no undo for this: the list above is what was there.\(time)"
+    }
+
+    private func writeToMusic(_ offer: MusicOffer) async {
+        isWritingMusic = true
+        musicProgress = (0, offer.updates.count)
+        let results = await AppleMusicYearWriter.apply(offer.updates, progress: { done, total in
+            Task { @MainActor in musicProgress = (done, total) }
+        })
+        isWritingMusic = false
+        musicProgress = nil
+        musicTask = nil
+        resultMessage = AppleMusicYearWriter.summary(results)
+        // Read Music again so the list shows what it holds now.
+        await run()
     }
 
     private func apply(_ request: BulkRequest) {
@@ -451,9 +540,17 @@ struct ReleaseYearAuditView: View {
             case .useApple(let rows):
                 let result = try ReleaseYearAuditActions.useAppleYear(rows, skipVaries: rows.count > 1, context: modelContext)
                 resultMessage = Self.message("Set \(result.applied.formatted()) \(result.applied == 1 ? "album" : "albums") to Apple Music’s year", result)
+            case .useAppleTracks(let rows):
+                let result = try ReleaseYearAuditActions.useAppleYearsForTracks(rows, context: modelContext)
+                var text = "Set \(result.tracksSet.formatted()) \(result.tracksSet == 1 ? "track’s year" : "tracks’ years") on \(result.albums.formatted()) \(result.albums == 1 ? "album" : "albums")"
+                if result.skippedOwnDate > 0 { text += "; left \(result.skippedOwnDate.formatted()) with a date of your own" }
+                if result.skippedShared > 0 { text += "; \(result.skippedShared.formatted()) are on more than one of these albums and were set once" }
+                if result.skippedNoTrack > 0 { text += "; \(result.skippedNoTrack.formatted()) have no track here (never played)" }
+                resultMessage = text + "."
             case .keepMine(let rows):
                 let result = try ReleaseYearAuditActions.keepMine(rows, context: modelContext)
                 resultMessage = "Kept Scroblytics’ date for \(result.applied.formatted()) \(result.applied == 1 ? "album" : "albums")."
+                offerMusicUpdate(for: rows)
             }
         } catch {
             resultMessage = "That didn’t work: \(error.localizedDescription)"
@@ -513,11 +610,27 @@ struct ReleaseYearAuditRowView: View {
     let row: ReleaseYearAudit.AlbumRow
     var isWide = true
     var onUseApple: () -> Void = {}
+    var onUseTracks: () -> Void = {}
     var onKeepMine: () -> Void = {}
     var onEdit: () -> Void = {}
     var onOpen: () -> Void = {}
+    /// The tracks that differ are listed under the album when this is open.
+    @State private var showsTracks = false
+    /// Open to begin with (the layout snapshots use this; the list never does).
+    var initiallyOpen = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            columns
+            if showsTracks, !row.trackDifferences.isEmpty { trackPanel }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onAppear { if initiallyOpen { showsTracks = true } }
+    }
+
+    private var columns: some View {
         Group {
             if isWide {
                 HStack(alignment: .center, spacing: ReleaseYearAuditColumns.spacing) {
@@ -539,26 +652,72 @@ struct ReleaseYearAuditRowView: View {
                 }
             }
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 4)
-        .contentShape(Rectangle())
     }
 
     private var identity: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.scroblytics.title).font(AppTypography.contentTitle).lineLimit(1)
-                Text(row.scroblytics.artist).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
-                if row.musicVaries, let first = row.musicEarliest, let last = row.musicLatest {
-                    Label("Its tracks span \(String(first))–\(String(last)) in Music", systemImage: "square.stack.3d.up")
-                        .font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
-                        .help("Music holds several different years for this album’s tracks, so a single year for the album is a guess. The most common one is shown.")
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.scroblytics.title).font(AppTypography.contentTitle).lineLimit(1)
+                    Text(row.scroblytics.artist).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
+                    if row.musicVaries, let first = row.musicEarliest, let last = row.musicLatest {
+                        Label("Its tracks span \(String(first))–\(String(last)) in Music", systemImage: "square.stack.3d.up")
+                            .font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
+                            .help("Music holds several different years for this album’s tracks, so a single year for the album is a guess. The most common one is shown.")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help("Open the album")
+            if !row.trackDifferences.isEmpty {
+                let count = row.trackDifferences.count
+                Button { showsTracks.toggle() } label: {
+                    Label("\(count.formatted()) \(count == 1 ? "track differs" : "tracks differ")", systemImage: showsTracks ? "chevron.down" : "chevron.right")
+                        .font(AppTypography.compactMetadata)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help("Show the tracks whose year here differs from the year Music holds for them.")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The tracks that differ: the year shown here (its own date, or the album's) beside Music's.
+    private var trackPanel: some View {
+        let eligible = row.trackDifferences.filter { !$0.ownDate }.count
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 10) {
+                Text("Track").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Scroblytics").frame(width: 130, alignment: .trailing)
+                Text("Apple Music").frame(width: 100, alignment: .trailing)
+            }
+            .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            ForEach(row.trackDifferences.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }, id: \.self) { difference in
+                HStack(spacing: 10) {
+                    Text(difference.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(String(difference.scroblyticsYear) + (difference.ownDate ? " · your date" : ""))
+                        .foregroundStyle(difference.ownDate ? Color.purple : Color.secondary).frame(width: 130, alignment: .trailing)
+                    Text(String(difference.musicYear)).monospacedDigit().frame(width: 100, alignment: .trailing)
+                }
+                .font(AppTypography.metadata)
+            }
+            HStack(spacing: 10) {
+                Button(action: onUseTracks) {
+                    Label(eligible == 1 ? "Use Apple Music’s year for this track" : "Use Apple Music’s years for \(eligible.formatted()) tracks", systemImage: "arrow.down.circle")
+                }
+                .controlSize(.small)
+                .disabled(eligible == 0)
+                .help("Sets these tracks’ own release dates to the years in Music. A track you gave a date of your own, or one you have never played, is left alone.")
+                if eligible < row.trackDifferences.count {
+                    Text("A date you set yourself is never changed.").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
         }
-        .buttonStyle(.plain)
-        .help("Open the album")
+        .padding(10)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func scroblyticsBlock(width: CGFloat, labelled: Bool) -> some View {
@@ -603,9 +762,12 @@ struct ReleaseYearAuditRowView: View {
 
     private var buttons: some View {
         HStack(spacing: 6) {
+            // An album whose own year already agrees (a compilation listed for its tracks) has nothing to set.
+            if row.category != .same {
             Button(action: onUseApple) { Label("Use Apple Music’s", systemImage: "arrow.down.circle") }
                 .disabled(row.musicYear == nil)
                 .help(row.musicVaries ? "Set this album’s date to \(row.musicYear.map(String.init) ?? "—"), the most common year among its tracks in Music." : "Set this album’s own release date to \(row.musicYear.map(String.init) ?? "—").")
+            }
             Button(action: onKeepMine) { Label("Keep Scroblytics", systemImage: "hand.raised") }
                 .help("Settle this album as it is. It comes back only if either year changes.")
             Button(action: onEdit) { Label("Edit…", systemImage: "calendar") }

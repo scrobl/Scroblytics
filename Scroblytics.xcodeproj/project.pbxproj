@@ -38,6 +38,7 @@
 		14EAB428037966584C74D50D /* WeatherSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E799C4805DA9F1D11A928E2C /* WeatherSettingsView.swift */; };
 		15F3A1E6B2FD53E8D5EEE8B0 /* ShareCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB66BDBB2C1610EBD73CAA8 /* ShareCards.swift */; };
 		16DB620F64ADDA32398FCB72 /* TestProfileLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6975629FBBF5349F2ABE1CF8 /* TestProfileLauncher.swift */; };
+		16FE93C77CF6E5AE69743F42 /* AppleMusicYearWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD4129824E7684A9BA07EE5 /* AppleMusicYearWriter.swift */; };
 		17E8D72EB15A31DFBC1496EC /* TrendsComputeGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8869751982F117FBE0474E3 /* TrendsComputeGate.swift */; };
 		189C30393B24025CCC293AFC /* QueryScopeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C48D8E27218DF0FD40D708 /* QueryScopeEditor.swift */; };
 		1966C9DCCECDBD187579A680 /* CollageQuerySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D193F2C1EFF35C021D1E11DA /* CollageQuerySource.swift */; };
@@ -538,6 +539,7 @@
 		7A22AFA3823B3FA4B68E7B05 /* TagManagementView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TagManagementView.swift; sourceTree = "<group>"; };
 		7A2E235FEADBC246A91B1558 /* DurationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurationEngine.swift; sourceTree = "<group>"; };
 		7AC0B6072860932169FC8397 /* AutoPlaylistRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutoPlaylistRecipe.swift; sourceTree = "<group>"; };
+		7CD4129824E7684A9BA07EE5 /* AppleMusicYearWriter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppleMusicYearWriter.swift; sourceTree = "<group>"; };
 		7CD96AFC245A7C42A3F31AE8 /* AskSuggestions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskSuggestions.swift; sourceTree = "<group>"; };
 		7CE436DD34F6AACF330623D7 /* AskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskView.swift; sourceTree = "<group>"; };
 		7D0B6E8DF3AB897EA26A86CD /* TrendsWeatherViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsWeatherViews.swift; sourceTree = "<group>"; };
@@ -790,6 +792,7 @@
 				CD33DCF69A84EE73CFB991FA /* AppleMusicCatalog.swift */,
 				C86E59DC451FDBD041D9D82F /* AppleMusicFavoritesWriter.swift */,
 				DF4E4A9264C6F91097EB7D8A /* AppleMusicYearReader.swift */,
+				7CD4129824E7684A9BA07EE5 /* AppleMusicYearWriter.swift */,
 			);
 			path = AlbumMatching;
 			sourceTree = "<group>";
@@ -1812,6 +1815,7 @@
 				B0790E84B2AD08C308C46035 /* ReleaseYearAuditChecks.swift in Sources */,
 				5F877F284BB3A3519571C090 /* ReleaseYearAuditActions.swift in Sources */,
 				A1369D00C7F57C6260844AFD /* ReleaseYearAuditView.swift in Sources */,
+				16FE93C77CF6E5AE69743F42 /* AppleMusicYearWriter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

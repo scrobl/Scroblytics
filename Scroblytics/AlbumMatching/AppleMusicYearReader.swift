@@ -16,6 +16,7 @@ enum AppleMusicYearReader {
         set aas to album artist of every track of library playlist 1
         set als to album of every track of library playlist 1
         set ys to year of every track of library playlist 1
+        set ids to persistent ID of every track of library playlist 1
     end tell
     set AppleScript's text item delimiters to rs
     set o1 to ns as string
@@ -23,8 +24,9 @@ enum AppleMusicYearReader {
     set o3 to aas as string
     set o4 to als as string
     set o5 to ys as string
+    set o6 to ids as string
     set AppleScript's text item delimiters to ""
-    return o1 & gs & o2 & gs & o3 & gs & o4 & gs & o5
+    return o1 & gs & o2 & gs & o3 & gs & o4 & gs & o5 & gs & o6
     """
 
     static func read() async throws -> [AppleMusicTrackYear] {
@@ -34,16 +36,16 @@ enum AppleMusicYearReader {
         return tracks
     }
 
-    /// The five columns joined by the group separator, each a list joined by the record separator. A year of 0 or none is "no year".
+    /// The six columns joined by the group separator, each a list joined by the record separator. A year of 0 or none is "no year".
     static func parse(_ output: String) -> [AppleMusicTrackYear]? {
         let columns = output.trimmingCharacters(in: .newlines).components(separatedBy: columnSep)
-        guard columns.count == 5 else { return nil }
+        guard columns.count == 6 else { return nil }
         func items(_ column: String) -> [String] { column.isEmpty ? [] : column.components(separatedBy: itemSep) }
-        let names = items(columns[0]), artists = items(columns[1]), albumArtists = items(columns[2]), albums = items(columns[3]), years = items(columns[4])
-        guard artists.count == names.count, albumArtists.count == names.count, albums.count == names.count, years.count == names.count else { return nil }
+        let names = items(columns[0]), artists = items(columns[1]), albumArtists = items(columns[2]), albums = items(columns[3]), years = items(columns[4]), ids = items(columns[5])
+        guard artists.count == names.count, albumArtists.count == names.count, albums.count == names.count, years.count == names.count, ids.count == names.count else { return nil }
         return names.indices.map { i in
             let year = Int(years[i].trimmingCharacters(in: .whitespaces)).flatMap { $0 > 0 ? $0 : nil }
-            return AppleMusicTrackYear(name: names[i], artist: artists[i], albumArtist: albumArtists[i], album: albums[i], year: year)
+            return AppleMusicTrackYear(name: names[i], artist: artists[i], albumArtist: albumArtists[i], album: albums[i], year: year, persistentID: ids[i])
         }
     }
 }

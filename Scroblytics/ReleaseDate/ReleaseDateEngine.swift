@@ -129,6 +129,8 @@ enum ReleaseDateEngine {
         let kind: TargetKind
         let date: String?
         let succeeded: Bool
+        /// Which service gave `date` (albums only).
+        var source: ReleaseDateSource? = nil
         /// Stopped because Offline mode is on: not a failure, and the target stays queued.
         var paused = false
     }
@@ -416,6 +418,7 @@ enum ReleaseDateEngine {
         case .album:
             if let row = fetchAlbumRow(context: context, identityKey: result.key) {
                 row.releaseDateDetected = result.date
+                row.releaseDateSource = result.date == nil ? nil : result.source?.rawValue
                 row.releaseDateResolvedAt = Date()
             }
         case .track:
@@ -430,13 +433,15 @@ enum ReleaseDateEngine {
         for attempt in 0...maxRetries {
             do {
                 let date: String?
+                var source: ReleaseDateSource?
                 switch target.kind {
                 case .album:
-                    date = try await resolveAlbumDate(artist: target.artist, album: target.name, musicBrainz: musicBrainz, deezer: deezer)
+                    let found = try await resolveAlbumDate(artist: target.artist, album: target.name, musicBrainz: musicBrainz, deezer: deezer)
+                    (date, source) = (found?.date, found?.source)
                 case .track:
                     date = try await deezer.fetchTrackReleaseDate(artist: target.artist, track: target.name)
                 }
-                return FetchResult(key: key, kind: target.kind, date: date, succeeded: true)
+                return FetchResult(key: key, kind: target.kind, date: date, succeeded: true, source: source)
             } catch {
                 if error is OfflineError { return FetchResult(key: key, kind: target.kind, date: nil, succeeded: false, paused: true) }
                 if attempt == maxRetries { return FetchResult(key: key, kind: target.kind, date: nil, succeeded: false) }
@@ -456,13 +461,23 @@ enum ReleaseDateEngine {
     /// "no match" (return value `nil`) does.
     nonisolated private static func resolveAlbumDate(
         artist: String, album: String, musicBrainz: MusicBrainzAPIClient, deezer: DeezerAPIClient
-    ) async throws -> String? {
+    ) async throws -> (date: String, source: ReleaseDateSource)? {
         let queryAlbum = TextNormalization.stripEditionSuffix(album)
         let (mbQueryAlbum, mbHints) = TextNormalization.extractQueryHints(album)
-        if let mbDate = try await musicBrainz.fetchAlbumReleaseDate(artist: artist, album: mbQueryAlbum, hints: mbHints) {
-            return mbDate
-        }
-        return try await deezer.fetchAlbumReleaseDate(artist: artist, album: queryAlbum)
+        return try await pickAlbumDate(
+            musicBrainz: { try await musicBrainz.fetchAlbumReleaseDate(artist: artist, album: mbQueryAlbum, hints: mbHints) },
+            deezer: { try await deezer.fetchAlbumReleaseDate(artist: artist, album: queryAlbum) }
+        )
+    }
+
+    /// The order the services are asked in, and which one answered. A MusicBrainz THROW propagates (the second is never asked); only a
+    /// confirmed "no match" (`nil`) goes on to Deezer.
+    nonisolated static func pickAlbumDate(
+        musicBrainz: () async throws -> String?, deezer: () async throws -> String?
+    ) async throws -> (date: String, source: ReleaseDateSource)? {
+        if let date = try await musicBrainz() { return (date, .musicBrainz) }
+        if let date = try await deezer() { return (date, .deezer) }
+        return nil
     }
 
     private static func postProgress(isComplete: Bool) {

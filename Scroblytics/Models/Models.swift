@@ -122,6 +122,9 @@ final class Album {
     /// a separate table, since `Album` already carries its own detected/
     /// override pair rather than a dedicated cache entry.
     var releaseDateResolvedAt: Date?
+    /// Which service answered for `releaseDateDetected` (`ReleaseDateSource` raw value); nil for a date detected before this was recorded
+    /// and when there is no detected date. Re-fetchable like the date itself, so not in backups.
+    var releaseDateSource: String?
 
     var customImageFilename: String?
     /// Locally cached Deezer album artwork. A non-nil resolution timestamp with

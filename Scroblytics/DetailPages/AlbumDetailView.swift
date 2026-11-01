@@ -67,7 +67,7 @@ struct AlbumDetailView: View {
                 } else {
                     AlbumTrackTable(
                         artist: identity.artist, album: identity.name, range: range, compareRange: compareRange,
-                        metric: settings.metric, turnover: model.turnoverState
+                        metric: settings.metric, turnover: model.turnoverState, albumReleaseDate: model.releaseDate
                     )
                 }
             }

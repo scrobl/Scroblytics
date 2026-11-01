@@ -84,7 +84,7 @@ enum DetailSnapshots {
 
 
     @MainActor
-    static func table(compact: Bool = false, longAlbum: Bool = false) -> some View {
+    static func table(compact: Bool = false, longAlbum: Bool = false, trackDates: Bool = false) -> some View {
         let now = Date()
         func entry(_ name: String, plays: Int, daysAgo: Double) -> TopChartEntry {
             TopChartEntry(
@@ -106,8 +106,11 @@ enum DetailSnapshots {
                 AlbumTrackTable(
                     artist: "Artist A", album: "Album Name",
                     range: DateRange(from: now.addingTimeInterval(-365 * 86400), to: now), compareRange: nil, metric: .scrobbles,
-                    turnover: .ready(sampleTurnover(total: count, tracks: listed)), seedEntries: played,
-                    seedDurations: Dictionary(uniqueKeysWithValues: played.enumerated().map { (DurationEngine.cacheKey(artist: "Artist A", track: $0.element.name), 170 + ($0.offset * 17) % 140) })
+                    turnover: .ready(sampleTurnover(total: count, tracks: listed)),
+                    albumReleaseDate: trackDates ? "2018-09-12" : nil, seedEntries: played,
+                    seedDurations: Dictionary(uniqueKeysWithValues: played.enumerated().map { (DurationEngine.cacheKey(artist: "Artist A", track: $0.element.name), 170 + ($0.offset * 17) % 140) }),
+                    // Songs first released before the album, one out as a single a month ahead, one dated only to the album's year.
+                    seedTrackDates: trackDates ? Dictionary(uniqueKeysWithValues: [("Song 1", "1962-05-14"), ("Song 2", "1962"), ("Song 4", "2018-08"), ("Song 5", "2018"), ("Song 7", "1975-11-03")].map { (TextNormalization.lovedKey(artist: "Artist A", track: $0.0), $0.1) }) : nil
                 )
             }
         }
@@ -709,6 +712,9 @@ enum DetailSnapshots {
             WeatherTripStore.save([])
             await render(playsList(withWeather: false), width: 700, dark: true, container: container, to: base.appending(path: "plays-plain-700-dark.png"))
             await render(table(longAlbum: true), width: 900, dark: true, container: container, to: base.appending(path: "table-long-900-dark.png"))
+            for (width, dark) in [(900.0, true), (900.0, false), (560.0, true), (480.0, false)] {
+                await render(table(trackDates: true), width: width, dark: dark, container: container, to: base.appending(path: "table-dates-\(Int(width))-\(dark ? "dark" : "light").png"))
+            }
             exit(0)
         }
     }

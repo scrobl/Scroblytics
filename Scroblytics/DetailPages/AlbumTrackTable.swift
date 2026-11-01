@@ -11,9 +11,12 @@ struct AlbumTrackTable: View {
     let compareRange: DateRange?
     let metric: TopChartsMetric
     let turnover: AlbumTurnoverState
+    /// The album's own release date (as saved: "YYYY", "YYYY-MM" or "YYYY-MM-DD"), to tell which tracks carry a different one.
+    var albumReleaseDate: String? = nil
     /// Plays to show instead of loading them (the layout snapshots use this; the page never does).
     var seedEntries: [TopChartEntry]? = nil
     var seedDurations: [String: Int]? = nil
+    var seedTrackDates: [String: String]? = nil
 
     @Environment(\.modelContext) private var modelContext
     @State private var entries: [TopChartEntry] = []
@@ -26,6 +29,8 @@ struct AlbumTrackTable: View {
     @State private var width: CGFloat = 900
     /// Saved lengths by key (see `AlbumTrackDurations`); a track with none shows a dash.
     @State private var durations: [String: Int] = [:]
+    /// The release dates set on individual tracks, by track key (see `AlbumTrackReleaseDates`).
+    @State private var ownDates: [String: String] = [:]
     /// How the listening history spells this album's tracks, so a track not played in the period still opens its own page.
     @State private var playedNames: [String: PlayedName] = [:]
 
@@ -37,6 +42,8 @@ struct AlbumTrackTable: View {
     private static let showsLastPlayedFrom: CGFloat = 640
     private static let showsLengthFrom: CGFloat = 560
     private static let lengthWidth: CGFloat = 52
+    private static let releasedWidth: CGFloat = 92
+    private static let showsReleasedFrom: CGFloat = 520
 
     private var cycleWidth: CGFloat { width >= 900 ? 56 : 40 }
     private var playsWidth: CGFloat { min(300, max(100, width * 0.24)) }
@@ -49,6 +56,17 @@ struct AlbumTrackTable: View {
     private var hasCycle: Bool { tracklist?.contains { $0.heardThisCycle != nil } == true }
     private var showsLastPlayed: Bool { width >= Self.showsLastPlayedFrom }
     private var showsLength: Bool { width >= Self.showsLengthFrom }
+
+    private var releasedKeys: [String: String] { AlbumTrackReleaseDates.keys(for: allRows, albumArtist: artist, playedNames: playedNames) }
+    /// The rows whose own date differs from the album's. The Released column exists only when there are some.
+    private var differingDates: Set<String> {
+        AlbumTrackReleaseDates.differing(rowKeys: releasedKeys, overrides: ownDates, albumDate: albumReleaseDate)
+    }
+    private var hasDifferingDates: Bool { !differingDates.isEmpty }
+    private var showsReleased: Bool { hasDifferingDates && width >= Self.showsReleasedFrom }
+    private var rowDates: [String: String] {
+        AlbumTrackReleaseDates.dates(rowKeys: releasedKeys, overrides: ownDates, albumDate: albumReleaseDate)
+    }
 
     /// Changes when the set of tracks does, so the lengths are read again only then.
     private var lengthKeys: [String: String] { AlbumTrackDurations.keys(for: allRows, albumArtist: artist, playedNames: playedNames) }
@@ -68,7 +86,7 @@ struct AlbumTrackTable: View {
 
     private var visibleRows: [AlbumTrackRow] {
         let activeFilter = hasTracklist ? filter : .all
-        return AlbumTrackRows.sorted(AlbumTrackRows.filtered(allRows, by: activeFilter), by: sort, metric: metric, ascending: ascending)
+        return AlbumTrackRows.sorted(AlbumTrackRows.filtered(allRows, by: activeFilter), by: sort, metric: metric, ascending: ascending, dates: rowDates)
     }
 
     private var filterID: String {
@@ -98,7 +116,12 @@ struct AlbumTrackTable: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .task(id: filterID) { await load() }
         .task(id: "\(artist)|\(album)") { await loadPlayedNames() }
-        .task(id: "\(allRows.map(\.id))|\(playedNames.count)") { await loadLengths() }
+        .task(id: "\(allRows.map(\.id))|\(playedNames.count)") {
+            await loadLengths()
+            await loadTrackDates()
+        }
+        // Coming back from a track's page, where its date may have been changed.
+        .onAppear { Task { await loadTrackDates() } }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await loadLengths() }
         }
@@ -196,6 +219,7 @@ struct AlbumTrackTable: View {
         HStack(spacing: 10) {
             Text("#").frame(width: Column.position, alignment: .trailing)
             Text("Track").frame(maxWidth: .infinity, alignment: .leading)
+            if showsReleased { Text("Released").frame(width: Self.releasedWidth, alignment: .trailing) }
             if hasCycle { Text("Cycle").frame(width: cycleWidth) }
             Text(metric == .scrobbles ? "Plays in period" : "Time in period").frame(width: playsWidth, alignment: .trailing)
             if showsLastPlayed { Text("Last played").frame(width: lastPlayedWidth, alignment: .trailing) }
@@ -238,6 +262,7 @@ struct AlbumTrackTable: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            if showsReleased { releasedCell(row) }
             if hasCycle {
                 cycleMark(row.heardThisCycle).frame(width: cycleWidth)
             }
@@ -256,6 +281,16 @@ struct AlbumTrackTable: View {
         .padding(.vertical, 8)
         .opacity(played ? 1 : 0.5)
         .contentShape(Rectangle())
+    }
+
+    /// A track's own date stands out; one that is just the album's is quiet, so the exceptions are what the eye finds.
+    private func releasedCell(_ row: AlbumTrackRow) -> some View {
+        let own = differingDates.contains(row.id)
+        return Text(rowDates[row.id].map(AlbumTrackReleaseDates.text) ?? "—")
+            .font(AppTypography.metadata).monospacedDigit().lineLimit(1)
+            .foregroundStyle(own ? Color.primary : Color.secondary.opacity(0.6))
+            .frame(width: Self.releasedWidth, alignment: .trailing)
+            .help(own ? "A release date set on this track" + (albumReleaseDate.map { ", not the album’s (\(AlbumTrackReleaseDates.text($0)))" } ?? "") : "The album’s release date")
     }
 
     @ViewBuilder
@@ -332,6 +367,18 @@ struct AlbumTrackTable: View {
         let found = await AlbumTrackDurations.seconds(forKeys: keys, container: container)
         guard !Task.isCancelled else { return }
         durations = found
+    }
+
+    private func loadTrackDates() async {
+        if let seedTrackDates {
+            ownDates = seedTrackDates
+            return
+        }
+        let keys = Array(Set(releasedKeys.values))
+        let container = modelContext.container
+        let found = await AlbumTrackReleaseDates.overrides(forKeys: keys, container: container)
+        guard !Task.isCancelled else { return }
+        ownDates = found
     }
 
     private func load() async {

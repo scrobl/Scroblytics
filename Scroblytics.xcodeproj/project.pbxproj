@@ -55,6 +55,7 @@
 		25604F22DAE4CAB7F3B6E2C4 /* AlbumTrackDurations.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC81CEE9F6FB1F957BAD856 /* AlbumTrackDurations.swift */; };
 		25818536AD0A542B3673E36A /* CredentialsProblemViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A8D38A2DB7D07F0FAD2343 /* CredentialsProblemViews.swift */; };
 		25AE67B5F835BF26817E7B01 /* TheClimbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86BE5C0DC594B2F36A0D0776 /* TheClimbView.swift */; };
+		2697897F7AD771311E99B1D6 /* AlbumTrackReleaseDates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CBDEE8D36100EE3AFB8E6D0 /* AlbumTrackReleaseDates.swift */; };
 		28B3A168EB4F6C681867EA91 /* LastfmAccountForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F8B1E6CEA3C756C5036673 /* LastfmAccountForm.swift */; };
 		29820B19B322401A3FCE8EFE /* StoreProblem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A614632468D1FDFFA048839E /* StoreProblem.swift */; };
 		2AA206F1A110BBCB73F11921 /* EditionChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DFB139ADF6102C35F148E2 /* EditionChecks.swift */; };
@@ -570,6 +571,7 @@
 		9A87A98C230F8E70C3F85B99 /* ListeningFlowSampleData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningFlowSampleData.swift; sourceTree = "<group>"; };
 		9BF5A0B3ED46AD42B472533C /* LastfmMark.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LastfmMark.swift; sourceTree = "<group>"; };
 		9C6373768428521C0D4FE74F /* LastfmAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastfmAPIClient.swift; sourceTree = "<group>"; };
+		9CBDEE8D36100EE3AFB8E6D0 /* AlbumTrackReleaseDates.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AlbumTrackReleaseDates.swift; sourceTree = "<group>"; };
 		9DB9B3CEE15FDD9E905F4FA3 /* ModelContextSave.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelContextSave.swift; sourceTree = "<group>"; };
 		9E737354271CE3CC5803AE59 /* EntitySubListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitySubListView.swift; sourceTree = "<group>"; };
 		9E8CD81548B76905EB3F1FDD /* ScrobbleHistoryCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScrobbleHistoryCache.swift; sourceTree = "<group>"; };
@@ -1112,6 +1114,7 @@
 				CFC81CEE9F6FB1F957BAD856 /* AlbumTrackDurations.swift */,
 				38F63838339CB68FE4110025 /* DetailLoadMemo.swift */,
 				927AEA0BDBF6CEF88AAD3B6E /* TrackPlaysList.swift */,
+				9CBDEE8D36100EE3AFB8E6D0 /* AlbumTrackReleaseDates.swift */,
 			);
 			name = DetailPages;
 			path = DetailPages;
@@ -1788,6 +1791,7 @@
 				99648673F775F4DF1AE3A2E2 /* QueryHeadlessRunner.swift in Sources */,
 				88F7E99CF016113D3AF4BE8B /* AutoPlaylistsView.swift in Sources */,
 				39D633EA57173E954B6864A5 /* ModelContextSave.swift in Sources */,
+				2697897F7AD771311E99B1D6 /* AlbumTrackReleaseDates.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

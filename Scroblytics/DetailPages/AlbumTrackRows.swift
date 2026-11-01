@@ -147,8 +147,8 @@ enum AlbumTrackRows {
 
     /// Orders the rows, ascending or descending (nil = the sort's own starting direction). Tracks with no plays count as zero plays
     /// in "Most played"; in the date orders a track with nothing to date is last whichever way the list runs, since "unknown" is not
-    /// oldest or newest. "Track order" puts extras after the tracklist, and a reversed list starts with them.
-    static func sorted(_ rows: [AlbumTrackRow], by sort: AlbumTrackSort, metric: TopChartsMetric, ascending: Bool? = nil) -> [AlbumTrackRow] {
+    /// oldest or newest. "Release year" goes by the date shown for the row (`dates`, by row id: a track's own date, else the album's). "Track order" puts extras after the tracklist, and a reversed list starts with them.
+    static func sorted(_ rows: [AlbumTrackRow], by sort: AlbumTrackSort, metric: TopChartsMetric, ascending: Bool? = nil, dates: [String: String] = [:]) -> [AlbumTrackRow] {
         let up = ascending ?? sort.startsAscending
         func byTitle(_ a: AlbumTrackRow, _ b: AlbumTrackRow) -> Bool {
             a.title.localizedStandardCompare(b.title) == .orderedAscending
@@ -184,7 +184,8 @@ enum AlbumTrackRows {
         case .recentlyPlayed:
             return byValue { $0.entry?.lastPlayedAt }
         case .releaseYear:
-            return byValue { $0.entry?.releaseDate.flatMap(ReleaseDateEngine.year(of:)) }
+            // A track's own date (or the album's) by row; failing that, the date its plays carry.
+            return byValue { dates[$0.id].flatMap(ReleaseDateEngine.year(of:)) ?? $0.entry?.releaseDate.flatMap(ReleaseDateEngine.year(of:)) }
         }
     }
 

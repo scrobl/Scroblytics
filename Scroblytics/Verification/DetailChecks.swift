@@ -200,6 +200,40 @@ enum DetailChecks {
             check("a length reads as m:ss, h:mm:ss, or a dash when unknown", AlbumTrackDurations.text(seconds: 224) == "3:44" && AlbumTrackDurations.text(seconds: 3725) == "1:02:05" && AlbumTrackDurations.text(seconds: nil) == "—")
 
 
+            // MARK: The released column (a track's own date next to the album's)
+            func diff(_ track: String, _ album: String?) -> Bool { AlbumTrackReleaseDates.differs(track, from: album) }
+            check("a track dated differently from its album differs: a year, a month, a day", diff("1953", "2008-09-30") && diff("2008-08", "2008-09-30") && diff("2008-09-29", "2008-09-30") && diff("1953-01-12", "2008"))
+            check("the same date, or one inside a year-only or month-only album date, does not differ", !diff("2008-09-30", "2008-09-30") && !diff("2008-09-30", "2008") && !diff("2008", "2008-09-30") && !diff("2008-09", "2008-09-30") && !diff("2008-09-30", "2008-09"))
+            check("an album with no date known has nothing to agree with", diff("1953", nil))
+            let keysByRow = AlbumTrackReleaseDates.keys(for: merged, albumArtist: "Artist A")
+            check("every row has its own date key, the one a track's page edits", Set(keysByRow.values).count == merged.count && keysByRow[playedRow.id] == TextNormalization.lovedKey(artist: "Artist A", track: "Song One") && keysByRow[unplayedRow.id] == TextNormalization.lovedKey(artist: "Artist A", track: "Song Three"))
+            let ownDates = [keysByRow[playedRow.id]!: "1953-01-12", keysByRow[unplayedRow.id]!: "2008-09-30"]
+            let shown = AlbumTrackReleaseDates.dates(rowKeys: keysByRow, overrides: ownDates, albumDate: "2008-09-30")
+            check("every row shows its own date, else the album's", shown[playedRow.id] == "1953-01-12" && shown[unplayedRow.id] == "2008-09-30" && merged.allSatisfy { shown[$0.id] != nil })
+            check("with no album date, only tracks with their own date have one", AlbumTrackReleaseDates.dates(rowKeys: keysByRow, overrides: ownDates, albumDate: nil).count == 2)
+            check("only the tracks that differ are marked: a track given the album's own date is not", AlbumTrackReleaseDates.differing(rowKeys: keysByRow, overrides: ownDates, albumDate: "2008-09-30") == [playedRow.id])
+            check("an album whose tracks all share its date has no column", AlbumTrackReleaseDates.differing(rowKeys: keysByRow, overrides: [:], albumDate: "2008-09-30").isEmpty && AlbumTrackReleaseDates.differing(rowKeys: keysByRow, overrides: [keysByRow[playedRow.id]!: "2008"], albumDate: "2008-09-30").isEmpty)
+            check("the column reads a date as far as it is known", AlbumTrackReleaseDates.text("1953") == "1953" && AlbumTrackReleaseDates.text("1953-01") == "Jan 1953" && AlbumTrackReleaseDates.text("1953-01-12") == "Jan 12, 1953")
+            let datedOrder = AlbumTrackRows.sorted(merged, by: .releaseYear, metric: .scrobbles, ascending: true, dates: [playedRow.id: "1953-01-12", unplayedRow.id: "2008"]).map(\.title)
+            check("sorting by release year follows the dates shown, tracks the album never dated last", datedOrder.prefix(2) == ["Song One", "Song Three"], "\(datedOrder)")
+            if let container = try? ModelContainer(for: Schema([Artist.self, Album.self, Track.self, AlbumImageOverride.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true)) {
+                let context = ModelContext(container)
+                let artist = Artist(normalizedName: "artist a", name: "Artist A")
+                context.insert(artist)
+                for (title, date) in [("Song One", "1953-01-12" as String?), ("Song Two", nil), ("Song Three", "")] {
+                    let track = Track(identityKey: TextNormalization.lovedKey(artist: "Artist A", track: title), title: title, normalizedTitle: title.lowercased(), artist: artist)
+                    track.releaseDateOverride = date
+                    context.insert(track)
+                }
+                try? context.save()
+                let found = await AlbumTrackReleaseDates.overrides(forKeys: Array(keysByRow.values), container: container)
+                check("the store returns only the dates people set (not blanks, not other tracks)", found == [TextNormalization.lovedKey(artist: "Artist A", track: "Song One"): "1953-01-12"], "\(found)")
+                let none = await AlbumTrackReleaseDates.overrides(forKeys: [], container: container)
+                check("asking for no tracks reads nothing", none.isEmpty)
+            } else {
+                check("an in-memory store opens for the date reader", false)
+            }
+
             // MARK: Opening a track that wasn't played in the period
             func snap(_ artist: String, _ album: String, _ track: String) -> ScrobbleSnapshot {
                 ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track, imageURL: nil, playedAt: now)

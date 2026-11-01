@@ -110,6 +110,9 @@ struct ScrobbleHistoryView: View {
     /// The weather where you were for each play, when weather is turned on and downloaded (Settings › Weather).
     @State private var weather = WeatherSnapshot.empty
     @State private var availableWidth: CGFloat = 1000
+    /// The library's artwork index, so a row shows the same picture as everywhere else: a picture you chose, or the cover the app found,
+    /// before the image Last.fm stored on the play (which is often its blank star).
+    @State private var artwork: [String: String] = [:]
 
     private let pageSize = 200
     /// Below these widths the Location column goes first, then the Weather column, so a title is never squeezed to nothing.
@@ -145,13 +148,30 @@ struct ScrobbleHistoryView: View {
             }
         }
         .task { await loadWeather() }
+        .task { await loadArtwork() }
         .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await loadWeather() } }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             Task {
                 await resetAndLoad()
                 await loadTotalCount()
+                await loadArtwork()
             }
         }
+    }
+
+    private func loadArtwork() async {
+        let found = (try? await TopChartsEngine.artworkLookup(container: modelContainer)) ?? [:]
+        guard !Task.isCancelled else { return }
+        artwork = found
+    }
+
+    /// The picture for a play: the library's own for its track, album or artist, else the image stored on the play unless that is
+    /// Last.fm's blank star (then none, and the row shows its note icon).
+    private func shownImage(_ row: ScrobbleHistoryRow) -> String? {
+        ImageResolutionEngine.effectiveImageURL(
+            for: ImageTarget(kind: .track, artist: row.artist, album: row.album, track: row.track),
+            lookup: artwork, fallbackURL: row.imageURL
+        )
     }
 
     private var historyList: some View {
@@ -194,16 +214,17 @@ struct ScrobbleHistoryView: View {
             .listRowSeparator(.hidden)
 
             ForEach(rows) { row in
+                let image = shownImage(row)
                 NavigationLink(
                     value: TrackIdentity(
                         artist: row.artist,
                         name: row.track,
                         album: row.album,
-                        imageURL: row.imageURL
+                        imageURL: image
                     )
                 ) {
                     ScrobbleHistoryListRow(
-                        row: row, weather: weather, unit: WeatherSettings.temperatureUnit(),
+                        row: row, imageURL: image, weather: weather, unit: WeatherSettings.temperatureUnit(),
                         showsWeather: !weather.isEmpty && availableWidth >= Self.weatherMinimumWidth,
                         showsLocation: availableWidth >= Self.locationMinimumWidth
                     )
@@ -216,7 +237,7 @@ struct ScrobbleHistoryView: View {
                         album: row.album,
                         track: row.track
                     ),
-                    currentImageURL: row.imageURL
+                    currentImageURL: image
                 )
             }
 
@@ -332,6 +353,8 @@ struct ScrobbleHistoryView: View {
 
 private struct ScrobbleHistoryListRow: View {
     let row: ScrobbleHistoryRow
+    /// The picture to show (see `ScrobbleHistoryView.shownImage`), not the one stored on the play.
+    let imageURL: String?
     var weather = WeatherSnapshot.empty
     var unit = TemperatureUnit.celsius
     var showsWeather = false
@@ -339,7 +362,7 @@ private struct ScrobbleHistoryListRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ArtworkImage(urlString: row.imageURL, contentMode: .fill) {
+            ArtworkImage(urlString: imageURL, contentMode: .fill) {
                 Color.clear
                     .overlay {
                         Image(systemName: "music.note")

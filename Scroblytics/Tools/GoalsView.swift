@@ -248,6 +248,10 @@ struct GoalsView: View {
             HStack(spacing: 12) {
                 stat("Heard", a.heardNow.formatted(), detail: "of \(a.membersNow.formatted()) \(goal.criteria.loved == .loved ? "loved" : "tracks")")
                 stat("To hear", a.remainingNow.formatted(), detail: percentLabel(a.heardNow, a.membersNow) + " done")
+                // The day's progress, as on the goal's card: only while the goal is running, and back to 0 each morning.
+                if Self.showsHeardToday(a) {
+                    stat("Heard today", a.heardToday.formatted(), detail: a.heardToday == 1 ? "track, first time" : "tracks, first time")
+                }
                 if a.daysUntilStart > 0 {
                     stat("Starts in", a.daysUntilStart.formatted(), detail: a.daysUntilStart == 1 ? "day" : "days")
                 } else {
@@ -256,6 +260,11 @@ struct GoalsView: View {
                 stat("Needed", a.remainingNow == 0 ? "—" : String(format: "%.1f", a.requiredPerDay), detail: "a day, if none repeat")
             }
         }
+    }
+
+    /// Whether a goal is running, so "heard today" means something: started, not complete, and the deadline not yet reached.
+    static func showsHeardToday(_ a: GoalAnalysis) -> Bool {
+        a.completedIndex == nil && a.daysUntilStart == 0 && a.todayIndex < a.deadlineIndex
     }
 
     private func stat(_ title: String, _ value: String, detail: String) -> some View {

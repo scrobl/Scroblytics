@@ -104,6 +104,9 @@ enum GoalsChecks {
             check("after the deadline nothing is left to forecast", overdue.daysLeft == 0 && overdue.todayIndex == 40)
             let done = GoalEngine.analyze(goal: goal, loves: (1...2).map { love($0) }, plays: plays, now: now, calendar: calendar)
             check("a finished goal says when", done.remainingNow == 0 && done.completedIndex == 0, "\(String(describing: done.completedIndex))")
+            // The goal's page shows "Heard today" only while the goal is running.
+            check("the goal's page shows heard today while the goal runs", GoalsView.showsHeardToday(analysis) && GoalsView.showsHeardToday(withToday))
+            check("…but not before it starts, once it is finished, or after its deadline", !GoalsView.showsHeardToday(GoalEngine.analyze(goal: notStarted, loves: loves, plays: todaysPlays, now: now, calendar: calendar)) && !GoalsView.showsHeardToday(done) && !GoalsView.showsHeardToday(overdue))
 
             // MARK: A bulk day of loves
             // 60 more loves, all dated day 4 (an import), alongside the ten above.

@@ -48,7 +48,7 @@ enum QueryEngine {
         let universe = run.evaluationEntities
         var matched = universe
         var cellsByField: [String: [QueryEntityID: QueryCell]] = [:]
-        let matcher = QueryMatcher(calendar: run.calendar)
+        let matcher = QueryMatcher(calendar: run.calendar, now: run.asOf)
 
         if !query.groups.isEmpty {
             // Compute each referenced field once, over the whole universe.

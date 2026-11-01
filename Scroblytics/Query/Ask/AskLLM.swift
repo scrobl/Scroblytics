@@ -405,9 +405,11 @@ enum AskPortableSchema {
 
         let condition = object([
             "field": ["type": "string", "enum": fieldIDs], "op": ["type": "string", "enum": operators],
-            "value": nullable(number), "valueTo": nullable(number), "text": nullable(string),
+            "value": nullable(number.merging(["description": "the number to compare with; for inLast / notInLast how many units back (365 for “365 days”)"]) { $1 }),
+            "valueTo": nullable(number),
+            "text": nullable(string.merging(["description": "the text to compare with; for inLast / notInLast the unit only: days, weeks, months or years"]) { $1 }),
             "date": nullable(string), "dateTo": nullable(string),
-            "tags": ["type": "array", "items": string, "description": "tag names for a tag operator; empty otherwise"],
+            "tags": ["type": "array", "items": string, "description": "tag names for a tag operator, or day names (Sunday…Saturday) for weekdayIs / weekdayIsNot; empty otherwise"],
             "parameters": ["type": "array", "items": parameter, "description": "field settings, only where the field lists some; empty otherwise"],
             "scope": ["anyOf": [scope, ["type": "null"]]],
             "comparedAgo": ["anyOf": [shift, ["type": "null"]]],

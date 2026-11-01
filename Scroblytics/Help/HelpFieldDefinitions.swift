@@ -178,7 +178,7 @@ enum HelpFieldDefinitions {
         "firstPlayed": "The date of the earliest play in the period (or date scope). Compared by whole local days. No value if none.",
         "lastPlayed": "The date of the latest play in the period (or date scope). Compared by whole local days. No value if none.",
         "releaseYear": "The year it was first released. An album uses your override, else the detected date. A track uses its own override, else its main album’s date (the album it is scrobbled under most), and only a track with no album is looked up on its own. No value means none could be found; a lookup still running matches nothing.",
-        "releaseDate": "The first day of the period known: a year-only release is January 1, a month-only release is the 1st. Compared in UTC. To filter on the year exactly, use **Release year**.",
+        "releaseDate": "The first day of the period known: a year-only release is January 1, a month-only release is the 1st. Compared in UTC. To filter on the year exactly, use **Release year**. Besides before, after, on and between it takes **in the last N days, weeks, months or years** (a window that rolls with today), **not in the last**, **not on**, and **day of week is / is not**.",
     ]
 
     // MARK: Context

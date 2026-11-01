@@ -13,6 +13,10 @@ enum LayoutSnapshots {
             snapshotAskEngine(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_DATEOPS"] {
+            snapshotDateOperators(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_PLAYLIST"] {
             snapshotPlaylistDialog(into: folder)
             return
@@ -119,6 +123,45 @@ enum LayoutSnapshots {
     }
 
     /// `SCROBLYTICS_LAYOUT_SNAPSHOT_UPDATES=<folder>`: the "update available" strip at several widths and the Settings › Updates section.
+    @MainActor
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_DATEOPS=<folder>`: Query's condition rows for the date operators (in the last, not in the last, day of
+    /// week) at a narrow and a wide width, light and dark.
+    private static func snapshotDateOperators(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let conditions: [QueryCondition] = [
+                QueryCondition("releaseDate", .inLast, [.number(365), .text("days")]),
+                QueryCondition("releaseDate", .notInLast, [.number(6), .text("months")]),
+                QueryCondition("releaseDate", .weekdayIs, [.text("Friday")]),
+                QueryCondition("releaseDate", .weekdayIsNot, [.text("Saturday"), .text("Sunday")]),
+                QueryCondition("releaseDate", .notOn, [.date(Date())]),
+                QueryCondition("lastPlayed", .inLast, [.number(1), .text("weeks")]),
+            ]
+            for scheme in ["dark", "light"] {
+                for width: CGFloat in [340, 560] {
+                    let rows = VStack(alignment: .leading, spacing: 14) {
+                        ForEach(Array(conditions.enumerated()), id: \.offset) { _, condition in
+                            QueryConditionRow(condition: .constant(condition), registry: .standard, target: .track, onRemove: {})
+                        }
+                    }.padding(16)
+                    let host = NSHostingView(rootView: rows.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: scheme == "dark" ? .darkAqua : .aqua)
+                    window.contentView = host
+                    for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                    window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "dateops-\(Int(width))-\(scheme).png"))
+                    }
+                }
+            }
+            print("DATEOPS snapshots written to \(folder)")
+            exit(0)
+        }
+    }
+
     @MainActor
     /// `SCROBLYTICS_LAYOUT_SNAPSHOT_PLAYLIST=<folder>`: the playlist dialog with and without the keep-updated switch, and the result sheet for an
     /// automatic playlist with some tracks not found, light and dark.

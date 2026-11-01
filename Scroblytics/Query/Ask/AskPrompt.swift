@@ -56,6 +56,13 @@ enum AskPrompt {
         - "released in / from the 90s / before 1990 / newest" is about when the music CAME OUT: use the release-year field. A decade is \
         both ends inclusive: the 90s = between 1990 and 1999. "Discovered / first heard in" is about the first play, not the release.
         - "from <year>" with no word like played or listened means released in that year.
+        - A window counted back from today is a rolling date condition, not fixed dates: "released in the last year / 365 days / 6 months", \
+        "added or first played in the last 30 days", "not played in the last 3 months" → the date field with inLast (or notInLast), value the number, \
+        text the unit (days, weeks, months or years: "a year" is 1 years, "a month" 1 months, "a week" 1 weeks). Use releaseDate for released, firstPlayed \
+        for first heard, lastPlayed for last heard. Do not turn it into dateBetween with today's date: the window must keep rolling. A named \
+        calendar stretch ("in 2024", "in March") is still dateBetween.
+        - "released on a Friday", "first played on a weekend" → weekdayIs on the date field with the day names in tags (weekend = Saturday and Sunday); \
+        "not on a Monday" → weekdayIsNot. This is the day the DATE falls on, not the day a track is mostly played (that is the "dayOfWeek" field).
         - "played a lot but only over a few days", "binged", "a short burst": a plays condition AND a small number of ACTIVE days \
         (the number of different days it was played), or a small gap between its first and last play. "Played across many different \
         days" is a large active-days number; "how long it stayed in rotation" is the days between first and last play.

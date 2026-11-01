@@ -284,7 +284,7 @@ enum AskPatterns {
     /// say each/every/per year (or a top thing "by year") count.
     static func breakdownByYear(in request: String) -> Bool {
         let text = request.lowercased()
-        guard !matches(text, #"\b(?:release|released)\s+year\b|\byear\s+of\s+release\b"#) else { return false }
+        guard !matches(text, #"\b(?:release|released)(?:\s+date)?\s+year\b|\byear\s+of\s+release\b"#) else { return false }
         return matches(text, #"\b(?:each|every|per)\s+(?:calendar\s+)?year\b|\byear\s+by\s+year\b|\bfor\s+each\s+year\b|\byearly\b|\bannual(?:ly)?\b"#)
             || matches(text, #"\b(?:top|best|most[- ]played|favou?rite)\s+(?:\d+\s+|\w+\s+)?(?:artist|album|track|song|tune)s?\s+(?:by|for|of|in)\s+(?:each\s+)?year\b"#)
     }
@@ -505,7 +505,8 @@ enum AskPatterns {
         let perArtist = explicit("artist") ?? (each("artist") ? 1 : nil)
         let perAlbum = explicit("album") ?? (each("album") ? 1 : nil)
         // Only the explicit wording: "release year", "year of release" ("each year" alone stays the model's call).
-        let releaseYear = #"(?:(?:release|released)\s+year|year\s+of\s+release)"#
+        // “release date year” says the same thing as “release year”.
+        let releaseYear = #"(?:(?:release|released)(?:\s+date)?\s+year|year\s+of\s+release)"#
         let perYear = explicit(releaseYear) ?? (matches(text, #"\b(?:each|every)\s+\#(releaseYear)s?\b"#) || topOneByReleaseYear(text) ? 1 : nil)
         return (perArtist, perAlbum, perYear)
     }
@@ -514,7 +515,7 @@ enum AskPatterns {
     /// asks for the best one of every year. The plural ("top albums by release year") could just as well mean sorted by year, so it is
     /// left to the model.
     static func topOneByReleaseYear(_ lowered: String) -> Bool {
-        matches(lowered, #"\b(?:top|best|favou?rite|most[- ]played|#1)\s+(?:album|track|song|tune)\s+(?:by|for|of|in|from)\s+(?:(?:each|every)\s+)?(?:release|released)\s+year\b"#)
+        matches(lowered, #"\b(?:top|best|favou?rite|most[- ]played|#1)\s+(?:album|track|song|tune)\s+(?:by|for|of|in|from)\s+(?:(?:each|every)\s+)?(?:release|released)(?:\s+date)?\s+year\b"#)
     }
 
     /// "my most played song", "the top album": a singular superlative asks for the one.
@@ -560,7 +561,7 @@ enum AskPatterns {
         guard grouping else { return false }
         if caps.perArtist != nil, matches(lowered, #"\b(?:artist|band)s?\b"#) { return true }
         if caps.perAlbum != nil, matches(lowered, #"\balbums?\b"#) { return true }
-        if caps.perReleaseYear != nil, matches(lowered, #"\b(?:release|released)\s+years?\b|\byears?\s+of\s+release\b|\byears?\b"#) { return true }
+        if caps.perReleaseYear != nil, matches(lowered, #"\b(?:release|released)(?:\s+date)?\s+years?\b|\byears?\s+of\s+release\b|\byears?\b"#) { return true }
         return false
     }
 

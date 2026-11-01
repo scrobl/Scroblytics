@@ -13,6 +13,7 @@ enum QueryCapChecks {
             if !ok { failures += 1 }
         }
         seasonChecks(check)
+        dateOperatorChecks(check)
         breakdownChecks(check)
         engineChecks(check)
         modelChecks(check)
@@ -86,6 +87,167 @@ enum QueryCapChecks {
         spec.limit = limit
         if rankOrder { spec.showInRankOrder = true }
         return spec
+    }
+
+    // MARK: - Date operators: in the last / not in the last / not on / day of week
+
+    private static func dateOperatorChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func calendar(_ zone: String) -> Calendar {
+            var c = Calendar(identifier: .gregorian)
+            c.timeZone = TimeZone(identifier: zone)!
+            return c
+        }
+        let utc = calendar("UTC")
+        func day(_ y: Int, _ m: Int, _ d: Int, _ hour: Int = 0, in cal: Calendar = utc) -> Date {
+            cal.date(from: DateComponents(year: y, month: m, day: d, hour: hour))!
+        }
+        func cell(_ date: Date) -> QueryCell { .value(.date(date)) }
+        // “Now” is Sunday 1 November 2026, mid-afternoon, where the person is (UTC here).
+        let now = day(2026, 11, 1, 15)
+        let matcher = QueryMatcher(calendar: utc, now: now)
+        func inLast(_ n: Double, _ unit: String, _ date: Date, matcher m: QueryMatcher? = nil, on cal: Calendar? = nil) -> Bool {
+            (m ?? matcher).matches(cell(date), op: .inLast, operands: [.number(n), .text(unit)], calendar: cal)
+        }
+        func notInLast(_ n: Double, _ unit: String, _ date: Date) -> Bool {
+            matcher.matches(cell(date), op: .notInLast, operands: [.number(n), .text(unit)])
+        }
+
+        // The window is whole days, counted back from today: today and the N days before it.
+        check("in the last 7 days: today and the six days before it", inLast(7, "days", day(2026, 11, 1)) && inLast(7, "days", day(2026, 10, 26)) && !inLast(7, "days", day(2026, 10, 25)))
+        check("in the last 365 days: 2 Nov a year ago is in, 1 Nov a year ago is out", inLast(365, "days", day(2025, 11, 2)) && !inLast(365, "days", day(2025, 11, 1)))
+        check("in the last 1 years: the same window as 365 days here", inLast(1, "years", day(2025, 11, 2)) && !inLast(1, "years", day(2025, 11, 1)) && inLast(1, "years", day(2026, 7, 4)))
+        check("in the last 1 months: 2 Oct to today", inLast(1, "months", day(2026, 10, 2)) && !inLast(1, "months", day(2026, 10, 1)))
+        check("in the last 2 weeks: 14 days", inLast(2, "weeks", day(2026, 10, 19)) && !inLast(2, "weeks", day(2026, 10, 18)))
+        check("a date still to come is not in the last year", !inLast(1, "years", day(2026, 11, 2)) && !inLast(1, "years", day(2027, 3, 1)))
+        check("a play later today (any time of day) is in, one at 00:00 tomorrow is not", inLast(1, "days", day(2026, 11, 1, 23)) && !inLast(1, "days", day(2026, 11, 2, 0)) && inLast(1, "days", day(2026, 11, 1, 0)) && !inLast(1, "days", day(2026, 10, 31, 23)))
+        check("the window moves with “now”: a month later the same date has dropped out", inLast(30, "days", day(2026, 10, 20)) && !inLast(30, "days", day(2026, 10, 20), matcher: QueryMatcher(calendar: utc, now: day(2026, 12, 15, 9))))
+        // Not in the last: everything outside, the future included; a missing or pending value matches neither.
+        check("not in the last 365 days is the complement for a date: old and future dates are in it", notInLast(365, "days", day(2024, 1, 1)) && notInLast(365, "days", day(2027, 1, 1)) && !notInLast(365, "days", day(2026, 6, 1)))
+        for date in [day(2024, 1, 1), day(2025, 11, 1), day(2025, 11, 2), day(2026, 11, 1), day(2026, 11, 2)] {
+            check("exactly one of in / not in the last 365 days holds for \(date.formatted(date: .abbreviated, time: .omitted))", inLast(365, "days", date) != notInLast(365, "days", date))
+        }
+        for op in [QueryOperator.inLast, .notInLast, .notOn, .weekdayIs, .weekdayIsNot] {
+            let operands: [QueryValue] = op == .inLast || op == .notInLast ? [.number(7), .text("days")] : op == .notOn ? [.date(now)] : [.text("Friday")]
+            check("\(op.label): a missing or pending value matches nothing", !matcher.matches(.missing, op: op, operands: operands) && !matcher.matches(.pending, op: op, operands: operands))
+        }
+        // “Today” is the date where the person is, even though a release date is a UTC day.
+        let la = calendar("America/Los_Angeles")
+        let lateSaturdayInLA = day(2026, 10, 31, 20, in: la)   // 3 AM Sunday 1 Nov in UTC, still the 31st in Los Angeles
+        let laMatcher = QueryMatcher(calendar: la, now: lateSaturdayInLA)
+        check("release dates (UTC days) are compared with today's date where you are: on the evening of 31 Oct 31 Oct is in, 1 Nov is not yet",
+              inLast(1, "days", day(2026, 10, 31), matcher: laMatcher, on: utc) && !inLast(1, "days", day(2026, 11, 1), matcher: laMatcher, on: utc) && inLast(2, "days", day(2026, 10, 30), matcher: laMatcher, on: utc))
+        // Not on.
+        check("not on: any other day, but not the same day at another time", matcher.matches(cell(day(2026, 10, 31)), op: .notOn, operands: [.date(day(2026, 11, 1))]) && !matcher.matches(cell(day(2026, 11, 1, 23)), op: .notOn, operands: [.date(day(2026, 11, 1, 2))]))
+        check("on and not on are opposites for a date, and neither matches an empty cell", matcher.matches(cell(day(2026, 11, 1, 8)), op: .on, operands: [.date(day(2026, 11, 1))]) && !matcher.matches(.missing, op: .on, operands: [.date(now)]))
+        // Day of week: Friday 30 Oct 2026, Saturday 31, Sunday 1 Nov.
+        func weekday(_ op: QueryOperator, _ date: Date, _ days: [String], cal: Calendar? = nil) -> Bool {
+            matcher.matches(cell(date), op: op, operands: days.map { .text($0) }, calendar: cal)
+        }
+        check("day of week is: Friday matches a Friday only", weekday(.weekdayIs, day(2026, 10, 30), ["Friday"]) && !weekday(.weekdayIs, day(2026, 10, 31), ["Friday"]))
+        check("day of week is: several days mean any of them (a weekend)", weekday(.weekdayIs, day(2026, 10, 31), ["Saturday", "Sunday"]) && weekday(.weekdayIs, day(2026, 11, 1), ["Saturday", "Sunday"]) && !weekday(.weekdayIs, day(2026, 10, 30), ["Saturday", "Sunday"]))
+        check("day of week is not: none of them", weekday(.weekdayIsNot, day(2026, 10, 30), ["Saturday", "Sunday"]) && !weekday(.weekdayIsNot, day(2026, 11, 1), ["Saturday", "Sunday"]))
+        check("day names ignore case and spaces", weekday(.weekdayIs, day(2026, 10, 30), [" friday "]) && weekday(.weekdayIs, day(2026, 10, 30), ["FRIDAY"]))
+        check("a release date's day of week is its UTC day, whatever zone the person is in", matcher.matches(cell(day(2026, 10, 30)), op: .weekdayIs, operands: [.text("Friday")], calendar: utc) && !QueryMatcher(calendar: la, now: now).matches(cell(day(2026, 10, 30)), op: .weekdayIs, operands: [.text("Friday")]))
+        // Validation.
+        func valid(_ op: QueryOperator, _ operands: [QueryValue], type: QueryValueType = .date) -> Bool {
+            (try? QueryMatcher.validate(fieldID: "f", fieldType: type, op: op, operands: operands)) != nil
+        }
+        check("in the last takes a whole number of at least 1 and a known unit", valid(.inLast, [.number(30), .text("days")]) && valid(.notInLast, [.number(1), .text("years")])
+              && !valid(.inLast, [.number(0), .text("days")]) && !valid(.inLast, [.number(1.5), .text("days")]) && !valid(.inLast, [.number(-3), .text("days")])
+              && !valid(.inLast, [.number(30), .text("fortnights")]) && !valid(.inLast, [.number(1e9), .text("days")]))
+        check("in the last needs both operands, a number then a unit", !valid(.inLast, [.number(30)]) && !valid(.inLast, [.text("days"), .number(30)]) && !valid(.inLast, [.date(now), .text("days")]))
+        check("the day operators take only real day names, at least one", valid(.weekdayIs, [.text("Friday")]) && valid(.weekdayIsNot, [.text("Saturday"), .text("Sunday")]) && !valid(.weekdayIs, [.text("Funday")]) && !valid(.weekdayIs, []) && !valid(.weekdayIs, [.number(5)]))
+        check("not on takes one date", valid(.notOn, [.date(now)]) && !valid(.notOn, [.number(1)]) && !valid(.notOn, []))
+        check("the new operators belong to date fields only", !valid(.inLast, [.number(30), .text("days")], type: .numeric) && !valid(.weekdayIs, [.text("Friday")], type: .text) && !valid(.notOn, [.date(now)], type: .numeric))
+        check("a date field offers the new operators; other types are unchanged", QueryValueType.date.operators.contains(.inLast) && QueryValueType.date.operators.contains(.weekdayIsNot) && QueryValueType.date.operators.first == .before && !QueryValueType.numeric.operators.contains(.inLast) && !QueryValueType.text.operators.contains(.notOn))
+        check("every operator has a meaning for the model and a label", QueryOperator.allCases.allSatisfy { AskVocabulary.operatorMeaning[$0] != nil && !$0.label.isEmpty })
+        check("changing between in the last / not in the last, or day is / is not, keeps the operands", QueryOperator.inLast.operandTypes == QueryOperator.notInLast.operandTypes && QueryOperator.weekdayIs.operandTypes == QueryOperator.weekdayIsNot.operandTypes && QueryOperator.before.operandTypes != QueryOperator.inLast.operandTypes)
+
+        // A saved condition survives a round trip, and one saved before these operators decodes as it did.
+        let saved = QueryCondition("releaseDate", .inLast, [.number(365), .text("days")])
+        let restored = (try? JSONEncoder().encode(saved)).flatMap { try? JSONDecoder().decode(QueryCondition.self, from: $0) }
+        check("an “in the last” condition round-trips through its saved form", restored == saved)
+        check("operators saved before these existed still decode by name", ["dateBetween", "before", "after", "on", "hasValue", "tagsIsAny"].allSatisfy { (try? JSONDecoder().decode(QueryOperator.self, from: Data("\"\($0)\"".utf8))) != nil })
+
+        // End to end through the engine and the real Release date field: tracks of four albums with full release dates.
+        let asOf = day(2026, 11, 1, 15)
+        let albums: [(name: String, date: String)] = [("Fresh", "2026-10-20"), ("LastWinter", "2025-12-05"), ("JustOutside", "2025-11-01"), ("Old", "2019-05-17"), ("YearOnly", "2026")]
+        var releases = ReleaseDateEngine.Snapshot()
+        var plays: [ScrobbleSnapshot] = []
+        for (index, album) in albums.enumerated() {
+            let info = ReleaseDateEngine.Snapshot.AlbumInfo(artistKey: TextNormalization.artistIdentityKey("Artist A"), override: nil, detected: album.date, resolved: true)
+            releases.albumsByIdentityKey[TextNormalization.albumIdentityKey(artist: "Artist A", album: album.name)] = info
+            releases.albumsByNormalizedTitle[TextNormalization.normalizeAlbumName(album.name), default: []].append(info)
+            for n in 0...index { plays.append(ScrobbleSnapshot(artistName: "Artist A", albumName: album.name, trackName: "\(album.name) song", imageURL: nil, playedAt: asOf.addingTimeInterval(-Double(n + 1) * 3600))) }
+        }
+        var snaps = QuerySnapshots()
+        snaps.releaseDates = releases
+        func albumsWhere(_ op: QueryOperator, _ operands: [QueryValue]) -> [String]? {
+            var spec = QuerySpec(target: .album)
+            spec.groups = [[QueryCondition("releaseDate", op, operands)]]
+            spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+            spec.columns = [QueryFieldRef("releaseDate")]
+            guard let validated = try? spec.validate(against: .standard) else { return nil }
+            let run = QueryRun(target: .album, asOf: asOf, scrobbles: plays, allTimeScrobbles: plays, snapshots: snaps)
+            return QueryEngine.evaluate(validated, run: run).rows.map { $0.entity.name }
+        }
+        let lastYear = albumsWhere(.inLast, [.number(365), .text("days")])
+        check("albums released in the last 365 days (engine, real Release date field): the recent ones, a year-only 2026 as 1 Jan 2026, not the one a day too old", Set(lastYear ?? []) == ["Fresh", "LastWinter", "YearOnly"], "\(String(describing: lastYear))")
+        let notLastYear = albumsWhere(.notInLast, [.number(365), .text("days")])
+        check("not in the last 365 days: the older ones, and together with “in the last” every album with a date", Set(notLastYear ?? []) == ["JustOutside", "Old"] && Set(lastYear ?? []).union(notLastYear ?? []).count == 5, "\(String(describing: notLastYear))")
+        let moved = albumsWhere(.inLast, [.number(1), .text("years")])
+        check("1 year gives the same albums as 365 days here", moved == lastYear)
+        let weekendAlbums = albumsWhere(.weekdayIs, [.text("Saturday"), .text("Sunday")])
+        // 2026-10-20 Tuesday, 2025-12-05 Friday, 2025-11-01 Saturday, 2019-05-17 Friday, 2026-01-01 (year only) Thursday.
+        check("albums released on a weekend, by the UTC day of the release date", Set(weekendAlbums ?? []) == ["JustOutside"], "\(String(describing: weekendAlbums))")
+        let notFriday = albumsWhere(.weekdayIsNot, [.text("Friday")])
+        check("albums not released on a Friday", Set(notFriday ?? []) == ["Fresh", "JustOutside", "YearOnly"], "\(String(describing: notFriday))")
+        let notOnDay = albumsWhere(.notOn, [.date(day(2025, 12, 5))])
+        check("not on 5 Dec 2025: every album with a release date but that one", Set(notOnDay ?? []) == ["Fresh", "JustOutside", "Old", "YearOnly"], "\(String(describing: notOnDay))")
+        // Rolling: a month later "in the last 30 days" has moved on.
+        func freshInLast30(asOf later: Date) -> [String] {
+            var spec = QuerySpec(target: .album)
+            spec.groups = [[QueryCondition("releaseDate", .inLast, [.number(30), .text("days")])]]
+            guard let validated = try? spec.validate(against: .standard) else { return ["invalid"] }
+            let run = QueryRun(target: .album, asOf: later, scrobbles: plays, allTimeScrobbles: plays, snapshots: snaps)
+            return QueryEngine.evaluate(validated, run: run).rows.map { $0.entity.name }
+        }
+        check("the same saved query rolls: 30 days after 1 Nov the fresh album has aged out", freshInLast30(asOf: asOf) == ["Fresh"] && freshInLast30(asOf: day(2026, 12, 15, 12)).isEmpty)
+
+        // Ask reads these from a reply, with the unit and the days checked.
+        func read(_ conditions: String, _ request: String, target: String = "album") -> AskTranslation? {
+            try? AskModelEngine.read(reply(target: target, conditions: conditions), request: request, registry: .standard, context: .none, now: Date(), engine: "test", seconds: 0)
+        }
+        func wire(_ op: String, value: String = "null", text: String = "null", tags: String = "[]") -> String {
+            #"[{"field":"releaseDate","op":"\#(op)","value":\#(value),"valueTo":null,"text":\#(text),"date":null,"dateTo":null,"tags":\#(tags),"parameters":[],"scope":null,"comparedAgo":null}]"#
+        }
+        let askLast = read(wire("inLast", value: "1", text: #""year""#), "albums released in the last year")
+        check("Ask: “in the last 1 year” becomes inLast 1 years (a singular unit is accepted)", askLast?.interpretation.spec.groups.first?.first == QueryCondition("releaseDate", .inLast, [.number(1), .text("years")]) && askLast?.interpretation.dropped.isEmpty == true, "\(String(describing: askLast?.interpretation.spec.groups))")
+        let askDays = read(wire("inLast", value: "365", text: #""days""#), "albums released in the last 365 days")
+        check("Ask: 365 days is kept as a rolling condition, not turned into fixed dates", askDays?.interpretation.spec.groups.first?.first?.op == .inLast && askDays?.interpretation.spec.groups.first?.first?.operands == [.number(365), .text("days")])
+        let askFriday = read(wire("weekdayIs", tags: #"["friday"]"#), "albums released on a friday")
+        check("Ask: “released on a friday” becomes the day-of-week operator with the app's own day name", askFriday?.interpretation.spec.groups.first?.first == QueryCondition("releaseDate", .weekdayIs, [.text("Friday")]), "\(String(describing: askFriday?.interpretation.spec.groups))")
+        let releaseDateYear = AskPatterns.groupLimit(in: "top 1 song by plays for each release date year")
+        check("“for each release date year” is the per-release-year cap, like “each release year”", releaseDateYear.perReleaseYear == 1 && AskPatterns.groupLimit(in: "one album per release date year").perReleaseYear == 1 && AskPatterns.groupLimit(in: "2 tracks per release year").perReleaseYear == 2 && !AskPatterns.breakdownByYear(in: "top 1 song by plays for each release date year"))
+        check("“for each year” on its own is still not read as the cap", AskPatterns.groupLimit(in: "my top song for each year").perReleaseYear == nil)
+        let askTextOnly = read(wire("inLast", text: #""365 days""#), "albums released within the last 365 days")
+        check("Ask: “365 days” written as the text, with no number, is read the same way", askTextOnly?.interpretation.spec.groups.first?.first == QueryCondition("releaseDate", .inLast, [.number(365), .text("days")]), "\(String(describing: askTextOnly?.interpretation))")
+        let askNoUnit = read(wire("inLast", value: "365"), "albums released within the last 365 days")
+        check("Ask: a number with no unit is refused (a unit is never guessed), and says so", askNoUnit?.interpretation.spec.groups.first?.isEmpty ?? true && askNoUnit?.interpretation.dropped.count == 1, "\(String(describing: askNoUnit?.interpretation.dropped))")
+        let askBadUnit = read(wire("inLast", value: "3", text: #""fortnights""#), "albums released in the last 3 fortnights")
+        check("Ask: an unknown unit is refused, not guessed", askBadUnit?.interpretation.spec.groups.first?.isEmpty ?? true, "\(String(describing: askBadUnit?.interpretation))")
+        let askBadDay = read(wire("weekdayIs", tags: #"["Funday"]"#), "albums released on a funday")
+        check("Ask: an unknown day is refused", askBadDay?.interpretation.spec.groups.first?.isEmpty ?? true)
+        check("Ask: the chips read “in the last 365 days”, “in the last year” and the day names", {
+            let registry = QueryFieldRegistry.standard
+            return AskChips.describe(QueryCondition("releaseDate", .inLast, [.number(365), .text("days")]), target: .album, registry: registry).hasSuffix("in the last 365 days")
+                && AskChips.describe(QueryCondition("releaseDate", .inLast, [.number(1), .text("years")]), target: .album, registry: registry).hasSuffix("in the last year")
+                && AskChips.describe(QueryCondition("releaseDate", .weekdayIsNot, [.text("Saturday"), .text("Sunday")]), target: .album, registry: registry).hasSuffix("day of week is not Saturday, Sunday")
+        }())
+        let prompt = AskPrompt.system(registry: .standard, context: .none, now: Date())
+        check("the model prompt names the new operators and the rolling-window rule", prompt.contains("inLast") && prompt.contains("weekdayIs") && prompt.contains("notInLast") && prompt.contains("rolling"))
+        check("every worked example (the new ones included) still reads cleanly", AskExamples.staleExamples(registry: .standard).isEmpty)
     }
 
     // MARK: - Break down by calendar year

@@ -251,6 +251,37 @@ enum AskInterpreter {
     }
 
     private static func operands(for op: QueryOperator, _ c: AskWire.Condition, field: QueryField, calendar: Calendar) throws -> [QueryValue] {
+        switch op {
+        case .inLast, .notInLast:
+            // The count is in `value` and the unit alone in `text`; a model that writes “365 days” as the text (and no number) is read the
+            // same way. A unit is never guessed: with none, the condition is refused.
+            var count = c.value
+            var unitText = c.text?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            if count == nil, let split = unitText.firstIndex(where: { $0.isWhitespace }), let number = Double(unitText[..<split]) {
+                count = number
+                unitText = unitText[split...].trimmingCharacters(in: .whitespaces)
+            }
+            if unitText.hasPrefix("last ") { unitText = String(unitText.dropFirst(5)) }
+            guard let count, !unitText.isEmpty else {
+                throw QueryError.unsupported("“\(op.rawValue)” needs a number and a unit (\(QueryOperator.relativeUnits.joined(separator: ", ")))")
+            }
+            try checkReasonable(count)
+            // A singular unit (“1 year”) means the same as the plural.
+            let plural = unitText.hasSuffix("s") ? unitText : unitText + "s"
+            return [.number(count), .text(plural)]
+        case .weekdayIs, .weekdayIsNot:
+            let names = (c.tags ?? []) + (c.text.map { [$0] } ?? [])
+            // Exactly the app's own day names (“friday” and “Friday” are the same), or the condition is refused with the list.
+            let days = try names.map { name -> String in
+                guard let index = QueryMatcher.weekdayIndex(of: name) else {
+                    throw QueryError.unsupported("“\(name)” isn’t a day of the week (\(QueryOperator.dayNames.joined(separator: ", ")))")
+                }
+                return QueryOperator.dayNames[index]
+            }
+            guard !days.isEmpty else { throw QueryError.unsupported("“\(op.rawValue)” needs at least one day of the week") }
+            return days.map { .text($0) }
+        default: break
+        }
         switch op.arity {
         case .none: return []
         case .oneOrMore:

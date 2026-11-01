@@ -75,6 +75,17 @@ enum AskChips {
         guard let resolved = try? registry.resolve(condition.field, target: target) else { return condition.field.id }
         let operands = condition.operands.map { display($0, field: resolved.field) }
         let value: String
+        // “in the last 365 days”, not “365 and “days””.
+        if condition.op == .inLast || condition.op == .notInLast, case .number(let count)? = condition.operands.first,
+           case .text(let unit)? = condition.operands.dropFirst().first {
+            let n = Int(count)
+            let shown = n == 1 ? String(unit.dropLast()) : unit
+            return [resolved.title, condition.op.label, n == 1 ? "" : String(n), shown].filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        if condition.op == .weekdayIs || condition.op == .weekdayIsNot {
+            let days = condition.operands.compactMap { operand -> String? in if case .text(let name) = operand { name } else { nil } }
+            return [resolved.title, condition.op.label, days.joined(separator: ", ")].joined(separator: " ")
+        }
         switch condition.op.arity {
         case .none: value = ""
         case .two: value = operands.joined(separator: " and ")

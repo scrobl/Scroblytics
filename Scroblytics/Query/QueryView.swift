@@ -1253,8 +1253,8 @@ struct QueryConditionRow: View {
     }
 
     static func defaultOperands(for op: QueryOperator) -> [QueryValue] {
-        func one() -> QueryValue {
-            switch op.operandType {
+        func blank(_ type: QueryValueType?) -> QueryValue {
+            switch type {
             case .numeric: .number(0)
             case .text: .text("")
             case .date: .date(Date())
@@ -1262,10 +1262,15 @@ struct QueryConditionRow: View {
             case .boolean, nil: .bool(true)
             }
         }
+        switch op {
+        case .inLast, .notInLast: return [.number(30), .text("days")]
+        case .weekdayIs, .weekdayIsNot: return [.text(QueryOperator.dayNames[0])]
+        default: break
+        }
         switch op.arity {
         case .none: return []
-        case .one, .oneOrMore: return [one()]
-        case .two: return [one(), one()]
+        case .one, .oneOrMore: return [blank(op.operandTypes.first)]
+        case .two: return op.operandTypes.map { blank($0) }
         }
     }
 
@@ -1379,13 +1384,33 @@ struct QueryConditionRow: View {
     private func setOperator(_ op: QueryOperator) {
         // Keep what the user already entered when the new operator takes the same kind and number
         // of operands (any-of → all-of, ≥ → >); otherwise start from defaults.
-        let keepsOperands = condition.op.operandType == op.operandType && condition.op.arity == op.arity
+        let keepsOperands = condition.op.operandTypes == op.operandTypes && condition.op.arity == op.arity
         condition.op = op
         if !keepsOperands { condition.operands = Self.defaultOperands(for: op) }
     }
 
     @ViewBuilder
     private var operandEditors: some View {
+        if condition.op == .weekdayIs || condition.op == .weekdayIsNot {
+            QueryDayOfWeekEditor(days: Binding(
+                get: { condition.operands.compactMap { if case .text(let name) = $0 { name } else { nil } } },
+                set: { condition.operands = $0.map { QueryValue.text($0) } }
+            ))
+        } else if condition.op == .inLast || condition.op == .notInLast {
+            QueryRelativeSpanEditor(count: Binding(
+                get: { if case .number(let n)? = condition.operands.first { n } else { 30 } },
+                set: { if condition.operands.count == 2 { condition.operands[0] = .number($0) } }
+            ), unit: Binding(
+                get: { if case .text(let u)? = condition.operands[safe: 1] { u } else { "days" } },
+                set: { if condition.operands.count == 2 { condition.operands[1] = .text($0) } }
+            ))
+        } else {
+            plainOperandEditors
+        }
+    }
+
+    @ViewBuilder
+    private var plainOperandEditors: some View {
         ForEach(Array(condition.operands.indices), id: \.self) { i in
             if let operand = condition.operands[safe: i] {
             switch operand {
@@ -1432,6 +1457,64 @@ struct QueryConditionRow: View {
                 EmptyView()
             }
             }
+        }
+    }
+}
+
+/// “in the last [30] [days ▾]”: a whole count and its unit, for the relative date operators.
+private struct QueryRelativeSpanEditor: View {
+    @Binding var count: Double
+    @Binding var unit: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            NumberEntryField(title: "number", value: Binding(
+                get: { count },
+                set: { count = min(max($0.rounded(), 1), Double(QueryOperator.relativeCountLimit)) }
+            ))
+            .textFieldStyle(.roundedBorder).frame(width: 70)
+            Picker("", selection: $unit) {
+                ForEach(QueryOperator.relativeUnits, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help("How far back to count, from today: today and the days (weeks, months, years) before it.")
+        }
+    }
+}
+
+/// A menu of the seven days with a tick on each one chosen (at least one stays chosen), for the day-of-week operators.
+private struct QueryDayOfWeekEditor: View {
+    @Binding var days: [String]
+
+    private var chosen: Set<String> { Set(days.compactMap { name in QueryOperator.dayNames.first { $0.caseInsensitiveCompare(name) == .orderedSame } }) }
+
+    var body: some View {
+        Menu {
+            ForEach(QueryOperator.dayNames, id: \.self) { name in
+                Button {
+                    var next = chosen
+                    if next.contains(name) { next.remove(name) } else { next.insert(name) }
+                    if !next.isEmpty { days = QueryOperator.dayNames.filter { next.contains($0) } }
+                } label: {
+                    Label(name, systemImage: chosen.contains(name) ? "checkmark" : "")
+                }
+            }
+        } label: {
+            Text(summary).lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Pick the days of the week. More than one means any of them.")
+    }
+
+    private var summary: String {
+        let picked = QueryOperator.dayNames.filter { chosen.contains($0) }
+        switch picked.count {
+        case 0: return "pick days"
+        case 1: return picked[0]
+        case 7: return "every day"
+        default: return picked.map { String($0.prefix(3)) }.joined(separator: ", ")
         }
     }
 }

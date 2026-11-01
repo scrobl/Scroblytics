@@ -42,6 +42,11 @@ enum AskExamples {
             groups: [[cond("playsChange", "greaterThan", value: 0, scope: thisMonth, comparedAgo: yearAgo)]], unsupported: [])),
         Example(request: "artists I discovered in 2023", target: .artist, ordered: false, query: AskWire.Query(
             groups: [[cond("firstPlayed", "dateBetween", date: "2023-01-01", dateTo: "2023-12-31")]], unsupported: [])),
+        Example(request: "my top 100 songs released in the last year", target: .track, ordered: true, query: AskWire.Query(
+            groups: [[cond("releaseDate", "inLast", value: 1, text: "years")]],
+            sorts: [.init(field: "plays", direction: "descending")], limit: 100, unsupported: [])),
+        Example(request: "albums released on a Friday", target: .album, ordered: false, query: AskWire.Query(
+            groups: [[AskWire.Condition(field: "releaseDate", op: "weekdayIs", tags: ["Friday"])]], unsupported: [])),
         Example(request: "tracks I played at least 5 times in the last 30 days", target: .track, ordered: false, query: AskWire.Query(
             groups: [[cond("plays", "greaterThanOrEqual", value: 5, scope: .init(kind: "trailing", days: 30))]], unsupported: [])),
         Example(request: "tracks I mostly play in the evening", target: .track, ordered: false, query: AskWire.Query(

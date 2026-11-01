@@ -14,6 +14,12 @@ enum QueryOperator: String, Codable, CaseIterable, Sendable, Hashable {
     case wholeWord
     // Date (calendar-day granularity)
     case before, after, on, dateBetween
+    /// "Not on this day": a resolved date on any other day.
+    case notOn
+    /// "In the last N days / weeks / months / years", counted back from the run's "now" (so a saved query keeps rolling).
+    case inLast, notInLast
+    /// The day of the week the date falls on (any of the chosen days / none of them).
+    case weekdayIs, weekdayIsNot
     // Boolean
     case isTrue, isFalse
     // Tags — exact, autocompleted values, so is/is-not with an any/all mode,
@@ -34,23 +40,39 @@ enum QueryOperator: String, Codable, CaseIterable, Sendable, Hashable {
     var arity: Arity {
         switch self {
         case .hasValue, .isMissing, .isTrue, .isFalse: .none
-        case .between, .dateBetween: .two
-        case .tagsIsAny, .tagsIsAll, .tagsIsNotAny, .tagsIsNotAll: .oneOrMore
+        case .between, .dateBetween, .inLast, .notInLast: .two
+        case .tagsIsAny, .tagsIsAll, .tagsIsNotAny, .tagsIsNotAll, .weekdayIs, .weekdayIsNot: .oneOrMore
         default: .one
         }
     }
 
-    /// The operand type the operator expects (nil when it takes none).
-    var operandType: QueryValueType? {
+    /// The type of each operand, in order (one entry per operand; for `.oneOrMore` the type every operand has). Empty when it takes none.
+    var operandTypes: [QueryValueType] {
         switch self {
-        case .equals, .notEquals, .greaterThan, .greaterThanOrEqual, .lessThan, .lessThanOrEqual, .between: .numeric
+        case .equals, .notEquals, .greaterThan, .greaterThanOrEqual, .lessThan, .lessThanOrEqual: [.numeric]
+        case .between: [.numeric, .numeric]
         case .textIs, .textIsNot, .contains, .doesNotContain, .startsWith, .doesNotStartWith,
-             .endsWith, .doesNotEndWith, .wholeWord: .text
-        case .before, .after, .on, .dateBetween: .date
-        case .tagsIsAny, .tagsIsAll, .tagsIsNotAny, .tagsIsNotAll: .tags
-        case .isTrue, .isFalse, .hasValue, .isMissing: nil
+             .endsWith, .doesNotEndWith, .wholeWord: [.text]
+        case .before, .after, .on, .notOn: [.date]
+        case .dateBetween: [.date, .date]
+        // A count and its unit (“days”, “weeks”, “months”, “years”).
+        case .inLast, .notInLast: [.numeric, .text]
+        // Day names (“Friday”).
+        case .weekdayIs, .weekdayIsNot: [.text]
+        case .tagsIsAny, .tagsIsAll, .tagsIsNotAny, .tagsIsNotAll: [.tags]
+        case .isTrue, .isFalse, .hasValue, .isMissing: []
         }
     }
+
+    /// The type of the first operand (nil when it takes none).
+    var operandType: QueryValueType? { operandTypes.first }
+
+    /// The units “in the last” counts in, as stored in the condition.
+    static let relativeUnits = ["days", "weeks", "months", "years"]
+    /// The days a weekday condition names, Sunday first (the numbering the heatmap and play filter use).
+    static let dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    /// The most “in the last” will count back, so a typo can't ask for a window that never fits a date.
+    static let relativeCountLimit = 100_000
 
     var label: String {
         switch self {
@@ -74,6 +96,11 @@ enum QueryOperator: String, Codable, CaseIterable, Sendable, Hashable {
         case .after: "after"
         case .on: "on"
         case .dateBetween: "between"
+        case .notOn: "not on"
+        case .inLast: "in the last"
+        case .notInLast: "not in the last"
+        case .weekdayIs: "day of week is"
+        case .weekdayIsNot: "day of week is not"
         case .isTrue: "is yes"
         case .isFalse: "is no"
         case .tagsIsAny: "is any of"
@@ -99,7 +126,7 @@ extension QueryValueType {
             return [.textIs, .textIsNot, .contains, .doesNotContain, .startsWith, .doesNotStartWith,
                     .endsWith, .doesNotEndWith, .wholeWord] + universal
         case .date:
-            return [.before, .after, .on, .dateBetween] + universal
+            return [.before, .after, .on, .notOn, .dateBetween, .inLast, .notInLast, .weekdayIs, .weekdayIsNot] + universal
         case .boolean:
             return [.isTrue, .isFalse] + universal
         case .tags:
@@ -121,6 +148,7 @@ enum QueryError: Error, Equatable, CustomStringConvertible {
     case unsupported(String)
     case emptyTagOperand
     case emptyTextOperand
+    case invalidOperand(String)
     case rangeOutOfOrder
     case scopeNotSupported(field: String)
     case invalidScope(String)
@@ -139,6 +167,7 @@ enum QueryError: Error, Equatable, CustomStringConvertible {
         case .unsupported(let what): "Not supported yet: \(what)"
         case .emptyTagOperand: "Pick at least one tag"
         case .emptyTextOperand: "Enter some text to match"
+        case .invalidOperand(let why): why
         case .rangeOutOfOrder: "The range’s start is after its end"
         case .scopeNotSupported(let field): "“\(field)” can’t be scoped to a date range"
         case .invalidScope(let why): "Invalid date scope: \(why)"

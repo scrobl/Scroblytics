@@ -80,7 +80,8 @@ enum AskSchema {
         // "has a value" / "is missing" are offered only when stage 1 saw the request ask about absence.
         for op in field.type.operators where (absence || (op != .hasValue && op != .isMissing))
             && (field.choices == nil || op == .textIs || op == .textIsNot || op == .hasValue || op == .isMissing) {
-            let shape = "\(op.arity)"
+            // The relative-date and day-of-week operators carry operands of their own shape, apart from “between two days”.
+            let shape = [.inLast, .notInLast].contains(op) ? "relative" : [.weekdayIs, .weekdayIsNot].contains(op) ? "days" : "\(op.arity)"
             if let index = byShape.firstIndex(where: { $0.shape == shape }) { byShape[index].ops.append(op) } else { byShape.append((shape, [op])) }
         }
         return byShape.map { shape, ops in
@@ -90,6 +91,11 @@ enum AskSchema {
             ]
             let arity = ops[0].arity
             switch (field.type, arity) {
+            case (.date, _) where shape == "relative":
+                props.append(property(K.value, DynamicGenerationSchema(type: Double.self), description: "How many units back, a whole number"))
+                props.append(property(K.text, choice("Unit_\(field.id)", QueryOperator.relativeUnits), description: "The unit of time"))
+            case (.date, _) where shape == "days":
+                props.append(property(K.tags, DynamicGenerationSchema(arrayOf: choice("Day_\(field.id)", QueryOperator.dayNames), minimumElements: 1), description: "The days of the week"))
             case (_, .none): break
             case (.numeric, .one): props.append(property(K.value, DynamicGenerationSchema(type: Double.self), description: "The number to compare with"))
             case (.numeric, _):

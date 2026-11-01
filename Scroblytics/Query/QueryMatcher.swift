@@ -35,6 +35,9 @@ import Foundation
 struct QueryMatcher: Sendable {
     /// Calendar-day comparisons use this (the user's local calendar in the app).
     var calendar: Calendar = AppCalendars.listening
+    /// “Now” for the relative date operators (“in the last 30 days”). The engine passes the run's `asOf`, so a saved query rolls
+    /// forward and a check can pin the day.
+    var now: Date = Date()
 
     /// Throws for a condition that could never be evaluated meaningfully.
     static func validate(fieldID: String, fieldType: QueryValueType, op: QueryOperator, operands: [QueryValue]) throws {
@@ -46,11 +49,12 @@ struct QueryMatcher: Sendable {
         case (.oneOrMore, let n) where n >= 1: break
         default: throw QueryError.wrongOperandCount(op: op, expected: op.arity, got: operands.count)
         }
-        if let expected = op.operandType {
-            for operand in operands where operand.type != expected {
-                throw QueryError.wrongOperandType(op: op, expected: expected, got: operand.type)
-            }
+        let types = op.operandTypes
+        for (index, operand) in operands.enumerated() {
+            guard let expected = op.arity == .oneOrMore ? types.first : (types.indices.contains(index) ? types[index] : nil) else { continue }
+            if operand.type != expected { throw QueryError.wrongOperandType(op: op, expected: expected, got: operand.type) }
         }
+        try validateRelativeOperands(op: op, operands: operands)
         if case .tags(let tags)? = operands.first, tags.isEmpty { throw QueryError.emptyTagOperand }
         if op.operandType == .text, case .text(let text)? = operands.first,
            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -61,6 +65,31 @@ struct QueryMatcher: Sendable {
         case (.dateBetween, .date(let lo)?, .date(let hi)?) where lo > hi: throw QueryError.rangeOutOfOrder
         default: break
         }
+    }
+
+    /// The extra rules of the operators whose operands are more than a plain value: a whole count of a known unit, known days.
+    private static func validateRelativeOperands(op: QueryOperator, operands: [QueryValue]) throws {
+        switch op {
+        case .inLast, .notInLast:
+            guard case .number(let count)? = operands.first, case .text(let unit)? = operands.dropFirst().first else { return }
+            guard count == count.rounded(), count >= 1, count <= Double(QueryOperator.relativeCountLimit) else {
+                throw QueryError.invalidOperand("“\(op.label)” needs a whole number of at least 1 (and at most \(QueryOperator.relativeCountLimit.formatted()))")
+            }
+            guard QueryOperator.relativeUnits.contains(unit) else {
+                throw QueryError.invalidOperand("“\(unit)” isn’t a unit of time (\(QueryOperator.relativeUnits.joined(separator: ", ")))")
+            }
+        case .weekdayIs, .weekdayIsNot:
+            for case .text(let name) in operands where weekdayIndex(of: name) == nil {
+                throw QueryError.invalidOperand("“\(name)” isn’t a day of the week (\(QueryOperator.dayNames.joined(separator: ", ")))")
+            }
+        default: break
+        }
+    }
+
+    /// 0 = Sunday … 6 = Saturday for a day name, ignoring case and surrounding spaces; nil for anything else.
+    static func weekdayIndex(of name: String) -> Int? {
+        let wanted = fold(name)
+        return QueryOperator.dayNames.firstIndex { fold($0) == wanted }
     }
 
     func matches(
@@ -106,6 +135,12 @@ struct QueryMatcher: Sendable {
         case (.before, .date(let v)): return operandDate(operands, 0).map { v < dateCalendar.startOfDay(for: $0) } ?? false
         case (.after, .date(let v)): return operandDate(operands, 0).map { v >= dayAfter($0, calendar: dateCalendar) } ?? false
         case (.on, .date(let v)): return operandDate(operands, 0).map { dateCalendar.isDate(v, inSameDayAs: $0) } ?? false
+        case (.notOn, .date(let v)): return operandDate(operands, 0).map { !dateCalendar.isDate(v, inSameDayAs: $0) } ?? false
+        case (.inLast, .date(let v)): return inLastWindow(operands, calendar: dateCalendar).map { v >= $0.start && v < $0.end } ?? false
+        // Everything outside the window counts, including a date still to come (an unreleased album is not in the last year).
+        case (.notInLast, .date(let v)): return inLastWindow(operands, calendar: dateCalendar).map { !(v >= $0.start && v < $0.end) } ?? false
+        case (.weekdayIs, .date(let v)): return weekdays(operands).map { $0.contains(dateCalendar.component(.weekday, from: v) - 1) } ?? false
+        case (.weekdayIsNot, .date(let v)): return weekdays(operands).map { !$0.contains(dateCalendar.component(.weekday, from: v) - 1) } ?? false
         case (.dateBetween, .date(let v)):
             guard let lo = operandDate(operands, 0), let hi = operandDate(operands, 1) else { return false }
             return v >= dateCalendar.startOfDay(for: lo) && v < dayAfter(hi, calendar: dateCalendar)
@@ -134,6 +169,32 @@ struct QueryMatcher: Sendable {
     private func operandDate(_ operands: [QueryValue], _ i: Int) -> Date? {
         guard operands.indices.contains(i), case .date(let d) = operands[i] else { return nil }
         return d
+    }
+
+    /// The days “in the last N units” covers: from the day after N units ago through today, so “the last 7 days” is today and the six
+    /// days before it. “Today” is the date where the person is (this matcher's calendar); `calendar` is the field's own (release dates
+    /// are UTC days), and the window is built there from the same year, month and day.
+    private func inLastWindow(_ operands: [QueryValue], calendar dateCalendar: Calendar) -> (start: Date, end: Date)? {
+        guard case .number(let count)? = operands.first, case .text(let unit)? = operands.dropFirst().first, count >= 1, count <= Double(QueryOperator.relativeCountLimit) else { return nil }
+        let component: Calendar.Component
+        switch unit {
+        case "days": component = .day
+        case "weeks": component = .weekOfYear
+        case "months": component = .month
+        case "years": component = .year
+        default: return nil
+        }
+        let today = calendar.dateComponents([.year, .month, .day], from: now)
+        guard let todayHere = dateCalendar.date(from: today),
+              let back = dateCalendar.date(byAdding: component, value: -Int(count), to: todayHere) else { return nil }
+        return (dayAfter(back, calendar: dateCalendar), dayAfter(todayHere, calendar: dateCalendar))
+    }
+
+    private func weekdays(_ operands: [QueryValue]) -> Set<Int>? {
+        let days = operands.compactMap { operand -> Int? in
+            if case .text(let name) = operand { return Self.weekdayIndex(of: name) } else { return nil }
+        }
+        return days.isEmpty ? nil : Set(days)
     }
 
     private func dayAfter(_ date: Date, calendar: Calendar) -> Date {

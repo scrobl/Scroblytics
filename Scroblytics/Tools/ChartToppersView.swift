@@ -94,12 +94,12 @@ struct ChartToppersView: View {
         isLoading = true
         errorMessage = nil
         do {
-            periods = try await ChartToppersReader(modelContainer: modelContainer).load(
-                entity: entity,
-                metric: metric,
-                period: options.period,
-                yearRange: options.period == .year ? options.yearRange : 0
-            )
+            let (container, entity, metric, period) = (modelContainer, entity, metric, options.period)
+            let yearRange = period == .year ? options.yearRange : 0
+            // Off the main thread: a model actor awaited from here would read every play on it (see `offMain`).
+            periods = try await offMain {
+                try await ChartToppersReader(modelContainer: container).load(entity: entity, metric: metric, period: period, yearRange: yearRange)
+            }
         } catch {
             periods = []
             errorMessage = error.localizedDescription

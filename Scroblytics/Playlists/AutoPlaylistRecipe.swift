@@ -248,9 +248,12 @@ enum AutoPlaylistSources {
             let lookup = (try? ImageResolutionEngine.imageLookup(context: container.mainContext)) ?? [:]
             return MostRecentMostOftenEngine.playlistTracks(rows: rows, scrobbles: all, lookup: lookup)
         case .chartToppers(let chart):
-            let periods = try await ChartToppersReader(modelContainer: container).load(
-                entity: chart.entity, metric: chart.metric, period: chart.period, yearRange: chart.period == .year ? chart.yearRange : 0
-            )
+            // A model actor awaited from the main actor runs on the main thread (see `offMain`); this reads every play and ranks each period.
+            let periods = try await offMain {
+                try await ChartToppersReader(modelContainer: container).load(
+                    entity: chart.entity, metric: chart.metric, period: chart.period, yearRange: chart.period == .year ? chart.yearRange : 0
+                )
+            }
             return ChartToppersReader.playlistTracks(periods: periods)
         case .flaggedTracks(let flagged):
             let flags = try await offMain { try await FlaggedTracksDataReader(modelContainer: container).fetch() }

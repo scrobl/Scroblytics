@@ -104,6 +104,18 @@ enum ReleaseYearAudit {
         let musicYear: Int?
         /// A date you set on the track (its year); nil when it just shows its album's.
         let ownYear: Int?
+        /// Scroblytics has a row for the track (you have played it), so it has a date that can be set.
+        var inScroblytics = true
+    }
+
+    /// The tracks of an album that would differ from Music once the album itself shows `albumYear`: those that show their album's date and
+    /// whose year in Music is another. A track you set a date on, and one you have never played, are not among them.
+    static func trackChanges(for row: AlbumRow, albumYear: Int?) -> [TrackDifference] {
+        guard let target = albumYear ?? row.scroblytics.year else { return [] }
+        return row.musicTracks.compactMap { track in
+            guard track.inScroblytics, track.ownYear == nil, let year = track.musicYear, year != target else { return nil }
+            return TrackDifference(name: track.name, artist: track.artist, musicYear: year, scroblyticsYear: target, ownDate: false)
+        }
     }
 
     /// A change to the year Music holds for one track.
@@ -118,14 +130,15 @@ enum ReleaseYearAudit {
     }
 
     /// The Music years to change so they follow Scroblytics, for one album: each track gets the year Scroblytics shows for it (its own
-    /// date, else the album's `albumYear`). An album whose tracks span several years in Music is a compilation, whose years are real
-    /// data, so there only the tracks you set a date on are brought into line, never the rest to one album year.
-    static func musicUpdates(for row: AlbumRow, albumYear: Int?) -> [MusicYearUpdate] {
+    /// date, else the album's `albumYear`). An album whose tracks span several years in Music may be a compilation, whose years are real
+    /// data: unless `includeVaried` (you chose that one album yourself, and are shown what it will do), only the tracks you set a date on
+    /// are brought into line there, never the rest to one album year.
+    static func musicUpdates(for row: AlbumRow, albumYear: Int?, includeVaried: Bool = false) -> [MusicYearUpdate] {
         let target = albumYear ?? row.scroblytics.year
         var updates: [MusicYearUpdate] = []
         for track in row.musicTracks where !track.persistentID.isEmpty {
             let wanted: Int?
-            if row.musicVaries { wanted = track.ownYear } else { wanted = track.ownYear ?? target }
+            if row.musicVaries && !includeVaried { wanted = track.ownYear } else { wanted = track.ownYear ?? target }
             guard let wanted, wanted != track.musicYear else { continue }
             updates.append(MusicYearUpdate(persistentID: track.persistentID, name: track.name, artist: track.artist, album: row.musicAlbum, from: track.musicYear, to: wanted))
         }
@@ -179,6 +192,8 @@ enum ReleaseYearAudit {
         let musicTracksWithoutYear: Int
 
         func count(_ category: Category) -> Int { rows.filter { $0.category == category }.count }
+        /// Albums that disagree by this much (1–2 years, or 3 and more).
+        func count(band: GapBand) -> Int { rows.filter { ReleaseYearAudit.band(forGap: $0.gap) == band }.count }
         var matched: Int { rows.count }
         var disagreements: Int { rows.filter { $0.category == .offByOne || $0.category == .differs }.count }
         var albumsWithTrackDifferences: Int { rows.filter { !$0.trackDifferences.isEmpty }.count }
@@ -247,8 +262,98 @@ enum ReleaseYearAudit {
         rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty && !isDecided($0, decisions: decisions) }
     }
 
+    /// How far apart the two years are, for the filters: a year or two (often a release-date edge or a reissue), or three and more.
+    enum GapBand: Sendable { case close, far }
+
+    static func band(forGap gap: Int?) -> GapBand? {
+        guard let gap, gap != 0 else { return nil }
+        return abs(gap) <= 2 ? .close : .far
+    }
+
+    /// The raw values of `close` and `far` are the names the filters had before they were split at two years, so a saved choice still reads.
     enum Filter: String, Codable, CaseIterable, Sendable {
-        case all, offByOne, differs, yourDates, musicVaries
+        case all
+        case close = "offByOne"
+        case far = "differs"
+        case yourDates, musicVaries
+    }
+
+    /// What the list is ordered by.
+    enum SortKey: String, Codable, CaseIterable, Sendable, Identifiable {
+        case difference, album, artist, scroblyticsYear, musicYear, source, tracksDiffering
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .difference: "Difference"
+            case .album: "Album"
+            case .artist: "Artist"
+            case .scroblyticsYear: "Scroblytics year"
+            case .musicYear: "Apple Music year"
+            case .source: "Source of the date"
+            case .tracksDiffering: "Tracks that differ"
+            }
+        }
+
+        /// The direction each starts in: names A to Z, the others biggest or newest first.
+        var startsAscending: Bool {
+            switch self {
+            case .album, .artist, .source: true
+            case .difference, .scroblyticsYear, .musicYear, .tracksDiffering: false
+            }
+        }
+
+        func directionLabel(ascending: Bool) -> String {
+            switch self {
+            case .difference: ascending ? "Smallest first" : "Largest first"
+            case .album, .artist, .source: ascending ? "A to Z" : "Z to A"
+            case .scroblyticsYear, .musicYear: ascending ? "Oldest first" : "Newest first"
+            case .tracksDiffering: ascending ? "Fewest first" : "Most first"
+            }
+        }
+    }
+
+    /// The rows in the chosen order (`ascending` nil: that sort's own starting direction). Rows with nothing to order by (no year) come last
+    /// whichever way the list runs; ties are broken by artist, then album, always A to Z, so the order never shuffles.
+    static func sorted(_ rows: [AlbumRow], by key: SortKey, ascending: Bool? = nil) -> [AlbumRow] {
+        let up = ascending ?? key.startsAscending
+        func byName(_ a: AlbumRow, _ b: AlbumRow) -> Bool {
+            let artists = a.scroblytics.artist.localizedStandardCompare(b.scroblytics.artist)
+            if artists != .orderedSame { return artists == .orderedAscending }
+            return a.scroblytics.title.localizedStandardCompare(b.scroblytics.title) == .orderedAscending
+        }
+        func ordered<V: Comparable>(_ value: @escaping (AlbumRow) -> V?) -> [AlbumRow] {
+            rows.sorted { a, b in
+                switch (value(a), value(b)) {
+                case (let x?, let y?): return x != y ? (up ? x < y : x > y) : byName(a, b)
+                case (_?, nil): return true
+                case (nil, _?): return false
+                case (nil, nil): return byName(a, b)
+                }
+            }
+        }
+        switch key {
+        case .difference:
+            // The bigger the gap the larger; an album whose own year agrees (a compilation) is ordered by how many tracks differ.
+            return ordered { row in
+                (row.gap.map { abs($0) } ?? 0) * 1000 + min(row.trackDifferences.count, 999)
+            }
+        case .album:
+            return rows.sorted { a, b in
+                let titles = a.scroblytics.title.localizedStandardCompare(b.scroblytics.title)
+                return titles == .orderedSame ? byName(a, b) : ((titles == .orderedAscending) == up)
+            }
+        case .artist:
+            return rows.sorted { a, b in
+                let artists = a.scroblytics.artist.localizedStandardCompare(b.scroblytics.artist)
+                return artists == .orderedSame ? byName(a, b) : ((artists == .orderedAscending) == up)
+            }
+        case .scroblyticsYear: return ordered { $0.scroblytics.year }
+        case .musicYear: return ordered { $0.musicYear }
+        case .source: return ordered { $0.scroblytics.origin.label }
+        case .tracksDiffering: return ordered { $0.trackDifferences.count }
+        }
     }
 
     /// The albums a filter lists: those that disagree and that you haven't settled.
@@ -257,8 +362,8 @@ enum ReleaseYearAudit {
         let open = rows.filter { ($0.category == .offByOne || $0.category == .differs) && !isDecided($0, decisions: decisions) }
         switch filter {
         case .all: return open
-        case .offByOne: return open.filter { $0.category == .offByOne }
-        case .differs: return open.filter { $0.category == .differs }
+        case .close: return open.filter { band(forGap: $0.gap) == .close }
+        case .far: return open.filter { band(forGap: $0.gap) == .far }
         case .yourDates: return open.filter { $0.scroblytics.origin == .manual }
         case .musicVaries: return compilations(rows, decisions: decisions)
         }
@@ -369,7 +474,9 @@ enum ReleaseYearAudit {
             let refs = tracks.map { track -> MusicTrackRef in
                 let ownDate = trackOverrides[TextNormalization.lovedKey(artist: track.artist, track: track.name)]
                     ?? trackOverrideIndex[trackIndexKey(artist: track.artist, title: track.name)]
-                return MusicTrackRef(persistentID: track.persistentID, name: track.name, artist: track.artist, musicYear: track.year, ownYear: ownDate.flatMap(ReleaseDateEngine.year(of:)))
+                let savedKey = TextNormalization.lovedKey(artist: track.artist, track: track.name)
+                let played = knownTracks.map { $0.identityKeys.contains(savedKey) || $0.indexKeys.contains(trackIndexKey(artist: track.artist, title: track.name)) } ?? true
+                return MusicTrackRef(persistentID: track.persistentID, name: track.name, artist: track.artist, musicYear: track.year, ownYear: ownDate.flatMap(ReleaseDateEngine.year(of:)), inScroblytics: played)
             }
             rows.append(AlbumRow(
                 musicArtist: first.albumArtist.isEmpty ? first.artist : first.albumArtist, musicAlbum: first.album, trackCount: tracks.count,

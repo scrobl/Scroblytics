@@ -148,18 +148,20 @@ enum LayoutSnapshots {
             }
             let hits = [difference("Opening Song", music: 1965, shown: 1972), difference("A Track With A Rather Long Title That Needs Room", music: 1966, shown: 1972), difference("Closing Time", music: 1970, shown: 1972), difference("Chosen By Hand", music: 1968, shown: 1999, own: true)]
             let rows = [
-                row(album("Artist A", "Back In Black Sabbath Sessions", "2007-04-30", .musicBrainz), music: 2006, tracks: 12, category: .offByOne),
+                row(album("Artist A", "Back In Black Sabbath Sessions", "2007-04-30", .musicBrainz), music: 2006, tracks: 12, category: .offByOne,
+                    differences: (1...12).map { difference("Track \($0)", music: 2006, shown: 2007) }),
                 row(album("Artist B", "A Reissue Whose Date Was Detected As The Reissue Not The Original Album", "2021-01-01", .detectedUnrecorded), music: 1971, tracks: 10, category: .differs),
                 row(album("Artist C", "Chosen By Hand", "1986", .manual, detected: "1987-03-02"), music: 1987, tracks: 9, category: .offByOne),
                 row(album("Artist D", "Greatest Hits", "1972", .musicBrainzInferred), music: 1965, tracks: 18, span: (1965, 1970), category: .differs, differences: hits),
                 row(album("Artist F", "Rarities Collected", "1999", .musicBrainz), music: 1999, tracks: 15, span: (1993, 2007), category: .same, differences: [difference("Early One", music: 1993, shown: 1999), difference("Late One", music: 2007, shown: 1999)]),
+                row(album("Artist G", "Phases", "2017-11-10", .detectedUnrecorded), music: 2017, tracks: 12, span: (2013, 2017), category: .same, differences: [difference("An Earlier Song", music: 2013, shown: 2017)]),
                 row(album("Artist E", "Deezer Said So", "2010-06-01", .deezer), music: 2009, tracks: 11, category: .offByOne),
             ]
             for scheme in ["dark", "light"] {
                 for width: CGFloat in [1400, 1200, 700, 440] {
                     let list = VStack(alignment: .leading, spacing: 1) {
                         if width >= ReleaseYearAuditRowView.wideMinimumWidth { ReleaseYearAuditHeaderView() }
-                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in ReleaseYearAuditRowView(row: row, isWide: width >= ReleaseYearAuditRowView.wideMinimumWidth, initiallyOpen: !row.trackDifferences.isEmpty) }
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in ReleaseYearAuditRowView(row: row, isWide: width >= ReleaseYearAuditRowView.wideMinimumWidth, initiallyOpen: row.musicVaries && !row.trackDifferences.isEmpty) }
                     }
                     .padding(.horizontal, 10).padding(.vertical, 8)
                     let host = NSHostingView(rootView: list.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))

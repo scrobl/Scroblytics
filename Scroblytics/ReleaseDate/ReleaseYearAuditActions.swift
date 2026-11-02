@@ -12,6 +12,8 @@ enum ReleaseYearAuditActions {
         var skipped = 0
         /// Albums left alone because Music's tracks span several years, so its single year is a guess (bulk only).
         var skippedVaries = 0
+        /// Tracks whose own date was set along with their album's (an album whose tracks span years, chosen alone).
+        var tracksSet = 0
     }
 
     struct TrackResult: Equatable {
@@ -81,10 +83,15 @@ enum ReleaseYearAuditActions {
     }
 
     /// Sets each album's own date to Music's year (the most common among its tracks), remembering what it was. With
-    /// `skipVaries`, an album whose Music tracks span several years is left alone: for those the single year is a guess.
+    /// `skipVaries`, an album whose Music tracks span several years is left alone: for those the single year is a guess. With
+    /// `tracksOfVaried`, such an album is changed too and each of its tracks is also set to its own year in Music (one decision, one undo),
+    /// because for it the album's single year says little and the tracks are what Music actually holds.
     @discardableResult
-    static func useAppleYear(_ rows: [ReleaseYearAudit.AlbumRow], skipVaries: Bool = false, context: ModelContext, now: Date = Date()) throws -> Result {
+    static func useAppleYear(
+        _ rows: [ReleaseYearAudit.AlbumRow], skipVaries: Bool = false, tracksOfVaried: Bool = false, context: ModelContext, now: Date = Date()
+    ) throws -> Result {
         var result = Result()
+        var setThisRun = Set<String>()
         for row in rows {
             guard let musicYear = row.musicYear, let year = row.scroblytics.year,
                   let album = ReleaseDateEngine.albumRow(context: context, artist: row.scroblytics.artist, album: row.scroblytics.title) else {
@@ -94,11 +101,38 @@ enum ReleaseYearAuditActions {
             if skipVaries, row.musicVaries { result.skippedVaries += 1; continue }
             let before = album.releaseDateOverride
             album.releaseDateOverride = String(musicYear)
-            recordUsed(row, scroblyticsYear: year, musicYear: musicYear, album: .changed(previous: before), tracks: [], context: context, now: now)
+            var changes: [ReleaseYearAudit.TrackChange] = []
+            if tracksOfVaried, row.musicVaries {
+                var trackResult = TrackResult()
+                changes = setTracks(ReleaseYearAudit.trackChanges(for: row, albumYear: musicYear), setThisRun: &setThisRun, result: &trackResult, context: context)
+                result.tracksSet += changes.count
+            }
+            recordUsed(row, scroblyticsYear: year, musicYear: musicYear, album: .changed(previous: before), tracks: changes, context: context, now: now)
             result.applied += 1
         }
         try context.save()
         return result
+    }
+
+    /// Sets the own date of each listed track to Music's year, skipping a track you gave a date of your own and a song already set in this
+    /// batch; returns what was set, with each track's earlier date.
+    private static func setTracks(
+        _ differences: [ReleaseYearAudit.TrackDifference], setThisRun: inout Set<String>, result: inout TrackResult, context: ModelContext
+    ) -> [ReleaseYearAudit.TrackChange] {
+        var changes: [ReleaseYearAudit.TrackChange] = []
+        for difference in differences {
+            if difference.ownDate { result.skippedOwnDate += 1; continue }
+            guard let track = trackRow(artist: difference.artist, name: difference.name, context: context) else { result.skippedNoTrack += 1; continue }
+            // The same song on another album of this batch was set a moment ago; a date of its own under a spelling the comparison didn't
+            // see is still yours.
+            if setThisRun.contains(track.identityKey) { result.skippedShared += 1; continue }
+            if let own = track.releaseDateOverride, !own.isEmpty { result.skippedOwnDate += 1; continue }
+            let applied = String(difference.musicYear)
+            changes.append(.init(key: track.identityKey, previous: nil, applied: applied))
+            track.releaseDateOverride = applied
+            setThisRun.insert(track.identityKey)
+        }
+        return changes
     }
 
     /// The track's row in the store: by the key it is saved under, else by artist and normalized title (Music and Last.fm may spell a
@@ -121,19 +155,7 @@ enum ReleaseYearAuditActions {
         var result = TrackResult()
         var setThisRun = Set<String>()
         for row in rows {
-            var changes: [ReleaseYearAudit.TrackChange] = []
-            for difference in row.trackDifferences {
-                if difference.ownDate { result.skippedOwnDate += 1; continue }
-                guard let track = trackRow(artist: difference.artist, name: difference.name, context: context) else { result.skippedNoTrack += 1; continue }
-                // The same song on another album of this batch was set a moment ago; a date of its own under a spelling the comparison didn't
-                // see is still yours.
-                if setThisRun.contains(track.identityKey) { result.skippedShared += 1; continue }
-                if let own = track.releaseDateOverride, !own.isEmpty { result.skippedOwnDate += 1; continue }
-                let applied = String(difference.musicYear)
-                changes.append(.init(key: track.identityKey, previous: nil, applied: applied))
-                track.releaseDateOverride = applied
-                setThisRun.insert(track.identityKey)
-            }
+            let changes = setTracks(row.trackDifferences, setThisRun: &setThisRun, result: &result, context: context)
             guard !changes.isEmpty else { continue }
             recordUsed(
                 row, scroblyticsYear: row.scroblytics.year ?? row.musicYear ?? 0, musicYear: row.musicYear ?? 0, album: .none,

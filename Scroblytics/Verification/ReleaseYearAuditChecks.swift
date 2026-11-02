@@ -124,7 +124,7 @@ enum ReleaseYearAuditChecks {
         music += ["x", "y", "z"].map { track($0, "Artist A", "Agree", 2001) }
         music += ["x", "y"].map { track($0, "Artist A", "One Off", 2002) }
         music += ["x", "y"].map { track($0, "Artist A", "Far Off", 1971) }
-        music += [track("old", "Artist A", "Compilation", 1953), track("older", "Artist A", "Compilation", 1953), track("new", "Artist A", "Compilation", 2004), track("same", "Artist A", "Compilation", 2004), track("none", "Artist A", "Compilation", nil)]
+        music += [track("old", "Artist A", "Compilation", 1953), track("older", "Artist A", "Compilation", 1953), track("oldest", "Artist A", "Compilation", 1953), track("new", "Artist A", "Compilation", 2004), track("same", "Artist A", "Compilation", 2004), track("none", "Artist A", "Compilation", nil)]
         music += [track("x", "Artist A", "Undated", 1999)]
         music += [track("x", "Artist B", "Edition Album (Deluxe Edition)", 1995)]
         music += [track("x", "Artist C", "Shared Title", 1980, albumArtist: "Various Artists")]   // album artist differs: matched by its track artist
@@ -144,7 +144,7 @@ enum ReleaseYearAuditChecks {
         check("a different album artist is matched through the track's artist; a compilation by its title; another artist's same title not at all", row("Shared Title")?.matchedBy == .trackArtist && row("Now Hits")?.matchedBy == .titleOnly && row("Green River")?.musicAlbum == nil, "\(String(describing: row("Green River")))")
         let compilation = row("Compilation")
         check("a compilation's years are read: modal, range, how many, and no year is left out", compilation?.musicYear == 1953 && compilation?.musicEarliest == 1953 && compilation?.musicLatest == 2004 && compilation?.musicDistinctYears == 2 && compilation?.musicVaries == true)
-        check("…and the album year here (2004) disagrees with its most common track year (1953), but only the 2 older tracks differ", compilation?.category == .differs && compilation?.trackDifferences.map(\.name).sorted() == ["old", "older"] && compilation?.trackDifferences.allSatisfy { !$0.ownDate } == true)
+        check("…and the album year here (2004) disagrees with its most common track year (1953), but only the 3 older tracks differ", compilation?.category == .differs && compilation?.trackDifferences.map(\.name).sorted() == ["old", "older", "oldest"] && compilation?.trackDifferences.allSatisfy { !$0.ownDate } == true)
         check("tracks with no year in Music are never differences", compilation?.trackDifferences.contains { $0.name == "none" } == false && report.musicTracksWithoutYear == 1)
         check("the totals add up", report.count(.same) + report.count(.offByOne) + report.count(.differs) + report.count(.scroblyticsUndated) + report.count(.musicUndated) == report.matched && report.disagreements == 3)
 
@@ -152,9 +152,19 @@ enum ReleaseYearAuditChecks {
         let overrides = [TextNormalization.lovedKey(artist: "Artist A", track: "old"): "1953-01-12", TextNormalization.lovedKey(artist: "Artist A", track: "same"): "1999"]
         let withOwn = ReleaseYearAudit.compare(music: music, albums: albums, trackOverrides: overrides)
         let own = withOwn.rows.first { $0.scroblytics.title == "Compilation" }
-        check("a track with its own date that matches Music is no longer a difference; one that doesn't is, marked as its own", own?.trackDifferences.map(\.name).sorted() == ["older", "same"] && own?.trackDifferences.first { $0.name == "same" }?.ownDate == true && own?.trackDifferences.first { $0.name == "same" }?.scroblyticsYear == 1999)
+        check("a track with its own date that matches Music is no longer a difference; one that doesn't is, marked as its own", own?.trackDifferences.map(\.name).sorted() == ["older", "oldest", "same"] && own?.trackDifferences.first { $0.name == "same" }?.ownDate == true && own?.trackDifferences.first { $0.name == "same" }?.scroblyticsYear == 1999)
         check("an album date doesn't change with a track date: the album-level category stays", own?.category == compilation?.category)
         check("with nothing in Music, nothing is compared", ReleaseYearAudit.compare(music: [], albums: albums).rows.isEmpty)
+
+        // Tracks spread evenly over several years: the album has no most common year, so any tied year agrees with it.
+        let spread: [AppleMusicTrackYear] = (1988...1990).flatMap { (year: Int) -> [AppleMusicTrackYear] in ["a", "b"].map { track("\($0)\(year)", "Artist A", "Spread", year) } }
+        func spreadRow(_ albumDate: String) -> ReleaseYearAudit.AlbumRow? {
+            ReleaseYearAudit.compare(music: spread, albums: [album("Artist A", "Spread", albumDate)], trackOverrides: [:]).rows.first
+        }
+        check("an even spread: the latest tied year agrees, and so does the earliest and a middle one", ["1990", "1988", "1989"].allSatisfy { spreadRow($0)?.category == .same && spreadRow($0)?.gap == 0 })
+        check("…a year outside the tied years still disagrees, against the earliest", spreadRow("1995")?.category == .differs && spreadRow("1995")?.musicYear == 1988 && spreadRow("1987")?.category == .offByOne)
+        check("…a clear majority year is still the album's Music year, not any year in the spread",
+              ReleaseYearAudit.modalYears([1988, 1989, 1989]) == [1989] && ReleaseYearAudit.modalYears([1988, 1989]) == [1988, 1989] && ReleaseYearAudit.modalYears([]).isEmpty)
 
         // One Scroblytics album is compared once, however many of Music's albums look like it.
         let dupAlbums = [album("Artist A", "Dup", "2000")]
@@ -384,6 +394,8 @@ enum ReleaseYearAuditChecks {
             track("It’s Mine Too", "Artist A", "Comp", 1971), track("Never Played", "Artist A", "Comp", 1965), track("Same", "Artist A", "Comp", 2004),
             track("Early", "Artist A", "Other Comp", 1980), track("Late", "Artist A", "Other Comp", 1990),
             track("Odd Name", "Artist A", "Comp", 1968),
+            // A second 1953 track (never played, so never a difference) makes 1953 the album's clear most common year.
+            track("Also Unplayed", "Artist A", "Comp", 1953),
         ]
         func analyse() async -> ReleaseYearAudit.Report {
             let loaded = await ReleaseYearAuditStoreReader(modelContainer: container).load()
@@ -426,7 +438,7 @@ enum ReleaseYearAuditChecks {
         let loadedForGuard = await ReleaseYearAuditStoreReader(modelContainer: container).load()
         let unguarded = ReleaseYearAudit.compare(music: music, albums: loadedForGuard.albums, trackOverrides: loadedForGuard.trackOverrides, trackOverrideIndex: loadedForGuard.trackOverrideIndex)
         let guarded = try ReleaseYearAuditActions.useAppleYearsForTracks(unguarded.rows.filter { $0.scroblytics.title == "Comp" }, context: context)
-        check("a track with no row here is left alone and counted, not created", guarded.skippedNoTrack == 1 && guarded.tracksSet == 2 && stored("Never Played") == nil, "\(guarded)")
+        check("a track with no row here is left alone and counted, not created", guarded.skippedNoTrack == 2 && guarded.tracksSet == 2 && stored("Never Played") == nil && stored("Also Unplayed") == nil, "\(guarded)")
         for item in try context.fetch(FetchDescriptor<ReleaseYearDecision>()) { try ReleaseYearAuditActions.undo(item, context: context) }
 
         // A track you have changed since is not undone over your change.
@@ -463,7 +475,7 @@ enum ReleaseYearAuditChecks {
         // Choosing Music's year on one album whose tracks span years sets the album and every track that shows the album's date, in one go.
         for item in try context.fetch(FetchDescriptor<ReleaseYearDecision>()) { try ReleaseYearAuditActions.undo(item, context: context) }
         let compNow = row("Comp", await analyse())!
-        // Every year on this album is different, so the most common is the earliest: 1953. Old One already has it.
+        // 1953 is the most common year on this album (two tracks), and Old One already has it.
         let combined = try ReleaseYearAuditActions.useAppleYear([compNow], tracksOfVaried: true, context: context)
         check("the album gets the most common year and the tracks that show another get their own, in one action", combined.applied == 1 && combined.tracksSet == 2 && ReleaseDateEngine.albumRow(context: context, artist: "Artist A", album: "Comp")?.releaseDateOverride == "1953" && stored("Don't Stop")?.releaseDateOverride == "1960" && stored("Same")?.releaseDateOverride == "2004", "\(combined)")
         check("a track already at the album's new year is left to inherit it, and one you gave a date of your own keeps it", stored("Old One")?.releaseDateOverride == nil && stored("Mine")?.releaseDateOverride == "1999" && stored("It's Mine Too")?.releaseDateOverride == "1971")

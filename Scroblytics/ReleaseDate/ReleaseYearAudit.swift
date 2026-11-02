@@ -80,7 +80,8 @@ struct AppleMusicTrackYear: Sendable, Hashable {
 /// Compares the release years Scroblytics holds with the ones in the Apple Music library, album by album and track by track. Only the
 /// year is compared. Pure: it works on what it is given and never reads Music, the store or the network.
 ///
-/// Music has no year of its own for an album, so an album's Music year is the most common year among its tracks (the earliest of a tie).
+/// Music has no year of its own for an album, so an album's Music year is the most common year among its tracks. When several years tie,
+/// the album's own year agrees if it is any of them; otherwise the earliest is shown.
 enum ReleaseYearAudit {
     enum Category: String, Sendable, CaseIterable {
         case same
@@ -162,7 +163,7 @@ enum ReleaseYearAudit {
         let musicAlbum: String
         let trackCount: Int
         let scroblytics: AuditAlbum
-        /// The most common year among the album's tracks in Music (the earliest of a tie).
+        /// The most common year among the album's tracks in Music; with a tie, the album's own year if it is one of the tied years, else the earliest.
         let musicYear: Int?
         let musicEarliest: Int?
         let musicLatest: Int?
@@ -209,12 +210,14 @@ enum ReleaseYearAudit {
     }
 
     /// The most common year; the earliest of a tie; nil for none.
-    static func modalYear(_ years: [Int]) -> Int? {
-        guard !years.isEmpty else { return nil }
+    static func modalYear(_ years: [Int]) -> Int? { modalYears(years).min() }
+
+    /// Every year that is the most common (more than one when the tracks are spread evenly over several years); empty for none.
+    static func modalYears(_ years: [Int]) -> Set<Int> {
         var counts: [Int: Int] = [:]
         for year in years { counts[year, default: 0] += 1 }
         let top = counts.values.max() ?? 0
-        return counts.filter { $0.value == top }.keys.min()
+        return Set(counts.filter { $0.value == top }.keys)
     }
 
     /// The album's identity in a decision: its artist and normalized title, as Scroblytics knows them.
@@ -457,8 +460,11 @@ enum ReleaseYearAudit {
         for candidate in candidates where best[albumKey(artistKey: candidate.album.artistKey, normalizedTitle: candidate.album.normalizedTitle)]?.key == candidate.key {
             let (tracks, album, how) = (candidate.tracks, candidate.album, candidate.how)
             let years = tracks.compactMap(\.year)
-            let modal = modalYear(years)
             let albumYear = album.year
+            // With no single most common year (tracks spread evenly over several years) the album has no year of its own in Music, so
+            // any of the tied years agrees with it; only a year outside them is a disagreement.
+            let tied = modalYears(years)
+            let modal = albumYear.flatMap { tied.count > 1 && tied.contains($0) ? $0 : nil } ?? tied.min()
             var differences: [TrackDifference] = []
             for track in tracks {
                 guard let musicYear = track.year else { continue }

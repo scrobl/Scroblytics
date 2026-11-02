@@ -81,6 +81,20 @@ actor ListeningHistoryCSVExporter {
     }
 }
 
+/// Every model stored in the database, in one place: the app builds its schema from this list, and `BackupCoverageChecks` requires
+/// each of them to be classified as either in the backup or rebuildable, so a new one cannot be left out of a backup unnoticed.
+enum AppSchema {
+    static let modelTypes: [any PersistentModel.Type] = [
+        Scrobble.self, Artist.self, Album.self, Track.self, SyncState.self,
+        FlaggedTrack.self, SavedQuery.self, LinerNote.self, ToolFilterSetting.self, AppSettings.self,
+        AlbumTracklistCacheEntry.self, ReverbPoolCache.self, AlbumTurnoverCompletionCache.self, TrackDurationCacheEntry.self, TrackBPMCacheEntry.self,
+        SimilarityLookupCacheEntry.self, LovedTrackEntry.self, EntityCommunityTagCacheEntry.self, UserEntityTagCacheEntry.self, PersonalTagSyncState.self,
+        TrackReleaseDateCacheEntry.self, PopularityCacheEntry.self, SavedConditionSet.self, AlbumImageOverride.self, LibraryPresenceEntry.self,
+        LibraryPresenceCheck.self, LibraryGapDismissal.self, LovedAuditDecision.self, ReleaseYearDecision.self, AlbumEditionMatch.self,
+        TagPlaylistRule.self, AutoPlaylist.self,
+    ]
+}
+
 enum NativeBackupFormat {
     static let currentVersion = 1
 

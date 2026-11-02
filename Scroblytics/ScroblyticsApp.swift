@@ -109,30 +109,7 @@ struct ScroblyticsApp: App {
 
     /// The database, or an in-memory stand-in plus the reason when it couldn't be opened (`StoreStartup`).
     private static let opened: (container: ModelContainer, failure: StoreStartupFailure?) = {
-        let schema = Schema([
-            Scrobble.self, Artist.self, Album.self, Track.self, SyncState.self,
-            FlaggedTrack.self, SavedQuery.self, LinerNote.self, ToolFilterSetting.self, AppSettings.self,
-            AlbumTracklistCacheEntry.self, ReverbPoolCache.self, AlbumTurnoverCompletionCache.self,
-            TrackDurationCacheEntry.self,
-            TrackBPMCacheEntry.self,
-            SimilarityLookupCacheEntry.self,
-            LovedTrackEntry.self,
-            EntityCommunityTagCacheEntry.self,
-            UserEntityTagCacheEntry.self,
-            PersonalTagSyncState.self,
-            TrackReleaseDateCacheEntry.self,
-            PopularityCacheEntry.self,
-            SavedConditionSet.self,
-            AlbumImageOverride.self,
-            LibraryPresenceEntry.self,
-            LibraryPresenceCheck.self,
-            LibraryGapDismissal.self,
-            LovedAuditDecision.self,
-            ReleaseYearDecision.self,
-            AlbumEditionMatch.self,
-            TagPlaylistRule.self,
-            AutoPlaylist.self,
-        ])
+        let schema = Schema(AppSchema.modelTypes)
         #if DEBUG
         // Lets a verification run use a COPY of the store (and, with
         // SCROBLYTICS_OFFLINE, skip all network work) so it can run beside a
@@ -190,6 +167,7 @@ struct ScroblyticsApp: App {
         NewMusicChecks.runHeadlessIfRequested(container: modelContainer)
         GoalsChecks.runHeadlessIfRequested(container: modelContainer)
         AutoPlaylistChecks.runHeadlessIfRequested(container: modelContainer)
+        BackupCoverageChecks.runHeadlessIfRequested()
         ReleaseYearAuditChecks.runHeadlessIfRequested(container: modelContainer)
         Task { @MainActor in ProgressSimulator.startIfRequested() }
         TestProfile.seedAccountIfRequested()

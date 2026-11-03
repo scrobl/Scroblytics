@@ -97,8 +97,8 @@ enum ReleaseYearAuditChecks {
 
     // MARK: - The comparison
 
-    private static func album(_ artist: String, _ title: String, _ date: String?, _ origin: AlbumDateOrigin = .musicBrainz) -> AuditAlbum {
-        AuditAlbum(title: title, artist: artist, artistKey: TextNormalization.artistIdentityKey(artist), normalizedTitle: TextNormalization.normalizeAlbumName(title), date: date, origin: date == nil ? .none : origin)
+    private static func album(_ artist: String, _ title: String, _ date: String?, _ origin: AlbumDateOrigin = .musicBrainz, plays: Int = 0) -> AuditAlbum {
+        AuditAlbum(title: title, artist: artist, artistKey: TextNormalization.artistIdentityKey(artist), normalizedTitle: TextNormalization.normalizeAlbumName(title), date: date, origin: date == nil ? .none : origin, plays: plays)
     }
 
     private static func track(_ name: String, _ artist: String, _ album: String, _ year: Int?, albumArtist: String? = nil) -> AppleMusicTrackYear {
@@ -247,6 +247,18 @@ enum ReleaseYearAuditChecks {
         check("by Scroblytics year, newest first to begin with", order(.scroblyticsYear).first == "Far Off" && order(.scroblyticsYear, true).first == "Mine", "\(order(.scroblyticsYear))")
         check("by Apple Music year, oldest first when asked", order(.musicYear, true).first == "Compilation" && order(.musicYear).first == "Late", "\(order(.musicYear))")
         check("by source, alphabetically by the source's name: Deezer first, then the unrecorded, Manual, and MusicBrainz last", order(.source, true).first == "Late" && order(.source, true).dropFirst().first == "Far Off" && order(.source, true).dropFirst(2).first == "Mine", "\(order(.source, true))")
+        // Plays: counted per album across edition names and artist spellings, and a sort puts the most played first.
+        func play(_ artist: String, _ album: String) -> ScrobbleSnapshot { ScrobbleSnapshot(artistName: artist, albumName: album, trackName: "t", imageURL: nil, playedAt: Date(timeIntervalSince1970: 0)) }
+        let played = [play("Artist P", "Big"), play("artist p", "Big (Deluxe Edition)"), play("Artist P", "Big"), play("Artist P", "Small"), play("Artist P", ""), play("Artist Q", "Big")]
+        let counts = ReleaseYearAudit.playCounts(of: played)
+        func count(_ artist: String, _ title: String) -> Int { counts[ReleaseYearAudit.albumKey(artistKey: TextNormalization.artistIdentityKey(artist), normalizedTitle: TextNormalization.normalizeAlbumName(title))] ?? 0 }
+        check("plays count every edition name and case spelling of an album together, and no other artist's album of the same name", count("Artist P", "Big") == 3 && count("Artist Q", "Big") == 1 && count("Artist P", "Small") == 1, "\(counts)")
+        check("a play with no album name belongs to no album", counts.values.reduce(0, +) == 5)
+        let playedAlbums = [album("Artist P", "Quiet", "2001", plays: 5), album("Artist P", "Loud", "2001", plays: 500), album("Artist P", "Middle", "2001", plays: 50), album("Artist P", "Alpha", "2001", plays: 50)]
+        let playedMusic = playedAlbums.map { track("x", "Artist P", $0.title, 1990) }
+        let playedRows = ReleaseYearAudit.compare(music: playedMusic, albums: playedAlbums).rows
+        check("by plays, most played first to begin with (ties by artist, then album), and fewest first when asked", ReleaseYearAudit.sorted(playedRows, by: .plays).map(\.scroblytics.title) == ["Loud", "Alpha", "Middle", "Quiet"] && ReleaseYearAudit.sorted(playedRows, by: .plays, ascending: true).map(\.scroblytics.title) == ["Quiet", "Alpha", "Middle", "Loud"] && ReleaseYearAudit.SortKey.plays.startsAscending == false)
+        check("a row carries its album's plays", playedRows.first { $0.scroblytics.title == "Loud" }?.plays == 500)
         let withNoYear = sample.rows + ReleaseYearAudit.compare(music: [track("x", "Artist Z", "Undated", 2000)], albums: [album("Artist Z", "Undated", nil)]).rows
         check("an album with no year in one place comes last, whichever way the list runs", ReleaseYearAudit.sorted(withNoYear, by: .scroblyticsYear, ascending: true).last?.scroblytics.title == "Undated" && ReleaseYearAudit.sorted(withNoYear, by: .scroblyticsYear, ascending: false).last?.scroblytics.title == "Undated")
         check("each sort starts in its own direction and every direction has words", ReleaseYearAudit.SortKey.allCases.allSatisfy { !$0.directionLabel(ascending: true).isEmpty && $0.directionLabel(ascending: true) != $0.directionLabel(ascending: false) } && ReleaseYearAudit.SortKey.difference.startsAscending == false && ReleaseYearAudit.SortKey.album.startsAscending)
@@ -785,6 +797,15 @@ enum ReleaseYearAuditChecks {
         let music = try await AppleMusicYearReader.read()
         let loaded = await ReleaseYearAuditStoreReader(modelContainer: container).load()
         let report = ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides, trackOverrideIndex: loaded.trackOverrideIndex, knownTracks: loaded.known)
+        // Plays: every album's count against a plain loop over the Scrobble rows that normalizes each play itself.
+        var independent: [String: Int] = [:]
+        for play in try container.mainContext.fetch(FetchDescriptor<Scrobble>()) where !play.albumName.isEmpty {
+            independent[ReleaseYearAudit.albumKey(artistKey: TextNormalization.artistIdentityKey(play.artistName), normalizedTitle: TextNormalization.normalizeAlbumName(play.albumName)), default: 0] += 1
+        }
+        let mismatched = loaded.albums.filter { $0.plays != (independent[ReleaseYearAudit.albumKey(artistKey: $0.artistKey, normalizedTitle: $0.normalizedTitle)] ?? 0) }
+        print("PLAYS: \(loaded.albums.count) albums, \(loaded.albums.filter { $0.plays > 0 }.count) with plays, \(loaded.albums.map(\.plays).reduce(0, +)) plays on them (\(independent.values.reduce(0, +)) plays have an album); albums whose count differs from the independent loop: \(mismatched.count)")
+        let listedByPlays = ReleaseYearAudit.sorted(ReleaseYearAudit.listed(report.rows, filter: .all, decisions: [:]), by: .plays)
+        print("PLAYS: listed albums by plays, first five: \(listedByPlays.prefix(5).map { "\($0.plays)×" + String($0.scroblytics.title.prefix(1)) + "…" }.joined(separator: ", ")); sorted non-increasing: \(zip(listedByPlays, listedByPlays.dropFirst()).allSatisfy { $0.plays >= $1.plays })")
         print("Music: \(report.musicTracks) tracks in \(report.musicAlbums) albums (\(report.musicTracksWithoutYear) tracks with no year); Scroblytics: \(loaded.albums.count) albums, \(loaded.trackOverrides.count) track dates")
         print("matched albums: \(report.matched); not matched: \(report.unmatchedMusicAlbums)")
         for category in ReleaseYearAudit.Category.allCases { print("  \(category.rawValue): \(report.count(category))") }

@@ -58,6 +58,8 @@ struct ReleaseYearAuditView: View {
         let albums: Int
         /// For an album whose tracks have several years in Music: what that is, so the prompt can say it will set them all to one.
         var variedNote: String?
+        /// Albums whose "Keep Scroblytics" was clicked just before this was offered, so Cancel can take that back.
+        var justKept: [String] = []
     }
 
     private static let toolId = "releaseYearAudit"
@@ -154,7 +156,12 @@ struct ReleaseYearAuditView: View {
             Button("Update Apple Music") {
                 if let offer = musicOffer { musicOffer = nil; musicTask = Task { await writeToMusic(offer) } }
             }
-            Button("Not now", role: .cancel) { musicOffer = nil }
+            if let offer = musicOffer, !offer.justKept.isEmpty {
+                Button("Not now") { musicOffer = nil }
+                Button("Cancel", role: .cancel) { cancelKeep(offer) }
+            } else {
+                Button("Not now", role: .cancel) { musicOffer = nil }
+            }
         } message: {
             Text(musicOfferMessage)
         }
@@ -539,7 +546,7 @@ struct ReleaseYearAuditView: View {
     /// One album you chose yourself is offered in full, even if its tracks have several years in Music (the prompt says so). Several at once
     /// leave alone any album whose tracks have different years there, so a batch can't flatten many compilations. Either way, if there is
     /// nothing to offer, the result line says why.
-    private func offerMusicUpdate(for rows: [ReleaseYearAudit.AlbumRow]) {
+    private func offerMusicUpdate(for rows: [ReleaseYearAudit.AlbumRow], justKept: Bool = false) {
         let single = rows.count == 1
         let updates = rows.flatMap { ReleaseYearAudit.musicUpdates(for: $0, albumYear: nil, includeVaried: single) }
         let skippedVaried = single ? 0 : rows.filter { $0.musicVaries && ReleaseYearAudit.musicUpdates(for: $0, albumYear: nil, includeVaried: true).count > ReleaseYearAudit.musicUpdates(for: $0, albumYear: nil).count }.count
@@ -556,7 +563,22 @@ struct ReleaseYearAuditView: View {
             offer.variedNote = "Music holds several different years for this album’s tracks (\(first)–\(last)). This sets all of them to \(row.scroblytics.year.map(String.init) ?? "this year")."
         }
         if skippedVaried > 0 { resultMessage = [resultMessage, "Left \(skippedVaried.formatted()) \(skippedVaried == 1 ? "album" : "albums") whose tracks have different years in Music alone."].compactMap { $0 }.joined(separator: " ") }
+        if justKept { offer.justKept = rows.map(\.albumKey) }
         musicOffer = offer
+    }
+
+    /// Takes back the "Keep Scroblytics" that led to the offer (a click on the wrong row): the albums are asked about again.
+    private func cancelKeep(_ offer: MusicOffer) {
+        musicOffer = nil
+        let keys = Set(offer.justKept)
+        let kept = decisions.filter { keys.contains($0.albumKey) && $0.verdict == ReleaseYearAudit.Decision.Verdict.keepMine.rawValue }
+        do {
+            for decision in kept { try ReleaseYearAuditActions.undo(decision, context: modelContext) }
+            resultMessage = "Took back keeping Scroblytics’ date for \(kept.count.formatted()) \(kept.count == 1 ? "album" : "albums"). \(kept.count == 1 ? "It is" : "They are") listed again."
+        } catch {
+            resultMessage = "Couldn’t take that back: \(error.localizedDescription)"
+        }
+        Task { await recompute() }
     }
 
     private func offerMusicUpdate(forAlbum key: String) {
@@ -572,7 +594,8 @@ struct ReleaseYearAuditView: View {
         let tracks = offer.updates.count
         let time = AppleMusicYearWriter.estimate(tracks: tracks).map { " This takes \($0); you can stop it." } ?? ""
         let varied = offer.variedNote.map { "\n\n" + $0 } ?? ""
-        return lines.joined(separator: "\n") + varied + "\n\nThis changes the Year of \(tracks.formatted()) \(tracks == 1 ? "track" : "tracks") on \(offer.albums.formatted()) \(offer.albums == 1 ? "album" : "albums") in your Apple Music library to match Scroblytics. It changes nothing else in Music. A track whose name or year in Music has changed since it was read is left alone, and Music may refuse a streaming track it can’t edit. Music has no undo for this: the list above is what was there.\(time)"
+        let cancel = offer.justKept.isEmpty ? "" : "\n\nNot now keeps Scroblytics’ date and leaves Music alone. Cancel takes the decision back, so the album is listed again."
+        return lines.joined(separator: "\n") + varied + "\n\nThis changes the Year of \(tracks.formatted()) \(tracks == 1 ? "track" : "tracks") on \(offer.albums.formatted()) \(offer.albums == 1 ? "album" : "albums") in your Apple Music library to match Scroblytics. It changes nothing else in Music. A track whose name or year in Music has changed since it was read is left alone, and Music may refuse a streaming track it can’t edit. Music has no undo for this: the list above is what was there.\(time)\(cancel)"
     }
 
     private func writeToMusic(_ offer: MusicOffer) async {
@@ -606,7 +629,7 @@ struct ReleaseYearAuditView: View {
             case .keepMine(let rows):
                 let result = try ReleaseYearAuditActions.keepMine(rows, context: modelContext)
                 resultMessage = "Kept Scroblytics’ date for \(result.applied.formatted()) \(result.applied == 1 ? "album" : "albums")."
-                offerMusicUpdate(for: rows)
+                offerMusicUpdate(for: rows, justKept: true)
             }
         } catch {
             resultMessage = "That didn’t work: \(error.localizedDescription)"
@@ -629,6 +652,7 @@ struct ReleaseYearAuditView: View {
 
 /// The column widths the wide rows and their header share, so the figures line up down the list.
 private enum ReleaseYearAuditColumns {
+    static let plays: CGFloat = 70
     static let scroblytics: CGFloat = 265
     static let music: CGFloat = 150
     static let gap: CGFloat = 110
@@ -641,6 +665,8 @@ struct ReleaseYearAuditHeaderView: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: ReleaseYearAuditColumns.spacing) {
             Text("Album").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Plays").frame(width: ReleaseYearAuditColumns.plays, alignment: .trailing)
+                .help("How many times you have played the album, with all its edition names counted together.")
             Text("Scroblytics").frame(width: ReleaseYearAuditColumns.scroblytics, alignment: .leading)
                 .help("The album's release date here, and where it came from.")
             Text("Apple Music").frame(width: ReleaseYearAuditColumns.music, alignment: .leading)
@@ -661,7 +687,7 @@ struct ReleaseYearAuditHeaderView: View {
 /// (`ReleaseYearAuditHeaderView`). Otherwise stacked, each figure with its own label.
 struct ReleaseYearAuditRowView: View {
     /// The narrowest list width at which the columns fit.
-    static let wideMinimumWidth: CGFloat = 1140
+    static let wideMinimumWidth: CGFloat = 1230
 
     let row: ReleaseYearAudit.AlbumRow
     var isWide = true
@@ -697,6 +723,8 @@ struct ReleaseYearAuditRowView: View {
             if isWide {
                 HStack(alignment: .center, spacing: ReleaseYearAuditColumns.spacing) {
                     identity
+                    Text(row.plays.formatted()).font(AppTypography.contentTitle.monospacedDigit())
+                        .frame(width: ReleaseYearAuditColumns.plays, alignment: .trailing)
                     scroblyticsBlock(width: ReleaseYearAuditColumns.scroblytics, labelled: false)
                     musicBlock(width: ReleaseYearAuditColumns.music, labelled: false)
                     // A row with no gap to show still keeps the column, or its neighbours would slide along.
@@ -706,6 +734,8 @@ struct ReleaseYearAuditRowView: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     identity
+                    Text("\(row.plays.formatted()) \(row.plays == 1 ? "play" : "plays")")
+                        .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                     HStack(alignment: .top, spacing: 14) {
                         scroblyticsBlock(width: 190, labelled: true)
                         musicBlock(width: 140, labelled: true)

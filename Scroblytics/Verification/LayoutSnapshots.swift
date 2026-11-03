@@ -134,7 +134,7 @@ enum LayoutSnapshots {
         Task { @MainActor in
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             func album(_ artist: String, _ title: String, _ date: String, _ origin: AlbumDateOrigin, detected: String? = nil) -> AuditAlbum {
-                AuditAlbum(title: title, artist: artist, artistKey: artist.lowercased(), normalizedTitle: title.lowercased(), date: date, origin: origin, detected: detected ?? (origin == .manual ? nil : date))
+                AuditAlbum(title: title, artist: artist, artistKey: artist.lowercased(), normalizedTitle: title.lowercased(), date: date, origin: origin, detected: detected ?? (origin == .manual ? nil : date), plays: 40 + title.count * 123)
             }
             func row(_ a: AuditAlbum, music: Int, tracks: Int, span: (Int, Int)? = nil, category: ReleaseYearAudit.Category, differences: [ReleaseYearAudit.TrackDifference] = []) -> ReleaseYearAudit.AlbumRow {
                 ReleaseYearAudit.AlbumRow(

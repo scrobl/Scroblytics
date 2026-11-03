@@ -60,6 +60,8 @@ struct AuditAlbum: Sendable, Hashable {
     let origin: AlbumDateOrigin
     /// The detected date, even when your own shows instead (the date editor shows it).
     var detected: String? = nil
+    /// How many times the album has been played (every edition name of it counted together).
+    var plays: Int = 0
 
     var year: Int? { date.flatMap(ReleaseDateEngine.year(of:)) }
     /// The date you set yourself, if any.
@@ -163,6 +165,7 @@ enum ReleaseYearAudit {
         let musicAlbum: String
         let trackCount: Int
         let scroblytics: AuditAlbum
+        var plays: Int { scroblytics.plays }
         /// The most common year among the album's tracks in Music; with a tie, the album's own year if it is one of the tied years, else the earliest.
         let musicYear: Int?
         let musicEarliest: Int?
@@ -283,7 +286,7 @@ enum ReleaseYearAudit {
 
     /// What the list is ordered by.
     enum SortKey: String, Codable, CaseIterable, Sendable, Identifiable {
-        case difference, album, artist, scroblyticsYear, musicYear, source, tracksDiffering
+        case difference, album, artist, scroblyticsYear, musicYear, source, tracksDiffering, plays
 
         var id: String { rawValue }
 
@@ -296,6 +299,7 @@ enum ReleaseYearAudit {
             case .musicYear: "Apple Music year"
             case .source: "Source of the date"
             case .tracksDiffering: "Tracks that differ"
+            case .plays: "Plays"
             }
         }
 
@@ -303,7 +307,7 @@ enum ReleaseYearAudit {
         var startsAscending: Bool {
             switch self {
             case .album, .artist, .source: true
-            case .difference, .scroblyticsYear, .musicYear, .tracksDiffering: false
+            case .difference, .scroblyticsYear, .musicYear, .tracksDiffering, .plays: false
             }
         }
 
@@ -312,7 +316,7 @@ enum ReleaseYearAudit {
             case .difference: ascending ? "Smallest first" : "Largest first"
             case .album, .artist, .source: ascending ? "A to Z" : "Z to A"
             case .scroblyticsYear, .musicYear: ascending ? "Oldest first" : "Newest first"
-            case .tracksDiffering: ascending ? "Fewest first" : "Most first"
+            case .tracksDiffering, .plays: ascending ? "Fewest first" : "Most first"
             }
         }
     }
@@ -356,7 +360,21 @@ enum ReleaseYearAudit {
         case .musicYear: return ordered { $0.musicYear }
         case .source: return ordered { $0.scroblytics.origin.label }
         case .tracksDiffering: return ordered { $0.trackDifferences.count }
+        case .plays: return ordered { $0.plays }
         }
+    }
+
+    /// Plays per album, by `albumKey`: an album's edition names (and artist spellings that differ only in case) count together, the same
+    /// way the audit matches an album. Each distinct artist and album spelling is normalized once, not once per play.
+    static func playCounts(of snapshots: [ScrobbleSnapshot]) -> [String: Int] {
+        struct Spelling: Hashable { let artist: String; let album: String }
+        var bySpelling: [Spelling: Int] = [:]
+        for play in snapshots where !play.albumName.isEmpty { bySpelling[Spelling(artist: play.artistName, album: play.albumName), default: 0] += 1 }
+        var counts: [String: Int] = [:]
+        for (spelling, plays) in bySpelling {
+            counts[albumKey(artistKey: TextNormalization.artistIdentityKey(spelling.artist), normalizedTitle: TextNormalization.normalizeAlbumName(spelling.album)), default: 0] += plays
+        }
+        return counts
     }
 
     /// The albums a filter lists: those that disagree and that you haven't settled.
@@ -507,7 +525,9 @@ actor ReleaseYearAuditStoreReader {
         let known: ReleaseYearAudit.KnownTracks
     }
 
-    func load() -> Loaded {
+    func load() async -> Loaded {
+        // The shared copy of the history, read off the main thread; with none to read, every album shows 0 plays.
+        let plays = ReleaseYearAudit.playCounts(of: (try? await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)) ?? [])
         var albums: [AuditAlbum] = []
         for album in (try? modelContext.fetch(FetchDescriptor<Album>())) ?? [] {
             guard let artist = album.artist?.name else { continue }
@@ -515,7 +535,8 @@ actor ReleaseYearAuditStoreReader {
             albums.append(AuditAlbum(
                 title: album.title, artist: artist, artistKey: TextNormalization.artistIdentityKey(artist), normalizedTitle: album.normalizedTitle,
                 date: date, origin: AlbumDateOrigin.of(override: album.releaseDateOverride, detected: album.releaseDateDetected, recorded: album.releaseDateSource),
-                detected: album.releaseDateDetected
+                detected: album.releaseDateDetected,
+                plays: plays[ReleaseYearAudit.albumKey(artistKey: TextNormalization.artistIdentityKey(artist), normalizedTitle: album.normalizedTitle)] ?? 0
             ))
         }
         var overrides: [String: String] = [:]

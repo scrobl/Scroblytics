@@ -44,7 +44,9 @@ struct AlbumDetailView: View {
                     entity: .album, name: identity.name, subtitle: identity.artist, tertiary: nil,
                     imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
-                    onFixAlbumMatch: { showingFixSheet = true },
+                    // Only offered once the album's match group exists: it is built from this album's scrobbles, so an album
+                    // with none (or one whose turnover is still loading) has nothing to fix yet.
+                    onFixAlbumMatch: model.currentGroup == nil ? nil : { showingFixSheet = true },
                     facts: model.facts(onEditReleaseDate: { showingReleaseDateEdit = true }, onFixAlbumMatch: { showingFixSheet = true })
                         + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
                     sharePeriodLabel: periodLabel
@@ -116,6 +118,16 @@ struct AlbumDetailView: View {
                     group: group, openedFrom: identity.name, modelContext: modelContext, client: model.makeClient(),
                     onResolved: { Task { await model.loadTurnover() } }
                 )
+            } else {
+                // Never an empty sheet: if the group isn't there (it went away while the sheet was opening), say so and offer a way out.
+                VStack(spacing: 12) {
+                    Text("Nothing to fix yet").font(AppTypography.sectionTitle)
+                    Text("This album has no scrobbles, so there is no match to fix.")
+                        .font(AppTypography.supporting).foregroundStyle(.secondary)
+                    Button("Close") { showingFixSheet = false }.keyboardShortcut(.defaultAction)
+                }
+                .padding(32)
+                .frame(minWidth: 320)
             }
         }
         .sheet(isPresented: $showingReleaseDateEdit) {

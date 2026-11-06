@@ -21,10 +21,12 @@ struct ReleaseYearAuditView: View {
         /// Set after a successful run: Automation permission has been granted, so a later visit may read Music without asking.
         var hasRun = false
         var lastRun: Date?
+        /// What the Mixed years list asks of an album.
+        var mixed = ReleaseYearAudit.MixedYearsCriteria()
 
         init() {}
 
-        private enum CodingKeys: String, CodingKey { case filter, sort, ascending, hasRun, lastRun }
+        private enum CodingKeys: String, CodingKey { case filter, sort, ascending, hasRun, lastRun, mixed }
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -33,6 +35,7 @@ struct ReleaseYearAuditView: View {
             ascending = try values.decodeIfPresent(Bool.self, forKey: .ascending)
             hasRun = try values.decodeIfPresent(Bool.self, forKey: .hasRun) ?? false
             lastRun = try values.decodeIfPresent(Date.self, forKey: .lastRun)
+            mixed = (try? values.decodeIfPresent(ReleaseYearAudit.MixedYearsCriteria.self, forKey: .mixed)) ?? ReleaseYearAudit.MixedYearsCriteria()
         }
     }
 
@@ -99,7 +102,7 @@ struct ReleaseYearAuditView: View {
 
     private var visibleRows: [ReleaseYearAudit.AlbumRow] {
         guard let report else { return [] }
-        return ReleaseYearAudit.sorted(ReleaseYearAudit.listed(report.rows, filter: options.filter, decisions: decisionMap), by: options.sort, ascending: options.ascending)
+        return ReleaseYearAudit.sorted(ReleaseYearAudit.listed(report.rows, filter: options.filter, decisions: decisionMap, mixed: options.mixed), by: options.sort, ascending: options.ascending)
     }
 
     var body: some View {
@@ -221,7 +224,7 @@ struct ReleaseYearAuditView: View {
         case .close: "1–2 years"
         case .far: "3+ years"
         case .yourDates: "Your own dates"
-        case .musicVaries: "Compilations"
+        case .musicVaries: "Mixed years"
         }
     }
 
@@ -364,7 +367,7 @@ struct ReleaseYearAuditView: View {
     private func counts(_ report: ReleaseYearAudit.Report) -> some View {
         Label("\(report.count(band: .close).formatted()) 1–2 years apart", systemImage: "plusminus.circle.fill").foregroundStyle(.orange)
         Label("\(report.count(band: .far).formatted()) 3+ years apart", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-        Label("\(report.rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty }.count.formatted()) compilations", systemImage: "square.stack.3d.up").foregroundStyle(.secondary)
+        Label("\(report.rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty }.count.formatted()) with mixed years", systemImage: "square.stack.3d.up").foregroundStyle(.secondary)
             .help("Albums whose tracks have several different years in Music (a greatest-hits set, a rarities collection) and some of whose tracks show a different year here.")
     }
 
@@ -376,17 +379,76 @@ struct ReleaseYearAuditView: View {
     }
 
     private var actionRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    resultCount
+                    sortControls
+                    Spacer()
+                    bulkButtons
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) { resultCount; sortControls }
+                    bulkButtons
+                }
+            }
+            if options.filter == .musicVaries { mixedControls }
+        }
+    }
+
+    /// How much an album must have going on to be listed under Mixed years.
+    private var mixedControls: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                resultCount
-                sortControls
-                Spacer()
-                bulkButtons
+            HStack(spacing: 6) {
+                spreadLimit
+                Text("and").foregroundStyle(.secondary)
+                tracksLimit
+                resetMixed
             }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 12) { resultCount; sortControls }
-                bulkButtons
+            VStack(alignment: .leading, spacing: 6) {
+                spreadLimit
+                tracksLimit
+                resetMixed
             }
+        }
+        .font(AppTypography.compactMetadata)
+        .controlSize(.small)
+        .disabled(report == nil)
+    }
+
+    private var spreadLimit: some View {
+        limitControl("Years spanned", limit: $options.mixed.spread, unit: "years",
+                     help: "How many years lie between the album’s earliest and latest track in Music. Many tracks over a long time is usually a collection; one or two tracks far from the rest may be a data problem, which “tracks differing < 3” with “years spanned > 2” finds.")
+    }
+
+    private var tracksLimit: some View {
+        limitControl("Tracks differing", limit: $options.mixed.tracks, unit: "tracks",
+                     help: "How many of the album’s tracks show a different year here than in Music. 0 with “>” means any.")
+    }
+
+    /// "Years spanned  >  2  years": the name, then a comparison and a number.
+    private func limitControl(_ title: String, limit: Binding<ReleaseYearAudit.Limit>, unit: String, help: String) -> some View {
+        HStack(spacing: 4) {
+            Text(title).foregroundStyle(.secondary)
+            Picker(title + " comparison", selection: Binding(get: { limit.wrappedValue.comparison }, set: { limit.wrappedValue = ReleaseYearAudit.Limit(comparison: $0, value: limit.wrappedValue.value).normalized })) {
+                ForEach(ReleaseYearAudit.Limit.Comparison.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .labelsHidden().fixedSize()
+            Picker(title + " number", selection: limit.value) {
+                ForEach(ReleaseYearAudit.MixedYearsCriteria.valueChoices.filter { $0 > 0 || limit.wrappedValue.comparison == .greater }, id: \.self) {
+                    Text($0 == 0 ? "0 (any)" : "\($0)").tag($0)
+                }
+            }
+            .labelsHidden().fixedSize()
+            Text(unit).foregroundStyle(.secondary)
+        }
+        .help(help)
+    }
+
+    @ViewBuilder
+    private var resetMixed: some View {
+        if !options.mixed.isDefault {
+            Button("Reset") { options.mixed = ReleaseYearAudit.MixedYearsCriteria() }.buttonStyle(.link)
         }
     }
 
@@ -481,7 +543,7 @@ struct ReleaseYearAuditView: View {
                 systemImage: "checkmark.circle",
                 description: Text(options.filter == .all
                     ? "Every album’s release year here matches the one in Music, or you’ve settled the difference."
-                    : "No albums match this view.")
+                    : (options.filter == .musicVaries && !options.mixed.isDefault ? "No albums match this view. Lower the minimums above to list more." : "No albums match this view."))
             )
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
@@ -656,7 +718,7 @@ private enum ReleaseYearAuditColumns {
     static let scroblytics: CGFloat = 265
     static let music: CGFloat = 150
     static let gap: CGFloat = 110
-    static let buttons: CGFloat = 372
+    static let buttons: CGFloat = 404
     static let spacing: CGFloat = 14
 }
 
@@ -687,7 +749,7 @@ struct ReleaseYearAuditHeaderView: View {
 /// (`ReleaseYearAuditHeaderView`). Otherwise stacked, each figure with its own label.
 struct ReleaseYearAuditRowView: View {
     /// The narrowest list width at which the columns fit.
-    static let wideMinimumWidth: CGFloat = 1230
+    static let wideMinimumWidth: CGFloat = 1270
 
     let row: ReleaseYearAudit.AlbumRow
     var isWide = true
@@ -860,7 +922,13 @@ struct ReleaseYearAuditRowView: View {
                 .help("Settle this album as it is. It comes back only if either year changes.")
             Button(action: onEdit) { Label("Edit…", systemImage: "calendar") }
                 .help("Set a different date by hand.")
-            // An album whose own year already agrees (a compilation listed for its tracks) has nothing to set.
+            // An album whose own year already agrees (listed for its tracks) has no album date to set; its tracks can still follow Music.
+            if row.category == .same, Self.showsTrackDetails(row) {
+                let eligible = row.trackDifferences.filter { !$0.ownDate }.count
+                Button(action: onUseTracks) { Label("Use Apple Music’s · \(eligible.formatted()) \(eligible == 1 ? "track" : "tracks")", systemImage: "arrow.down.circle") }
+                    .disabled(eligible == 0)
+                    .help("Set the release date of \(eligible == 1 ? "the track" : "each of the \(eligible.formatted()) tracks") whose year differs to the year Music holds for it. A track you gave a date of your own, or one you have never played, is left alone. Open the row to see which.")
+            }
             if row.category != .same {
             Button(action: onUseApple) { Label("Use Apple Music’s", systemImage: "arrow.down.circle") }
                 .disabled(row.musicYear == nil)

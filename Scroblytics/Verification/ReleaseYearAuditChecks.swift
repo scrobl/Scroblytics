@@ -427,10 +427,35 @@ enum ReleaseYearAuditChecks {
         check("the tracks that differ: those shown at the album's year and those with a date of their own; never the one that agrees, and never a track you haven't played (nothing of it here to change)", Set(comp?.trackDifferences.map(\.name) ?? []) == ["Old One", "Don’t Stop", "Mine"], "\(String(describing: comp?.trackDifferences.map(\.name)))")
 
         // Compilations: albums whose Music tracks span several years and some differ, whether or not the album's own year agrees.
-        let listedNames = Set(ReleaseYearAudit.compilations(first.rows, decisions: [:]).map(\.scroblytics.title))
-        check("the compilations list holds the albums with several years in Music and tracks that differ", listedNames == ["Comp", "Other Comp"], "\(listedNames)")
+        let listedNames = Set(ReleaseYearAudit.mixedYears(first.rows, decisions: [:]).map(\.scroblytics.title))
+        check("the Mixed years list holds the albums with several years in Music and tracks that differ", listedNames == ["Comp", "Other Comp"], "\(listedNames)")
         // Other Comp's album year (1985) is neither 1980 nor 1990, but is the most common year of neither: both its tracks differ.
-        check("an album whose tracks all agree with it, or have one year in Music, is not a compilation", ReleaseYearAudit.compilations(analyseSample(), decisions: [:]).isEmpty)
+        check("an album whose tracks all agree with it, or have one year in Music, is not listed as mixed years", ReleaseYearAudit.mixedYears(analyseSample(), decisions: [:]).isEmpty)
+
+        // The minimums that narrow the list, checked against a plain filter over the same rows.
+        let mixedRows = first.rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty }
+        let widest = mixedRows.map(\.yearSpread).max() ?? 0
+        let mostTracks = mixedRows.map { $0.trackDifferences.count }.max() ?? 0
+        func mixedTitles(_ criteria: ReleaseYearAudit.MixedYearsCriteria) -> Set<String> { Set(ReleaseYearAudit.mixedYears(first.rows, decisions: [:], criteria: criteria).map(\.scroblytics.title)) }
+        check("the defaults list every album with mixed years", ReleaseYearAudit.MixedYearsCriteria().isDefault && mixedTitles(.init()) == Set(mixedRows.map(\.scroblytics.title)))
+        func limit(_ comparison: ReleaseYearAudit.Limit.Comparison, _ value: Int) -> ReleaseYearAudit.Limit { .init(comparison: comparison, value: value) }
+        // Each operator, against a plain filter over the same rows (the rows are the ones the Mixed years list starts from).
+        func expected(_ keep: (ReleaseYearAudit.AlbumRow) -> Bool) -> Set<String> { Set(mixedRows.filter(keep).map(\.scroblytics.title)) }
+        check("spread more than a bound lists the albums whose years are further apart than that, and more than the widest lists none", mixedTitles(.init(spread: limit(.greater, widest - 1))) == expected { $0.yearSpread > widest - 1 } && !mixedTitles(.init(spread: limit(.greater, widest - 1))).isEmpty && mixedTitles(.init(spread: limit(.greater, widest))).isEmpty, "widest \(widest)")
+        check("spread fewer than a bound lists the albums closer together than that", mixedTitles(.init(spread: limit(.less, widest))) == expected { $0.yearSpread < widest } && mixedTitles(.init(spread: limit(.less, 1))).isEmpty)
+        check("spread exactly a number lists the albums with just that spread", mixedTitles(.init(spread: limit(.equal, widest))) == expected { $0.yearSpread == widest } && !mixedTitles(.init(spread: limit(.equal, widest))).isEmpty)
+        check("differing tracks more than, fewer than and exactly work the same way", mixedTitles(.init(tracks: limit(.greater, mostTracks - 1))) == expected { $0.trackDifferences.count > mostTracks - 1 } && mixedTitles(.init(tracks: limit(.less, mostTracks))) == expected { $0.trackDifferences.count < mostTracks } && mixedTitles(.init(tracks: limit(.equal, mostTracks))) == expected { $0.trackDifferences.count == mostTracks } && mixedTitles(.init(tracks: limit(.greater, mostTracks))).isEmpty, "most \(mostTracks)")
+        check("both conditions must hold: few tracks far apart is a different list from many tracks far apart", mixedTitles(.init(spread: limit(.greater, 0), tracks: limit(.less, mostTracks))) == expected { $0.trackDifferences.count < mostTracks } && mixedTitles(.init(spread: limit(.greater, widest), tracks: limit(.greater, 0))).isEmpty && mixedTitles(.init(spread: limit(.equal, widest), tracks: limit(.less, 1))).isEmpty)
+        check("few tracks far apart and many tracks far apart together are every album that is far apart (with the split at one number)", { let few = mixedTitles(.init(spread: limit(.greater, 1), tracks: limit(.less, 3))), many = mixedTitles(.init(spread: limit(.greater, 1), tracks: limit(.greater, 2))); return few.isDisjoint(with: many) && few.union(many) == expected { $0.yearSpread > 1 } }())
+        let strictest = ReleaseYearAudit.MixedYearsCriteria(spread: limit(.greater, widest), tracks: .init())
+        check("the conditions narrow only the Mixed years list, not the others", ReleaseYearAudit.listed(first.rows, filter: .musicVaries, decisions: [:], mixed: strictest).isEmpty && ReleaseYearAudit.listed(first.rows, filter: .all, decisions: [:], mixed: strictest).map(\.albumKey) == ReleaseYearAudit.listed(first.rows, filter: .all, decisions: [:]).map(\.albumKey))
+        check("fewer than or exactly nothing is not offered (it could never hold), and more than 0 stays as it is", limit(.less, 0).normalized.value == 1 && limit(.equal, 0).normalized.value == 1 && limit(.greater, 0).normalized.value == 0 && limit(.greater, -3).normalized.value == 0)
+        let oldOptions = try? JSONDecoder().decode(ReleaseYearAuditView.Options.self, from: Data(#"{"filter":"musicVaries","sort":"plays","hasRun":true}"#.utf8))
+        check("saved options from before the conditions existed read, with the conditions off", oldOptions?.filter == .musicVaries && oldOptions?.mixed.isDefault == true)
+        let firstVersion = try? JSONDecoder().decode(ReleaseYearAuditView.Options.self, from: Data(#"{"filter":"musicVaries","mixed":{"minSpread":3,"minTracks":2}}"#.utf8))
+        check("the first version's plain minimums read as the same thing (at least 3 is more than 2)", firstVersion?.mixed.spread == limit(.greater, 2) && firstVersion?.mixed.tracks == limit(.greater, 1) && mixedRows.allSatisfy { firstVersion?.mixed.accepts($0) == ($0.yearSpread >= 3 && $0.trackDifferences.count >= 2) })
+        let roundTrip = (try? JSONEncoder().encode({ var o = ReleaseYearAuditView.Options(); o.mixed = .init(spread: limit(.greater, 2), tracks: limit(.less, 3)); return o }())).flatMap { try? JSONDecoder().decode(ReleaseYearAuditView.Options.self, from: $0) }
+        check("the conditions are saved with the other options", roundTrip?.mixed == .init(spread: limit(.greater, 2), tracks: limit(.less, 3)))
 
         // Using Music's years for the tracks.
         var result = try ReleaseYearAuditActions.useAppleYearsForTracks(comp.map { [$0] } ?? [], context: context)
@@ -481,7 +506,7 @@ enum ReleaseYearAuditChecks {
 
         // Several albums at once.
         let all = await analyse()
-        result = try ReleaseYearAuditActions.useAppleYearsForTracks(ReleaseYearAudit.compilations(all.rows, decisions: [:]), context: context)
+        result = try ReleaseYearAuditActions.useAppleYearsForTracks(ReleaseYearAudit.mixedYears(all.rows, decisions: [:]), context: context)
         check("several albums at once: every eligible track is set, and each album gets its own decision", result.albums == 2 && result.tracksSet == 4 && decisionCount() == 2, "\(result) \(decisionCount())")
 
         // Choosing Music's year on one album whose tracks span years sets the album and every track that shows the album's date, in one go.
@@ -519,11 +544,11 @@ enum ReleaseYearAuditChecks {
         func decisions() throws -> [String: ReleaseYearAudit.Decision] {
             Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ReleaseYearDecision>()).map { ($0.albumKey, ReleaseYearAudit.Decision(albumKey: $0.albumKey, verdict: .init(rawValue: $0.verdict)!, scroblyticsYear: $0.scroblyticsYear, musicYear: $0.musicYear, tracksSignature: $0.tracksSignature ?? "")) })
         }
-        check("it leaves the compilations list", !ReleaseYearAudit.compilations(await analyse().rows, decisions: try decisions()).contains { $0.scroblytics.title == "Comp" })
+        check("it leaves the Mixed years list", !ReleaseYearAudit.mixedYears(await analyse().rows, decisions: try decisions()).contains { $0.scroblytics.title == "Comp" })
         let changedMusic = music.map { $0.name == "Old One" ? track("Old One", "Artist A", "Comp", 1954) : $0 }
         let loaded = await ReleaseYearAuditStoreReader(modelContainer: container).load()
         let changedReport = ReleaseYearAudit.compare(music: changedMusic, albums: loaded.albums, trackOverrides: loaded.trackOverrides, trackOverrideIndex: loaded.trackOverrideIndex, knownTracks: loaded.known)
-        check("…and comes back when Music's year for one of its tracks changes", ReleaseYearAudit.compilations(changedReport.rows, decisions: try decisions()).contains { $0.scroblytics.title == "Comp" })
+        check("…and comes back when Music's year for one of its tracks changes", ReleaseYearAudit.mixedYears(changedReport.rows, decisions: try decisions()).contains { $0.scroblytics.title == "Comp" })
         check("the fingerprint doesn't depend on the order of the tracks, and is empty for none", ReleaseYearAudit.tracksSignature(fresh.trackDifferences) == ReleaseYearAudit.tracksSignature(fresh.trackDifferences.reversed()) && ReleaseYearAudit.tracksSignature([]) == "")
 
         // The backup keeps all of it.
@@ -770,7 +795,7 @@ enum ReleaseYearAuditChecks {
             Dictionary(try context.fetch(FetchDescriptor<Track>()).compactMap { t in t.releaseDateOverride.map { (t.identityKey, $0) } }, uniquingKeysWith: { first, _ in first })
         }
         let tracksBefore = try trackDates()
-        let compilations = ReleaseYearAudit.compilations(report.rows, decisions: [:])
+        let compilations = ReleaseYearAudit.mixedYears(report.rows, decisions: [:])
         print("TRACKS: \(compilations.count) compilations listed with \(compilations.reduce(0) { $0 + $1.trackDifferences.count }) tracks that differ (\(compilations.reduce(0) { $0 + $1.trackDifferences.filter(\.ownDate).count }) have a date of your own); \(tracksBefore.count) tracks have their own date now")
         let trackResult = try ReleaseYearAuditActions.useAppleYearsForTracks(compilations, context: context)
         let tracksAfter = try trackDates()
@@ -804,6 +829,13 @@ enum ReleaseYearAuditChecks {
         }
         let mismatched = loaded.albums.filter { $0.plays != (independent[ReleaseYearAudit.albumKey(artistKey: $0.artistKey, normalizedTitle: $0.normalizedTitle)] ?? 0) }
         print("PLAYS: \(loaded.albums.count) albums, \(loaded.albums.filter { $0.plays > 0 }.count) with plays, \(loaded.albums.map(\.plays).reduce(0, +)) plays on them (\(independent.values.reduce(0, +)) plays have an album); albums whose count differs from the independent loop: \(mismatched.count)")
+        let mixedAll = report.rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty }
+        func mixedCount(_ c: ReleaseYearAudit.MixedYearsCriteria) -> String {
+            let listed = ReleaseYearAudit.mixedYears(report.rows, decisions: [:], criteria: c).count
+            return "\(listed)\(listed == mixedAll.filter { c.spread.holds($0.yearSpread) && c.tracks.holds($0.trackDifferences.count) }.count ? "" : " (MISMATCH)")"
+        }
+        func lim(_ c: ReleaseYearAudit.Limit.Comparison, _ v: Int) -> ReleaseYearAudit.Limit { .init(comparison: c, value: v) }
+        print("MIXED: \(mixedAll.count) albums have mixed years; years spanned > 2: \(mixedCount(.init(spread: lim(.greater, 2)))); tracks differing < 3: \(mixedCount(.init(tracks: lim(.less, 3)))); tracks differing < 3 and years spanned > 2 (few tracks far apart): \(mixedCount(.init(spread: lim(.greater, 2), tracks: lim(.less, 3)))); tracks differing > 2 and years spanned > 2 (collections): \(mixedCount(.init(spread: lim(.greater, 2), tracks: lim(.greater, 2)))); tracks differing = 1: \(mixedCount(.init(tracks: lim(.equal, 1))))")
         let listedByPlays = ReleaseYearAudit.sorted(ReleaseYearAudit.listed(report.rows, filter: .all, decisions: [:]), by: .plays)
         print("PLAYS: listed albums by plays, first five: \(listedByPlays.prefix(5).map { "\($0.plays)×" + String($0.scroblytics.title.prefix(1)) + "…" }.joined(separator: ", ")); sorted non-increasing: \(zip(listedByPlays, listedByPlays.dropFirst()).allSatisfy { $0.plays >= $1.plays })")
         print("Music: \(report.musicTracks) tracks in \(report.musicAlbums) albums (\(report.musicTracksWithoutYear) tracks with no year); Scroblytics: \(loaded.albums.count) albums, \(loaded.trackOverrides.count) track dates")

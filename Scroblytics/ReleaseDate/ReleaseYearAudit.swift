@@ -166,6 +166,8 @@ enum ReleaseYearAudit {
         let trackCount: Int
         let scroblytics: AuditAlbum
         var plays: Int { scroblytics.plays }
+        /// Years between the earliest and the latest year among the album's tracks in Music (0 with one year or none).
+        var yearSpread: Int { (musicLatest ?? 0) - (musicEarliest ?? 0) }
         /// The most common year among the album's tracks in Music; with a tie, the album's own year if it is one of the tied years, else the earliest.
         let musicYear: Int?
         let musicEarliest: Int?
@@ -262,10 +264,72 @@ enum ReleaseYearAudit {
             && decision.tracksSignature == tracksSignature(row.trackDifferences)
     }
 
-    /// The compilations that need a look: Music's tracks have several years and some of them differ from what Scroblytics shows, whether or
-    /// not the album's own year agrees. The albums not yet settled.
-    static func compilations(_ rows: [AlbumRow], decisions: [String: Decision]) -> [AlbumRow] {
-        rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty && !isDecided($0, decisions: decisions) }
+    /// What the Mixed years list asks of an album beyond having several years in Music: how far apart those years are, and how many of
+    /// its tracks differ from what Scroblytics shows. The defaults list every such album.
+    struct MixedYearsCriteria: Codable, Equatable, Sendable {
+        /// How many years lie between the earliest and latest year among the album's tracks in Music.
+        var spread = Limit()
+        /// How many of the album's tracks show a different year here than in Music.
+        var tracks = Limit()
+
+        /// The numbers the menus offer.
+        static let valueChoices = [0, 1, 2, 3, 4, 5, 7, 10, 15, 20]
+
+        var isDefault: Bool { self == MixedYearsCriteria() }
+
+        func accepts(_ row: AlbumRow) -> Bool { spread.holds(row.yearSpread) && tracks.holds(row.trackDifferences.count) }
+
+        init(spread: Limit = Limit(), tracks: Limit = Limit()) {
+            self.spread = spread
+            self.tracks = tracks
+        }
+
+        private enum CodingKeys: String, CodingKey { case spread, tracks, minSpread, minTracks }
+
+        /// Reads the saved form; the first version saved a plain minimum (`minSpread`, `minTracks`), which is "greater than that minus one".
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            func limit(_ key: CodingKeys, legacy: CodingKeys) -> Limit {
+                if let saved = try? values.decodeIfPresent(Limit.self, forKey: key) { return saved.normalized }
+                if let minimum = try? values.decodeIfPresent(Int.self, forKey: legacy) { return Limit(comparison: .greater, value: max(0, minimum - 1)) }
+                return Limit()
+            }
+            spread = limit(.spread, legacy: .minSpread)
+            tracks = limit(.tracks, legacy: .minTracks)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(spread, forKey: .spread)
+            try container.encode(tracks, forKey: .tracks)
+        }
+    }
+
+    /// A number compared with a bound: more than, fewer than, or exactly. The default, "more than 0", holds for any album that has mixed years.
+    struct Limit: Codable, Equatable, Sendable {
+        enum Comparison: String, Codable, CaseIterable, Sendable {
+            case greater = ">", less = "<", equal = "="
+        }
+
+        var comparison = Comparison.greater
+        var value = 0
+
+        func holds(_ number: Int) -> Bool {
+            switch comparison {
+            case .greater: number > value
+            case .less: number < value
+            case .equal: number == value
+            }
+        }
+
+        /// "Fewer than 0" and "exactly 0" can never hold, so only "more than" may be 0 (any).
+        var normalized: Limit { comparison == .greater ? Limit(comparison: .greater, value: max(0, value)) : Limit(comparison: comparison, value: max(1, value)) }
+    }
+
+    /// The albums that need a look for their tracks' years: Music's tracks have several years and some of them differ from what
+    /// Scroblytics shows, whether or not the album's own year agrees, and the album meets `criteria`. The albums not yet settled.
+    static func mixedYears(_ rows: [AlbumRow], decisions: [String: Decision], criteria: MixedYearsCriteria = MixedYearsCriteria()) -> [AlbumRow] {
+        rows.filter { $0.musicVaries && !$0.trackDifferences.isEmpty && criteria.accepts($0) && !isDecided($0, decisions: decisions) }
     }
 
     /// How far apart the two years are, for the filters: a year or two (often a release-date edge or a reissue), or three and more.
@@ -378,15 +442,15 @@ enum ReleaseYearAudit {
     }
 
     /// The albums a filter lists: those that disagree and that you haven't settled.
-    static func listed(_ rows: [AlbumRow], filter: Filter, decisions: [String: Decision]) -> [AlbumRow] {
-        if filter == .musicVaries { return compilations(rows, decisions: decisions) }
+    static func listed(_ rows: [AlbumRow], filter: Filter, decisions: [String: Decision], mixed: MixedYearsCriteria = MixedYearsCriteria()) -> [AlbumRow] {
+        if filter == .musicVaries { return mixedYears(rows, decisions: decisions, criteria: mixed) }
         let open = rows.filter { ($0.category == .offByOne || $0.category == .differs) && !isDecided($0, decisions: decisions) }
         switch filter {
         case .all: return open
         case .close: return open.filter { band(forGap: $0.gap) == .close }
         case .far: return open.filter { band(forGap: $0.gap) == .far }
         case .yourDates: return open.filter { $0.scroblytics.origin == .manual }
-        case .musicVaries: return compilations(rows, decisions: decisions)
+        case .musicVaries: return mixedYears(rows, decisions: decisions, criteria: mixed)
         }
     }
 

@@ -13,6 +13,8 @@ struct AppleMusicSnapshot: Sendable {
         /// Music's `database ID` for the track, when read. A favorite whose ID is not among the library's IDs is not a library
         /// track (see the Loved Status Audit's "Not in library").
         var databaseID: Int? = nil
+        /// Music's `album artist` for the track, when the read asked for it; "" otherwise (and for a track that has none).
+        var albumArtist: String = ""
     }
 
     enum Source: Sendable {
@@ -60,9 +62,10 @@ enum AppleMusicFavoritesReader {
 
     /// Columns come back joined in ONE step each (not row by row in AppleScript, which is ~20x slower for the same
     /// data). First column names the source; the rest are favorites then library columns.
-    private static func script(includeCloudStatus: Bool) -> String {
+    private static func script(includeCloudStatus: Bool, includeAlbumArtist: Bool) -> String {
     """
     set includeCloud to \(includeCloudStatus)
+    set includeAlbumArtist to \(includeAlbumArtist)
     set rs to (ASCII character 30)
     set gs to (ASCII character 29)
     set mode to "playlist"
@@ -72,6 +75,8 @@ enum AppleMusicFavoritesReader {
         set lb to album of every track of library playlist 1
         set lc to {}
         if includeCloud then set lc to cloud status of every track of library playlist 1
+        set lg to {}
+        if includeAlbumArtist then set lg to album artist of every track of library playlist 1
         set li to database ID of every track of library playlist 1
         set fn to {}
         set fa to {}
@@ -103,18 +108,19 @@ enum AppleMusicFavoritesReader {
     set o9 to li as string
     set o10 to fi as string
     set o11 to fc as string
+    set o12 to lg as string
     set AppleScript's text item delimiters to ""
-    return mode & gs & o1 & gs & o2 & gs & o3 & gs & o4 & gs & o5 & gs & o6 & gs & o7 & gs & o8 & gs & o9 & gs & o10 & gs & o11
+    return mode & gs & o1 & gs & o2 & gs & o3 & gs & o4 & gs & o5 & gs & o6 & gs & o7 & gs & o8 & gs & o9 & gs & o10 & gs & o11 & gs & o12
     """
     }
 
     /// `includeCloudStatus` adds one more whole-library column (`cloud status`); the Loved Status Audit doesn't need it.
-    static func read(includeCloudStatus: Bool = false) async throws -> AppleMusicSnapshot {
+    static func read(includeCloudStatus: Bool = false, includeAlbumArtist: Bool = false) async throws -> AppleMusicSnapshot {
         guard isMusicRunning else { throw ReadError.musicNotRunning }
         let started = Date()
-        let output = try await AppleMusicMatcher.runAppleScript(script(includeCloudStatus: includeCloudStatus), arguments: [])
+        let output = try await AppleMusicMatcher.runAppleScript(script(includeCloudStatus: includeCloudStatus, includeAlbumArtist: includeAlbumArtist), arguments: [])
         let columns = output.trimmingCharacters(in: .newlines).components(separatedBy: columnSep)
-        guard columns.count == 12 else { throw ReadError.unexpectedOutput }
+        guard columns.count == 13 else { throw ReadError.unexpectedOutput }
         func items(_ column: String) -> [String] { column.isEmpty ? [] : column.components(separatedBy: itemSep) }
 
         let libNames = items(columns[4]), libArtists = items(columns[5]), libAlbums = items(columns[6])
@@ -123,12 +129,14 @@ enum AppleMusicFavoritesReader {
         guard !includeCloudStatus || cloud.count == libNames.count else { throw ReadError.unexpectedOutput }
         // The IDs are only used to tell favorites that aren't in the library from ones that are; if they don't line up
         // with the names, leave them out rather than fail the whole read.
+        let libAlbumArtists = includeAlbumArtist ? items(columns[12]) : []
+        guard !includeAlbumArtist || libAlbumArtists.count == libNames.count else { throw ReadError.unexpectedOutput }
         let libIDs = items(columns[9]).compactMap { Int($0) }
         let hasLibIDs = libIDs.count == libNames.count
         let library = (0..<libNames.count).map {
             AppleMusicSnapshot.Track(
                 name: libNames[$0], artist: libArtists[$0], album: libAlbums[$0], cloudStatus: includeCloudStatus ? cloud[$0] : "",
-                databaseID: hasLibIDs ? libIDs[$0] : nil
+                databaseID: hasLibIDs ? libIDs[$0] : nil, albumArtist: includeAlbumArtist ? libAlbumArtists[$0] : ""
             )
         }
 

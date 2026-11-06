@@ -206,6 +206,8 @@ struct ToolsView: View {
             ReleaseYearAuditView(modelContainer: modelContainer, navigation: navigation)
         case .libraryGaps:
             LibraryGapsView(modelContainer: modelContainer, navigation: navigation)
+        case .songsWithoutAlbums:
+            SongsWithoutAlbumsView(modelContainer: modelContainer, navigation: navigation)
         case .tagManagement:
             TagManagementView(modelContainer: modelContainer, navigation: navigation)
         case .similarSounds:
@@ -242,7 +244,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
     let id: Kind
     let name: String
     let summary: String
@@ -291,6 +293,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .libraryGaps, name: "Library Gaps",
             summary: "Songs you’ve scrobbled that aren’t in your Apple Music library — or were, and no longer are.",
             systemImage: "music.note.list", category: "Organize"
+        ),
+        ToolDescriptor(
+            id: .songsWithoutAlbums, name: "Songs Without Albums",
+            summary: "Songs with no album in Music or in your scrobbles, and albums that hold just one song.",
+            systemImage: "square.stack", category: "Organize"
         ),
         ToolDescriptor(
             id: .tagManagement, name: "Tag Management",

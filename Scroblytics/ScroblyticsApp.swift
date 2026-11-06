@@ -169,6 +169,7 @@ struct ScroblyticsApp: App {
         AutoPlaylistChecks.runHeadlessIfRequested(container: modelContainer)
         BackupCoverageChecks.runHeadlessIfRequested()
         ReleaseYearAuditChecks.runHeadlessIfRequested(container: modelContainer)
+        SongsWithoutAlbumsChecks.runHeadlessIfRequested(container: modelContainer)
         Task { @MainActor in ProgressSimulator.startIfRequested() }
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()

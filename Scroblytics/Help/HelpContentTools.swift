@@ -25,6 +25,7 @@ extension HelpContent {
                     ["[Loved Status Audit](help://tool-loved-audit)", "Last.fm loves vs Apple Music favorites", "Music app permission"],
                     ["[Release Year Audit](help://tool-release-year-audit)", "Albums whose release year differs from Apple Music’s", "Music app permission"],
                     ["[Library Gaps](help://tool-library-gaps)", "Scrobbled tracks missing from your Music library", "Music app permission"],
+                    ["[Songs Without Albums](help://tool-songs-without-albums)", "Songs with no album, and albums holding one song", "Music app permission (for the library part)"],
                     ["[Tag Management](help://tool-tag-management)", "Bulk add/remove Last.fm tags", "Track Actions (**writes to Last.fm**)"],
                     ["[Collage Generator](help://tool-collage)", "A shareable image of your top items", "Nothing"],
                     ["[Auto-Updating Playlists](help://tool-auto-playlists)", "Apple Music playlists kept in step with a chart or query", "Music app permission"],
@@ -247,6 +248,26 @@ extension HelpContent {
             summary: "Scrobbled tracks that aren’t in your Apple Music library.",
             blocks: [
                 .paragraph("Lists tracks you’ve scrobbled that aren’t in your Music library, with statuses **Removed, Never in library, Unavailable, Uncertain** ([definitions](help://metrics-loved-library)). The result is saved, so reopening is instant. A track whose scrobbles were all corrected or removed on Last.fm (for example a changed artist credit, which makes it a different track) drops out of the list after the resync, and the next check also deletes its saved status; **Check library** re-reads Music (it must be running) and updates it. Sort by Most played, Last played or Artist, group by artist (each artist starts collapsed; click an artist to open it), and use **Confirm** (the check-circle button on an **Uncertain** row) when you’ve checked that the track really isn’t in your library: the near match Music has is a different recording (for example a live version next to the studio one). The track moves to **Never in library** (or **Removed**, if it was once in your library), gets the “not in your Apple Music library” mark elsewhere in the app, and stays in the list like any other track of that status. Later checks keep it there. The arrow button on a confirmed row undoes it and lists the track as Uncertain again. If a later check finds the track in your library, its confirmation is cleared, so a future removal is flagged as usual. Confirming doesn’t touch your Music library or your scrobbles. **Search in Apple Music** opens the track in Music. A small badge appears next to affected tracks elsewhere in the app. Confirmations are included in backups."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-songs-without-albums",
+            title: "Songs Without Albums",
+            summary: "Songs that have no album, and albums that hold just one song.",
+            blocks: [
+                .paragraph("Two lists of songs that aren’t properly tied to an album, switched at the top. The tool only reads: it changes nothing in Music, in your scrobbles or on Last.fm."),
+                .heading("No album"),
+                .paragraph("Songs whose **Album** is empty in your Music library, and songs Last.fm recorded with no album name on some of their plays (a blank or all-spaces album counts as none). A song appears once, whichever way it was found. A row says whether Music has the song with an empty Album (**Empty Album in Music**) and how many plays have no album name. When the same song has an album on other plays, or another copy in your library has one, the row names it (**Elsewhere on…**; hover for every album and its plays): that is usually the album to give it. The scrobbles part works from your history alone; **Read Music** adds the library part."),
+                .heading("Alone on an album"),
+                .paragraph("Albums in your Music library that contain exactly one song. Albums are told apart by their **album artist** (the track’s artist when it has none), so the songs of a compilation, or a song with a guest’s name on someone else’s album, don’t each count as an album of their own. A song in the library twice on one album (for example an uploaded and a streaming copy) is still one song, and an album name that differs only by case or stray spaces is one album. A one-song album is not necessarily a mistake: it is what you get when you own a single song from a record. The row helps tell which it is:"),
+                .bullets([
+                    "**Named after the song**: the album is the song’s own name, or the name with “- Single” (a single).",
+                    "**Maybe the same as “…”**: the same artist has another album in your library with the same name apart from “- Single”, “- EP” or an edition suffix, so the song may belong there.",
+                    "**Also on…**: the same song is on another album, in your library or in your scrobbles. Plays counted under that album are shown on hover.",
+                    "**Streaming copy** / **No longer available**: where the song comes from in Music.",
+                ]),
+                .paragraph("**Show** narrows each list (for example only the albums named after their song, or only those that look like another edition). Sort by Most played, Last played or Artist. Plays are counted the way the rest of the app matches tracks, so a song and its “(Acoustic)”, “(feat. …)” or year-tagged version are one song here. Click a row to open the song’s page; the magnifying glass searches for it in Apple Music."),
+                .paragraph("**Read Music** reads your library once, which takes about a second. Music must already be open (Scroblytics never opens it), and the first read asks for permission to control Music. After that the tool reads Music again by itself when you open it. Nothing is saved: the lists are worked out each time, and nothing is sent anywhere."),
             ]
         ),
         HelpArticle(

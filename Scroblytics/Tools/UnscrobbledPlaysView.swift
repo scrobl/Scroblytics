@@ -109,6 +109,21 @@ struct UnscrobbledPlaysView: View {
 
     private static let toolId = "unscrobbledPlays"
 
+    /// What the scrobbling warning's Review button sets up: the Not scrobbled list, everything in it, for the last 14 days.
+    @MainActor
+    static func prepareForReview(container: ModelContainer) {
+        let context = container.mainContext
+        var saved = ToolFilterSettingsStore.load(Options.self, toolId: toolId, context: context, default: Options())
+        saved.group = .notScrobbled
+        saved.filter = .all
+        saved.period = .fortnight
+        saved.hasRun = true
+        ToolFilterSettingsStore.save(saved, toolId: toolId, context: context)
+        try? context.save()
+    }
+
+    private let watch = ScrobblerWatchStore.shared
+
     @Environment(\.modelContext) private var modelContext
     @State private var options = Options()
     @State private var didLoad = false
@@ -224,6 +239,9 @@ struct UnscrobbledPlaysView: View {
         Toggle("Match spelling variants", isOn: $options.matchVariants)
             .toggleStyle(.checkbox)
             .help("On: a song scrobbled as “Title (feat. …)”, “Title (Acoustic)” or a year-tagged version counts as the same song, as everywhere else in the app. Off: only the identical artist and title counts, so songs scrobbled under another spelling are listed (with how they were scrobbled), which helps if you want to clean those up.")
+        Toggle("Warn me if scrobbling stops", isOn: Binding(get: { watch.settings.enabled }, set: { watch.setEnabled($0) }))
+            .toggleStyle(.checkbox)
+            .help("After each sync, check whether Music has played several songs Last.fm never got, and show a warning if so. Off until you turn it on. Settings › Sync sets how many songs and how many days.")
         Spacer(minLength: 0)
         if isReading { ProgressView().controlSize(.small) }
         if options.group == .notScrobbled, inputs != nil {

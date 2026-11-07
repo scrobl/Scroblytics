@@ -144,6 +144,100 @@ enum AppleMusicFavoritesReader {
     }
 
     /// `includeCloudStatus` adds one more whole-library column (`cloud status`); the Loved Status Audit doesn't need it.
+    /// Only the songs Music has played in the last `days` days, with their played dates and counts, in about a second and a half on a
+    /// 19,000-song library (the whole-library read takes about nine). It is what the background scrobbling check uses.
+    ///
+    /// It takes two steps, for reasons found by measuring on a real library. Picking the recent songs in AppleScript is slow (looping over
+    /// 19,000 dates takes about four seconds), and Music's own filter (`whose played date > …`) leaves out some songs whose played date
+    /// it does return when asked directly, which would hide exactly the plays this is meant to notice. So JavaScript for Automation reads
+    /// every song's played date in one call and picks the recent ones with a day's margin, together with their names, artists, albums and
+    /// counts. But its dates are not trustworthy to the hour (for a play from before a daylight-saving change they come back an hour
+    /// early, which does not match Last.fm's own timestamps for the same play), so the exact dates of just those songs are then read in
+    /// AppleScript, the way the whole-library read does, and the cut-off is applied to those.
+    static func readRecentlyPlayed(days: Int) async throws -> AppleMusicSnapshot {
+        guard isMusicRunning else { throw ReadError.musicNotRunning }
+        let started = Date()
+        let cutoff = started.addingTimeInterval(-Double(max(days, 1)) * 86_400)
+        func items(_ column: String) -> [String] { column.isEmpty ? [] : column.components(separatedBy: itemSep) }
+        // A song added or removed between the two steps would shift their positions; the second step notices and the pair is read again.
+        for _ in 0..<2 {
+            let first = try await AppleMusicMatcher.runAppleScript(recentCandidatesScript, arguments: [String(max(days, 1) + 1)], language: "JavaScript")
+            let columns = first.trimmingCharacters(in: .newlines).components(separatedBy: columnSep)
+            guard columns.count == 6, let total = Int(columns[0]) else { throw ReadError.unexpectedOutput }
+            let positions = items(columns[1])
+            let names = items(columns[2]), artists = items(columns[3]), albums = items(columns[4]), counts = items(columns[5])
+            guard names.count == positions.count, artists.count == positions.count, albums.count == positions.count, counts.count == positions.count else {
+                throw ReadError.unexpectedOutput
+            }
+            guard !positions.isEmpty else {
+                return AppleMusicSnapshot(favorites: [], library: [], source: .favoritedFlag, readSeconds: Date().timeIntervalSince(started))
+            }
+            let second = try await AppleMusicMatcher.runAppleScript(
+                exactDatesScript, arguments: [String(total), positions.joined(separator: ",")]
+            )
+            let dateText = second.trimmingCharacters(in: .newlines)
+            if dateText == "MISMATCH" { continue }
+            let dates = items(dateText)
+            guard dates.count == positions.count else { throw ReadError.unexpectedOutput }
+            var tracks: [AppleMusicSnapshot.Track] = []
+            for i in 0..<positions.count {
+                guard let seconds = Double(dates[i]) else { continue }
+                let played = Date(timeIntervalSince1970: seconds)
+                guard played > cutoff else { continue }
+                tracks.append(AppleMusicSnapshot.Track(name: names[i], artist: artists[i], album: albums[i], lastPlayedAt: played, playCount: Int(counts[i]) ?? 0))
+            }
+            return AppleMusicSnapshot(favorites: [], library: tracks, source: .favoritedFlag, readSeconds: Date().timeIntervalSince(started))
+        }
+        throw ReadError.unexpectedOutput
+    }
+
+    /// Step one, in JavaScript for Automation: how many songs the library has, which of them (1-based positions) were played in the last
+    /// `argv[0]` days by Music's own dates, and those songs' names, artists, albums and play counts.
+    private static let recentCandidatesScript = """
+    function run(argv) {
+      var days = parseInt(argv[0] || "14", 10);
+      var tracks = Application("Music").libraryPlaylists[0].tracks;
+      var dates = tracks.playedDate();
+      var cutoff = Date.now() - days * 86400000;
+      var idx = [];
+      for (var i = 0; i < dates.length; i++) { if (dates[i] && dates[i].getTime() > cutoff) idx.push(i); }
+      var names = tracks.name(), artists = tracks.artist(), albums = tracks.album(), counts = tracks.playedCount();
+      var rs = String.fromCharCode(30), gs = String.fromCharCode(29);
+      function col(f) { var o = []; for (var k = 0; k < idx.length; k++) o.push(f(idx[k])); return o.join(rs); }
+      return String(dates.length) + gs + col(function (i) { return String(i + 1); }) + gs + col(function (i) { return names[i]; }) + gs +
+             col(function (i) { return artists[i]; }) + gs + col(function (i) { return albums[i]; }) + gs + col(function (i) { return counts[i]; });
+    }
+    """
+
+    /// Step two, in AppleScript: the exact played dates (seconds since 1970, by the same arithmetic the whole-library read uses) of the songs
+    /// at the given positions. Answers MISMATCH when the library no longer has the number of songs step one saw.
+    private static let exactDatesScript = """
+    on run argv
+        set total to (item 1 of argv) as integer
+        set idxText to item 2 of argv
+        set rs to (ASCII character 30)
+        set nowDate to current date
+        set nowEpoch to (do shell script "date +%s") as integer
+        tell application "Music" to set x to played date of every track of library playlist 1
+        if (count of x) is not total then return "MISMATCH"
+        set AppleScript's text item delimiters to ","
+        set positions to text items of idxText
+        set out to {}
+        repeat with p in positions
+            set dv to item ((p as text) as integer) of x
+            if dv is missing value then
+                set end of out to ""
+            else
+                set end of out to (nowEpoch - (nowDate - dv)) as integer
+            end if
+        end repeat
+        set AppleScript's text item delimiters to rs
+        set r to out as string
+        set AppleScript's text item delimiters to ""
+        return r
+    end run
+    """
+
     /// `includeAlbumArtist` and `includePlayed` (the played date and count) add more whole-library columns; callers that don't
     /// need them don't pay for them.
     static func read(includeCloudStatus: Bool = false, includeAlbumArtist: Bool = false, includePlayed: Bool = false) async throws -> AppleMusicSnapshot {

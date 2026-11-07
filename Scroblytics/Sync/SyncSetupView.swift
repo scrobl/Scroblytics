@@ -87,6 +87,7 @@ struct SyncSetupView: View {
                     trackActionsContent
                     HelpLinkButton(articleID: "track-actions", title: "What Track Actions changes on Last.fm")
                 }
+                ScrobblerWatchSettingsSection()
             }
         }
         .formStyle(.grouped)

@@ -275,11 +275,12 @@ enum AppleMusicMatcher {
 
     // MARK: - AppleScript execution
 
-    static func runAppleScript(_ script: String, arguments: [String]) async throws -> String {
+    /// Runs `script` with `osascript`. `language` is "JavaScript" for a JXA script (whose `run(argv)` receives `arguments`); nil is AppleScript.
+    static func runAppleScript(_ script: String, arguments: [String], language: String? = nil) async throws -> String {
         try await Task.detached(priority: .utility) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", script] + arguments
+            process.arguments = (language.map { ["-l", $0] } ?? []) + ["-e", script] + arguments
             let outPipe = Pipe()
             let errPipe = Pipe()
             process.standardOutput = outPipe

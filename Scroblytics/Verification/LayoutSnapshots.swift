@@ -25,6 +25,10 @@ enum LayoutSnapshots {
             snapshotPlaylistDialog(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_SCROBBLERWATCH"] {
+            snapshotScrobblerWatch(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_UPDATES"] {
             snapshotUpdates(into: folder)
             return
@@ -311,6 +315,48 @@ enum LayoutSnapshots {
                 }
                 await render(Form { UpdateSettingsSection() }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings")
             }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_SCROBBLERWATCH=<folder>`: the scrobbling warning strip at several widths (five songs, some still
+    /// scrobblable; one song; none scrobblable) and the Settings › Sync "Scrobbling check" section off and on, light and dark. The
+    /// section uses a private preferences suite, so the real settings are not touched.
+    @MainActor
+    private static func snapshotScrobblerWatch(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let appearance = scheme == "dark" ? NSAppearance.Name.darkAqua : .aqua
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                }
+            }
+            let suite = UserDefaults(suiteName: "scrobbler-watch-snapshot")!
+            suite.removePersistentDomain(forName: "scrobbler-watch-snapshot")
+            let off = ScrobblerWatchStore(defaults: suite)
+            let on = ScrobblerWatchStore(defaults: suite)
+            on.setEnabled(true)
+            let since = Date().addingTimeInterval(-2 * 86_400)
+            for scheme in ["dark", "light"] {
+                for width in [900, 560, 380] as [CGFloat] {
+                    await render(ScrobblerWatchStripContent(count: 5, since: since, scrobblable: 5, onReview: {}, onDismiss: {}, onTurnOff: {}), width: width, scheme: scheme, name: "strip-all")
+                    await render(ScrobblerWatchStripContent(count: 5, since: since, scrobblable: 2, onReview: {}, onDismiss: {}, onTurnOff: {}), width: width, scheme: scheme, name: "strip-some")
+                    await render(ScrobblerWatchStripContent(count: 1, since: since, scrobblable: 0, onReview: {}, onDismiss: {}, onTurnOff: {}), width: width, scheme: scheme, name: "strip-none")
+                }
+                await render(Form { ScrobblerWatchSettingsSection(store: off) }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings-off")
+                await render(Form { ScrobblerWatchSettingsSection(store: on) }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings-on")
+            }
+            suite.removePersistentDomain(forName: "scrobbler-watch-snapshot")
             exit(0)
         }
     }

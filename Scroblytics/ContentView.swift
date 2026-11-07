@@ -208,6 +208,11 @@ struct ContentView: View {
                 CredentialsProblemStrip()
                 ImportStatusStrips(container: modelContainer, isSyncing: isSyncing, onResume: { startSync(full: false) })
                 RecheckStrip(container: modelContainer, isSyncing: isSyncing, onCheckNow: { startRecheck() })
+                ScrobblerWatchStrip(onReview: {
+                    UnscrobbledPlaysView.prepareForReview(container: modelContainer)
+                    openToolRequest = .unscrobbledPlays
+                    selectedTab = .tools
+                })
                 OfflineStrip()
                 UpdateStrip()
                 CrashNoticeStrip()
@@ -296,6 +301,7 @@ struct ContentView: View {
             await lovedTracksStore.load(container: modelContainer)
             await flaggedTracksStore.load(container: modelContainer)
             await libraryGapBadgeStore.load(container: modelContainer)
+            ScrobblerWatchStore.shared.start(container: modelContainer)
             await popularityStore.start(container: modelContainer, work: backgroundWork, warm: !DebugFlags.offline && !ConnectivityGate.isOffline)
             await tagStore.start(container: modelContainer, work: backgroundWork, warm: (!DebugFlags.offline || DebugFlags.tagSweep) && !ConnectivityGate.isOffline)
             await seedReleaseDates()

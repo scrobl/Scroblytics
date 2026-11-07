@@ -15,6 +15,10 @@ struct AppleMusicSnapshot: Sendable {
         var databaseID: Int? = nil
         /// Music's `album artist` for the track, when the read asked for it; "" otherwise (and for a track that has none).
         var albumArtist: String = ""
+        /// When Music last played the track (its `played date`), when the read asked for it; nil when it never has, or wasn't asked.
+        var lastPlayedAt: Date? = nil
+        /// Music's `played count` for the track, when the read asked for it; 0 otherwise.
+        var playCount: Int = 0
     }
 
     enum Source: Sendable {
@@ -62,10 +66,11 @@ enum AppleMusicFavoritesReader {
 
     /// Columns come back joined in ONE step each (not row by row in AppleScript, which is ~20x slower for the same
     /// data). First column names the source; the rest are favorites then library columns.
-    private static func script(includeCloudStatus: Bool, includeAlbumArtist: Bool) -> String {
+    private static func script(includeCloudStatus: Bool, includeAlbumArtist: Bool, includePlayed: Bool) -> String {
     """
     set includeCloud to \(includeCloudStatus)
     set includeAlbumArtist to \(includeAlbumArtist)
+    set includePlayed to \(includePlayed)
     set rs to (ASCII character 30)
     set gs to (ASCII character 29)
     set mode to "playlist"
@@ -78,6 +83,12 @@ enum AppleMusicFavoritesReader {
         set lg to {}
         if includeAlbumArtist then set lg to album artist of every track of library playlist 1
         set li to database ID of every track of library playlist 1
+        set lpd to {}
+        set lpc to {}
+        if includePlayed then
+            set lpd to played date of every track of library playlist 1
+            set lpc to played count of every track of library playlist 1
+        end if
         set fn to {}
         set fa to {}
         set fb to {}
@@ -96,6 +107,22 @@ enum AppleMusicFavoritesReader {
             set ff to favorited of every track of library playlist 1
         end try
     end tell
+    -- Played dates as seconds since 1970. A date printed as text uses TODAY's UTC offset for every date (so a summer date
+    -- reads an hour off in winter), so the dates are turned into absolute seconds here instead: both `current date` and each
+    -- played date are instants, and their difference is exact.
+    set pdOut to {}
+    if includePlayed then
+        set nowDate to current date
+        set nowEpoch to (do shell script "date +%s") as integer
+        repeat with d in lpd
+            set dv to contents of d
+            if dv is missing value then
+                set end of pdOut to ""
+            else
+                set end of pdOut to (nowEpoch - (nowDate - dv)) as integer
+            end if
+        end repeat
+    end if
     set AppleScript's text item delimiters to rs
     set o1 to fn as string
     set o2 to fa as string
@@ -109,18 +136,22 @@ enum AppleMusicFavoritesReader {
     set o10 to fi as string
     set o11 to fc as string
     set o12 to lg as string
+    set o13 to pdOut as string
+    set o14 to lpc as string
     set AppleScript's text item delimiters to ""
-    return mode & gs & o1 & gs & o2 & gs & o3 & gs & o4 & gs & o5 & gs & o6 & gs & o7 & gs & o8 & gs & o9 & gs & o10 & gs & o11 & gs & o12
+    return mode & gs & o1 & gs & o2 & gs & o3 & gs & o4 & gs & o5 & gs & o6 & gs & o7 & gs & o8 & gs & o9 & gs & o10 & gs & o11 & gs & o12 & gs & o13 & gs & o14
     """
     }
 
     /// `includeCloudStatus` adds one more whole-library column (`cloud status`); the Loved Status Audit doesn't need it.
-    static func read(includeCloudStatus: Bool = false, includeAlbumArtist: Bool = false) async throws -> AppleMusicSnapshot {
+    /// `includeAlbumArtist` and `includePlayed` (the played date and count) add more whole-library columns; callers that don't
+    /// need them don't pay for them.
+    static func read(includeCloudStatus: Bool = false, includeAlbumArtist: Bool = false, includePlayed: Bool = false) async throws -> AppleMusicSnapshot {
         guard isMusicRunning else { throw ReadError.musicNotRunning }
         let started = Date()
-        let output = try await AppleMusicMatcher.runAppleScript(script(includeCloudStatus: includeCloudStatus, includeAlbumArtist: includeAlbumArtist), arguments: [])
+        let output = try await AppleMusicMatcher.runAppleScript(script(includeCloudStatus: includeCloudStatus, includeAlbumArtist: includeAlbumArtist, includePlayed: includePlayed), arguments: [])
         let columns = output.trimmingCharacters(in: .newlines).components(separatedBy: columnSep)
-        guard columns.count == 13 else { throw ReadError.unexpectedOutput }
+        guard columns.count == 15 else { throw ReadError.unexpectedOutput }
         func items(_ column: String) -> [String] { column.isEmpty ? [] : column.components(separatedBy: itemSep) }
 
         let libNames = items(columns[4]), libArtists = items(columns[5]), libAlbums = items(columns[6])
@@ -131,12 +162,17 @@ enum AppleMusicFavoritesReader {
         // with the names, leave them out rather than fail the whole read.
         let libAlbumArtists = includeAlbumArtist ? items(columns[12]) : []
         guard !includeAlbumArtist || libAlbumArtists.count == libNames.count else { throw ReadError.unexpectedOutput }
+        let libPlayedAt = includePlayed ? items(columns[13]) : []
+        let libPlayCounts = includePlayed ? items(columns[14]) : []
+        guard !includePlayed || (libPlayedAt.count == libNames.count && libPlayCounts.count == libNames.count) else { throw ReadError.unexpectedOutput }
         let libIDs = items(columns[9]).compactMap { Int($0) }
         let hasLibIDs = libIDs.count == libNames.count
         let library = (0..<libNames.count).map {
             AppleMusicSnapshot.Track(
                 name: libNames[$0], artist: libArtists[$0], album: libAlbums[$0], cloudStatus: includeCloudStatus ? cloud[$0] : "",
-                databaseID: hasLibIDs ? libIDs[$0] : nil, albumArtist: includeAlbumArtist ? libAlbumArtists[$0] : ""
+                databaseID: hasLibIDs ? libIDs[$0] : nil, albumArtist: includeAlbumArtist ? libAlbumArtists[$0] : "",
+                lastPlayedAt: includePlayed ? Double(libPlayedAt[$0]).map { Date(timeIntervalSince1970: $0) } : nil,
+                playCount: includePlayed ? (Int(libPlayCounts[$0]) ?? 0) : 0
             )
         }
 

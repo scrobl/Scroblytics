@@ -112,7 +112,7 @@ extension HelpContent {
                 .bullets([
                     "Sync, Full Resync, Resync This…, the launch sync and the catch-up after loving or tagging.",
                     "Now Playing, and every background lookup: artwork, popularity, tags, release dates, track lengths and tempos.",
-                    "Loving and unloving tracks, adding or removing tags, Tag Management’s Apply, and Connect Track Actions.",
+                    "Loving and unloving tracks, adding or removing tags, Tag Management’s Apply, scrobbling from Unscrobbled Plays, and Connect Track Actions.",
                     "Similar Sounds’ Find Similar, Rabbit Hole suggestions, Missing Data’s Resolve Now, Refresh Image, and the Last.fm candidates in Fix Album Match.",
                     "Ask with Claude, OpenAI or Gemini. Ask with **Apple on-device**, **Ollama** or a **server on this Mac** keeps working (see [Ask engines](help://ask-keys)).",
                     "The daily check for a newer version of Scroblytics (see [Updating Scroblytics](help://updating)).",

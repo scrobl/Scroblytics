@@ -45,7 +45,7 @@ The app only contacts these services, and only the ones for features you use. Tu
 
 | Service | Why | What it receives |
 | --- | --- | --- |
-| **Last.fm** | Importing and updating your history, loved tracks, tags, popularity, similar music, now playing. With **Track Actions** connected: loving or unloving tracks and editing your tags (this changes your public Last.fm profile). | Your Last.fm username and the API key you registered; artist, album, track and tag names in the requests. Writes also send a session key and a signature (your shared secret is used on your Mac to sign and is never sent). |
+| **Last.fm** | Importing and updating your history, loved tracks, tags, popularity, similar music, now playing. With **Track Actions** connected: loving or unloving tracks, editing your tags and scrobbling plays you ask it to (these change your public Last.fm profile). A scrobble contains the artist, track and album names and the time Music last played the song. | Your Last.fm username and the API key you registered; artist, album, track and tag names in the requests. Writes also send a session key and a signature (your shared secret is used on your Mac to sign and is never sent). |
 | **Deezer** (no sign-in) | Track lengths, tempos and release dates as a fallback, artwork, popularity | Artist, album and track names as search text |
 | **GetSongBPM** | Tempo, time signature and musical key | Artist and track names as search text, with a GetSongBPM key |
 | **MusicBrainz** | Album release dates | Artist and album names. As MusicBrainz asks, requests identify the app and a project contact address. |

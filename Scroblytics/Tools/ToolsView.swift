@@ -208,6 +208,8 @@ struct ToolsView: View {
             LibraryGapsView(modelContainer: modelContainer, navigation: navigation)
         case .songsWithoutAlbums:
             SongsWithoutAlbumsView(modelContainer: modelContainer, navigation: navigation)
+        case .unscrobbledPlays:
+            UnscrobbledPlaysView(modelContainer: modelContainer, navigation: navigation)
         case .tagManagement:
             TagManagementView(modelContainer: modelContainer, navigation: navigation)
         case .similarSounds:
@@ -244,7 +246,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
     let id: Kind
     let name: String
     let summary: String
@@ -298,6 +300,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .songsWithoutAlbums, name: "Songs Without Albums",
             summary: "Songs with no album in Music or in your scrobbles, and albums that hold just one song.",
             systemImage: "square.stack", category: "Organize"
+        ),
+        ToolDescriptor(
+            id: .unscrobbledPlays, name: "Unscrobbled Plays",
+            summary: "Songs Apple Music has played more recently than their latest scrobble.",
+            systemImage: "clock.badge.exclamationmark", category: "Organize"
         ),
         ToolDescriptor(
             id: .tagManagement, name: "Tag Management",

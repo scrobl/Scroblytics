@@ -36,14 +36,15 @@ extension HelpContent {
         HelpArticle(
             id: "track-actions",
             title: "Track Actions (writing to Last.fm)",
-            summary: "The optional connection that lets the app love tracks and edit your tags.",
+            summary: "The optional connection that lets the app love tracks, edit your tags and scrobble missed plays.",
             blocks: [
                 .paragraph("**Track Actions** is the app’s write access to your Last.fm account. It enables:"),
                 .bullets([
                     "**Love / Unlove Track** in the right-click menu.",
                     "Adding and removing **your own tags** on artists, albums and tracks, and the [Tag Management](help://tool-tag-management) tool.",
+                    "**Scrobbling missed plays** from [Unscrobbled Plays](help://tool-unscrobbled-plays): plays Apple Music made that were never scrobbled, sent with the time Music says it last played each song.",
                 ]),
-                .callout(.warning, "Anything Track Actions writes changes your **public Last.fm profile**. Loves and tags are visible to others on your profile. Tag Management can change many tracks at once; it always shows a review of exactly what it will do first."),
+                .callout(.warning, "Anything Track Actions writes changes your **public Last.fm profile**. Loves, tags and scrobbles are visible to others on your profile. Tag Management and Unscrobbled Plays can change many tracks at once; each always shows a review of exactly what it will do first. A scrobble can only be deleted on Last.fm’s own website, not from Scroblytics."),
                 .heading("Connect"),
                 .steps([
                     "First save your username and API key (see [Your Last.fm account](help://lastfm-account)).",
@@ -127,7 +128,7 @@ extension HelpContent {
                 .paragraph("Everything you build in Scroblytics (history, edits, saved queries) lives on your Mac. These are the only outside services it contacts. There is no analytics or tracking. [Offline mode](help://offline-mode) stops every one of them."),
                 .paragraph("The full privacy policy is published online: [Scroblytics Privacy Policy](\(AppIdentity.privacyPolicyURLString))."),
                 .table(headers: ["Service", "Used for", "What it receives"], rows: [
-                    ["**Last.fm** (`ws.audioscrobbler.com`)", "Sync, loved tracks, tags, now playing, similar music (Rabbit Hole keeps the answers on your Mac for 30 days), tracklists, popularity; and writes if Track Actions is connected", "Your username and API key; artist, album, track and tag names in the request. Writes add a session key and signature."],
+                    ["**Last.fm** (`ws.audioscrobbler.com`)", "Sync, loved tracks, tags, now playing, similar music (Rabbit Hole keeps the answers on your Mac for 30 days), tracklists, popularity; and writes (loves, tags, scrobbles) if Track Actions is connected", "Your username and API key; artist, album, track and tag names in the request. Writes add a session key and signature."],
                     ["**Deezer** (`api.deezer.com`, no sign-in)", "Track lengths, tempos (fallback), release dates (fallback), artwork, popularity", "Artist, album and track names as search text"],
                     ["**GetSongBPM** (`api.getsong.co`)", "Track tempo, time signature and key", "Artist and track names as search text, with the app’s (or your own) GetSongBPM key"],
                     ["**MusicBrainz**", "Album release dates", "Artist and album name, with the project’s contact address in the request header, as MusicBrainz asks"],
@@ -139,7 +140,7 @@ extension HelpContent {
                 ]),
                 .heading("Things that stay on your Mac"),
                 .bullets([
-                    "Your **Apple Music / Music app** library. The app reads it through Music’s own scripting for Fix Album Match, Loved Status Audit, Library Gaps, Songs Without Albums, importing durations, and playlist export. None of it is sent anywhere. Scroblytics changes Music only when you ask it to: **Create Apple Music Playlist** makes a playlist (or adds to one you pick) from tracks already in your library; if you turn on **Keep this playlist updated after each sync** for a playlist, Scroblytics then changes that one playlist (found by its Music ID, never the rest of your library) after each sync, only while Music is open and never launching it (see [Auto-Updating Playlists](help://tool-auto-playlists)); the Loved Status Audit’s **Remove from Favorites…** un-favorites entries that aren’t in your library, after you confirm; and the Release Year Audit’s **Update Apple Music** sets the Year of the tracks it lists to the year shown in Scroblytics, after you confirm.",
+                    "Your **Apple Music / Music app** library. The app reads it through Music’s own scripting for Fix Album Match, Loved Status Audit, Library Gaps, Songs Without Albums, Unscrobbled Plays, importing durations, and playlist export. None of it is sent anywhere. Scroblytics changes Music only when you ask it to: **Create Apple Music Playlist** makes a playlist (or adds to one you pick) from tracks already in your library; if you turn on **Keep this playlist updated after each sync** for a playlist, Scroblytics then changes that one playlist (found by its Music ID, never the rest of your library) after each sync, only while Music is open and never launching it (see [Auto-Updating Playlists](help://tool-auto-playlists)); the Loved Status Audit’s **Remove from Favorites…** un-favorites entries that aren’t in your library, after you confirm; and the Release Year Audit’s **Update Apple Music** sets the Year of the tracks it lists to the year shown in Scroblytics, after you confirm.",
                     "Your **database, images and preferences**. See [Where your data lives](help://data-storage).",
                     "A small **activity log** of what the app did (no music, no account name, no keys), used only by [Report a Problem](help://report-a-problem). It is sent nowhere unless you choose to share it.",
                 ]),

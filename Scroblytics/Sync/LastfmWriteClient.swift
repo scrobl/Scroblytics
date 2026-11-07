@@ -1,7 +1,7 @@
 import Foundation
 
 /// Signed write/auth calls against Last.fm — `track.love`/`unlove`,
-/// `*.addTags`/`*.removeTag`, and the desktop auth flow
+/// `*.addTags`/`*.removeTag`, `track.scrobble`, and the desktop auth flow
 /// (`auth.getToken`/`auth.getSession`) that produces the session key every
 /// one of those write calls needs. Stateless functions
 /// taking `apiKey`/`secret`/`sessionKey` explicitly rather than a
@@ -109,6 +109,76 @@ enum LastfmWriteClient {
         let _: EmptyResponse = try await signedRequest(params: params, secret: secret, httpMethod: "POST")
     }
 
+    // MARK: Scrobbling
+
+    /// One play to submit: when it started (seconds since 1970, UTC), and what it was.
+    struct ScrobbleSubmission: Sendable, Equatable {
+        let artist: String
+        let track: String
+        let album: String?
+        let timestamp: Int
+    }
+
+    /// What Last.fm did with one submitted play. `ignoredCode` is Last.fm's own: 1 artist ignored, 2 track ignored, 3 timestamp too
+    /// old, 4 too new, 5 daily limit reached; nil when the play was accepted.
+    struct ScrobbleOutcome: Sendable, Equatable {
+        let accepted: Bool
+        let ignoredCode: Int?
+        let message: String
+    }
+
+    /// Last.fm takes at most this many plays in one `track.scrobble` call.
+    static let maxScrobblesPerCall = 50
+
+    /// The form fields of one `track.scrobble` call: the plays as numbered fields (`artist[0]`, `track[0]`, `timestamp[0]`, and
+    /// `album[0]` when there is one). The signature is computed over exactly these (plus `api_sig`'s own exclusions), by `signedData`.
+    static func scrobbleParameters(apiKey: String, sessionKey: String, plays: [ScrobbleSubmission]) -> [String: String] {
+        var params: [String: String] = ["method": "track.scrobble", "api_key": apiKey, "sk": sessionKey]
+        for (i, play) in plays.enumerated() {
+            params["artist[\(i)]"] = play.artist
+            params["track[\(i)]"] = play.track
+            params["timestamp[\(i)]"] = String(play.timestamp)
+            if let album = play.album, !album.isEmpty { params["album[\(i)]"] = album }
+        }
+        return params
+    }
+
+    /// Reads Last.fm's answer to a scrobble call into one outcome per submitted play, in order. Last.fm answers with a single object, not
+    /// a list, when only one play was sent, and its codes may be numbers or text, so this reads the JSON loosely. A count that doesn't
+    /// match what was sent is an error, never a guess about which plays were taken.
+    static func parseScrobbleResponse(_ data: Data, expected: Int) throws -> [ScrobbleOutcome] {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let scrobbles = root["scrobbles"] as? [String: Any] else { throw LastfmAPIError.malformedField("scrobbles") }
+        let rawItems: [[String: Any]]
+        switch scrobbles["scrobble"] {
+        case let list as [[String: Any]]: rawItems = list
+        case let one as [String: Any]: rawItems = [one]
+        default: rawItems = []
+        }
+        guard rawItems.count == expected else { throw LastfmAPIError.malformedField("scrobble count \(rawItems.count), expected \(expected)") }
+        return rawItems.map { item in
+            let message = item["ignoredMessage"] as? [String: Any]
+            let code: Int
+            switch message?["code"] {
+            case let n as Int: code = n
+            case let text as String: code = Int(text) ?? 0
+            default: code = 0
+            }
+            let text = (message?["#text"] as? String) ?? ""
+            return ScrobbleOutcome(accepted: code == 0, ignoredCode: code == 0 ? nil : code, message: text)
+        }
+    }
+
+    /// Submits up to 50 plays in one signed POST and returns what Last.fm did with each. A play Last.fm ignores is NOT an error: it comes
+    /// back as an outcome with a code. A thrown error means the call as a whole failed (and, after a dropped connection, that it is
+    /// not known whether Last.fm took the plays).
+    static func scrobble(apiKey: String, secret: String, sessionKey: String, plays: [ScrobbleSubmission]) async throws -> [ScrobbleOutcome] {
+        guard !plays.isEmpty else { return [] }
+        precondition(plays.count <= maxScrobblesPerCall, "Last.fm takes at most \(maxScrobblesPerCall) scrobbles per call")
+        let data = try await signedData(params: scrobbleParameters(apiKey: apiKey, sessionKey: sessionKey, plays: plays), secret: secret, httpMethod: "POST")
+        return try parseScrobbleResponse(data, expected: plays.count)
+    }
+
     /// Last.fm's write-method responses are just `{"status": "ok"}` shapes we
     /// don't need any field from — this only exists so `signedRequest`'s
     /// generic decode step has something to decode into without failing on
@@ -118,6 +188,16 @@ enum LastfmWriteClient {
     private static func signedRequest<T: Decodable>(
         params: [String: String], secret: String, httpMethod: String
     ) async throws -> T {
+        let data = try await signedData(params: params, secret: secret, httpMethod: httpMethod)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw LastfmAPIError.decoding(error)
+        }
+    }
+
+    /// Signs and sends one call, and returns the body of a successful answer; Last.fm's error answers and HTTP failures throw.
+    private static func signedData(params: [String: String], secret: String, httpMethod: String) async throws -> Data {
         let apiSig = LastfmSigning.sign(params: params, secret: secret)
         var body = params
         body["api_sig"] = apiSig
@@ -150,11 +230,7 @@ enum LastfmWriteClient {
             throw LastfmAPIError.api(code: apiError.error, message: apiError.message)
         }
         guard (200..<300).contains(http.statusCode) else { throw LastfmAPIError.http(http.statusCode) }
-        do {
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw LastfmAPIError.decoding(error)
-        }
+        return data
     }
 
     /// Standard `application/x-www-form-urlencoded` encoding — percent-encodes

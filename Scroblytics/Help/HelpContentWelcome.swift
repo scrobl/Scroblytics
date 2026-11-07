@@ -14,7 +14,7 @@ extension HelpContent {
                     "Get your free Last.fm API key and save it with your username: [Your Last.fm account and API key](help://lastfm-account).",
                     "The first import starts by itself once your account checks out. It reads your whole history and can take a while; see [Your first import](help://first-sync). You can browse while it runs, and use the toolbar’s Sync button for later updates.",
                     "Extra details (artwork, tags, popularity, release dates) fill in over the following hours in the background; see [What happens after a sync](help://sync-after).",
-                    "Optional: connect [Track Actions](help://track-actions) to love tracks and edit tags from the app, and choose an [Ask engine](help://ask-keys).",
+                    "Optional: connect [Track Actions](help://track-actions) to love tracks, edit tags and scrobble missed plays from the app, and choose an [Ask engine](help://ask-keys).",
                 ]),
                 .heading("Where to find things"),
                 .bullets([
@@ -25,7 +25,7 @@ extension HelpContent {
                     "What the app stores and which services it contacts: [What leaves your Mac](help://what-leaves-your-mac), and the published [Privacy Policy](\(AppIdentity.privacyPolicyURLString)).",
                     "Hovering over most column headers, controls and badges shows a short explanation.",
                 ]),
-                .callout(.note, "Your Last.fm account stays the source of truth for your plays. The app only ever changes Last.fm when you connect Track Actions and choose to love a track or edit tags, and it tells you before it does. Everything else you create (corrections, saved queries, custom images) is stored only on your Mac; see [Backup and restore](help://data-backup)."),
+                .callout(.note, "Your Last.fm account stays the source of truth for your plays. The app only ever changes Last.fm when you connect Track Actions and choose to love a track, edit tags or scrobble missed plays, and it tells you before it does. Everything else you create (corrections, saved queries, custom images) is stored only on your Mac; see [Backup and restore](help://data-backup)."),
             ]
         ),
     ])

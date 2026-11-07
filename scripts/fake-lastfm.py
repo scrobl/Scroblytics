@@ -27,12 +27,19 @@ Scenarios
                   between syncs: new = N newer plays; late = N plays dated within the last 10 days but older than the newest (a scrobbler
                   that sends late); delete_recent = N plays removed from 3 to 5 days ago; delete_old = N plays removed from over 25 days ago
 
+POST track.scrobble is accepted too (up to 50 plays per call), for testing Unscrobbled Plays' Scrobble button. It checks the
+request's signature the way Last.fm does, using the shared secret given with --secret (default "scrobblesecret"), answers error 9 with
+no session key and error 13 for a wrong signature, ignores a play older than 14 days (code 3) or in the future (code 4) or with an
+empty artist (1) or track (2), and keeps every accepted play. GET /__scrobbles lists them.
+
 GET /__stats returns what was served, and the dataset's own totals, as JSON, for cross-checking an import. It also reports the
 busiest second (max_requests_in_one_second), the shortest gap between history requests (min_history_gap_ms) and how many requests
 were answered with error 29 (rate_limit_answers).
 """
 import argparse
+import hashlib
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -65,6 +72,7 @@ SIZES = {"empty-account": 0, "small": 50, "medium": 2000, "large": 40000, "slow-
          "rate-limited-long": 2000, "strict-rate": 6000, "rate-limited-forever": 2000, "timing": 10000, "late-plays": 3000, "loved-dates": 50}
 RATE_LIMIT_ERROR = (29, "Rate Limit Exceeded - Your IP has made too many requests in a short period", 429)
 STRICT_PER_SECOND = 5
+SECRET = "scrobblesecret"   # the shared secret track.scrobble requests are signed with (--secret)
 LONG_WINDOW_SECONDS = 90.0
 LATENCY_SECONDS = 0.0
 RELEASE_VERSION = "9.9.9"   # newest version the stand-in GitHub release list announces; "down" makes it answer HTTP 500
@@ -111,6 +119,7 @@ class State:
         self.history_times = []        # ... of every history request (limit > 1)
         self.rate_limit_answers = 0
         self.first_history_at = None
+        self.scrobbles = []            # plays accepted through track.scrobble, in the order they arrived
 
     def inject(self, new=0, late=0, delete_recent=0, delete_old=0):
         """Changes the history between syncs (see the late-plays scenario). Late plays are dated within the last 10 days, half an hour
@@ -153,6 +162,7 @@ class State:
             "max_requests_in_one_second": self.max_in_one_second(),
             "min_history_gap_ms": self.min_history_gap_ms(),
             "rate_limit_answers": self.rate_limit_answers,
+            "scrobbles_accepted": len(self.scrobbles),
             "history_span_ms": round((self.history_times[-1] - self.history_times[0]) * 1000) if len(self.history_times) > 1 else None,
         }
 
@@ -185,10 +195,65 @@ def build_handler(state):
         def _error(self, code, message, status):
             self._send(status, {"error": code, "message": message})
 
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True).items()}
+            method = form.get("method", "")
+            with state.lock:
+                state.served[method] = state.served.get(method, 0) + 1
+            if method != "track.scrobble":
+                self._error(3, "Invalid Method - No method with that name in this package", 400)
+                return
+            if not form.get("sk"):
+                self._error(9, "Invalid session key - Please re-authenticate", 403)
+                return
+            signed = "".join(k + form[k] for k in sorted(form) if k not in ("api_sig", "format")) + SECRET
+            if form.get("api_sig") != hashlib.md5(signed.encode("utf-8")).hexdigest():
+                self._error(13, "Invalid method signature supplied", 403)
+                return
+            indexes = sorted({int(m.group(1)) for k in form for m in [re.fullmatch(r"artist\[(\d+)\]", k)] if m})
+            if not indexes or len(indexes) > 50:
+                self._error(1, "Invalid parameters - between 1 and 50 scrobbles per request", 400)
+                return
+            now = time.time()
+            items, accepted, ignored = [], 0, 0
+            for i in indexes:
+                artist, track = form.get(f"artist[{i}]", ""), form.get(f"track[{i}]", "")
+                album = form.get(f"album[{i}]", "")
+                try:
+                    ts = int(form.get(f"timestamp[{i}]", ""))
+                except ValueError:
+                    ts = 0
+                code, message = 0, ""
+                if not artist:
+                    code, message = 1, "Artist was ignored"
+                elif not track:
+                    code, message = 2, "Track was ignored"
+                elif ts < now - 14 * 86400:
+                    code, message = 3, "Timestamp was too old"
+                elif ts > now + 600:
+                    code, message = 4, "Timestamp was too new"
+                if code == 0:
+                    accepted += 1
+                    with state.lock:
+                        state.scrobbles.append({"artist": artist, "track": track, "album": album, "timestamp": ts})
+                else:
+                    ignored += 1
+                items.append({
+                    "track": {"corrected": "0", "#text": track}, "artist": {"corrected": "0", "#text": artist},
+                    "album": {"corrected": "0", "#text": album}, "albumArtist": {"corrected": "0", "#text": ""},
+                    "timestamp": str(ts), "ignoredMessage": {"code": str(code), "#text": message},
+                })
+            self._send(200, {"scrobbles": {"@attr": {"accepted": accepted, "ignored": ignored}, "scrobble": items[0] if len(items) == 1 else items}})
+
         def do_GET(self):
             url = urlparse(self.path)
             if url.path == "/__stats":
                 self._send(200, state.stats())
+                return
+            if url.path == "/__scrobbles":
+                with state.lock:
+                    self._send(200, state.scrobbles)
                 return
             if url.path == "/__inject":
                 q = {k: int(v[0]) for k, v in parse_qs(url.query).items()}
@@ -317,13 +382,15 @@ def main():
     ap.add_argument("--window", type=float, default=90.0, help="seconds rate-limited-long keeps answering error 29")
     ap.add_argument("--latency-ms", type=float, default=0.0, help="delay every history page by this long")
     ap.add_argument("--release-version", default="9.9.9", help='newest version the stand-in release list announces ("down": answer HTTP 500)')
+    ap.add_argument("--secret", default="scrobblesecret", help="shared secret track.scrobble requests must be signed with")
     ap.add_argument("--list", action="store_true", help="print the scenarios, one 'name<TAB>description' per line, and exit")
     args = ap.parse_args()
     if args.list:
         for name, detail in SCENARIOS.items():
             print(f"{name}\t{detail}")
         return
-    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION
+    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION, SECRET
+    SECRET = args.secret
     RELEASE_VERSION = args.release_version
     LONG_WINDOW_SECONDS = args.window
     LATENCY_SECONDS = args.latency_ms / 1000.0

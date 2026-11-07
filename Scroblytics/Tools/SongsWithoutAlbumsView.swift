@@ -333,16 +333,16 @@ struct SongsWithoutAlbumsView: View {
     }
 
     private func noAlbumRow(_ row: Engine.NoAlbumRow) -> some View {
-        SongRow(
+        ToolSongRow(
             title: row.track, subtitle: row.artist, plays: row.totalPlays, lastPlayed: row.lastPlayed,
             searchArtist: row.artist, searchTrack: row.track,
             onOpen: row.totalPlays > 0 ? { navigation.goToTrack(TrackIdentity(artist: row.artist, name: row.track, album: nil, imageURL: nil)) } : nil
         ) {
             if row.emptyInMusic {
-                Badge(text: "Empty Album in Music", systemImage: "music.note", tint: .orange)
+                ToolBadge(text: "Empty Album in Music", systemImage: "music.note", tint: .orange)
             }
             if row.albumlessPlays > 0 {
-                Badge(text: "\(row.albumlessPlays.formatted()) \(row.albumlessPlays == 1 ? "play" : "plays") with no album name", systemImage: "questionmark.circle", tint: .secondary)
+                ToolBadge(text: "\(row.albumlessPlays.formatted()) \(row.albumlessPlays == 1 ? "play" : "plays") with no album name", systemImage: "questionmark.circle", tint: .secondary)
             }
             if let first = row.hints.first {
                 let more = row.hints.count - 1
@@ -354,23 +354,23 @@ struct SongsWithoutAlbumsView: View {
     }
 
     private func aloneRow(_ row: Engine.AloneRow) -> some View {
-        SongRow(
+        ToolSongRow(
             title: row.album, subtitle: "\(row.artist) · \(row.track)", plays: row.plays, lastPlayed: row.lastPlayed,
             searchArtist: row.trackArtist, searchTrack: row.track,
             onOpen: row.plays > 0 ? { navigation.goToTrack(TrackIdentity(artist: row.trackArtist, name: row.track, album: row.album, imageURL: nil)) } : nil
         ) {
             switch row.singleBasis {
             case .tracklist?:
-                Badge(text: "Single · its tracklist has 1 track", systemImage: "checkmark.seal", tint: .secondary)
+                ToolBadge(text: "Single · its tracklist has 1 track", systemImage: "checkmark.seal", tint: .secondary)
             case .name?:
-                Badge(text: "Likely single · named after the song", systemImage: "music.note", tint: .secondary)
+                ToolBadge(text: "Likely single · named after the song", systemImage: "music.note", tint: .secondary)
             case nil:
                 if let count = row.knownTrackCount {
-                    Badge(text: "Album has \(count.formatted()) tracks · 1 in Music", systemImage: "square.stack.3d.up", tint: .orange)
+                    ToolBadge(text: "Album has \(count.formatted()) tracks · 1 in Music", systemImage: "square.stack.3d.up", tint: .orange)
                 }
             }
             if let sibling = row.siblings.first {
-                Badge(text: "Maybe the same as “\(sibling.album)” (\(sibling.songs.formatted()) \(sibling.songs == 1 ? "song" : "songs"))", systemImage: "exclamationmark.triangle.fill", tint: .orange)
+                ToolBadge(text: "Maybe the same as “\(sibling.album)” (\(sibling.songs.formatted()) \(sibling.songs == 1 ? "song" : "songs"))", systemImage: "exclamationmark.triangle.fill", tint: .orange)
             }
             if let first = row.hints.first {
                 let more = row.hints.count - 1
@@ -415,7 +415,8 @@ struct SongsWithoutAlbumsView: View {
 
 // MARK: - Row pieces
 
-private struct Badge: View {
+/// A small capsule label for a row; shared by the tools that list songs.
+struct ToolBadge: View {
     let text: String
     let systemImage: String
     let tint: Color
@@ -430,11 +431,14 @@ private struct Badge: View {
     }
 }
 
-private struct SongRow<Details: View>: View {
+/// One row of a song list: title, subtitle, details, and plays on the right (or `trailingText` in their place).
+struct ToolSongRow<Details: View>: View {
     let title: String
     let subtitle: String
-    let plays: Int
-    let lastPlayed: Date?
+    var plays: Int = 0
+    var lastPlayed: Date? = nil
+    /// Two short lines shown on the right instead of the play count and last-played month.
+    var trailingText: (top: String, bottom: String?)? = nil
     let searchArtist: String
     let searchTrack: String
     let onOpen: (() -> Void)?
@@ -477,11 +481,18 @@ private struct SongRow<Details: View>: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(plays.formatted()) \(plays == 1 ? "play" : "plays")")
-                    .font(AppTypography.metadata.monospacedDigit())
-                if let lastPlayed {
-                    Text("last \(lastPlayed.formatted(.dateTime.month(.abbreviated).year()))")
-                        .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                if let trailingText {
+                    Text(trailingText.top).font(AppTypography.metadata.monospacedDigit())
+                    if let bottom = trailingText.bottom {
+                        Text(bottom).font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("\(plays.formatted()) \(plays == 1 ? "play" : "plays")")
+                        .font(AppTypography.metadata.monospacedDigit())
+                    if let lastPlayed {
+                        Text("last \(lastPlayed.formatted(.dateTime.month(.abbreviated).year()))")
+                            .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    }
                 }
             }
             .frame(minWidth: 80, alignment: .trailing)

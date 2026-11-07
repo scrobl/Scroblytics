@@ -150,7 +150,7 @@ struct SyncSetupView: View {
             Button("Disconnect Track Actions") { Task { await disconnectTrackActions() } }
                 .disabled(isDisconnectingWrite)
         } else if !hasSecret {
-            Text("Connect write access to add or remove your own tags on artists, albums, and tracks. Your ALREADY-REGISTERED API account's page also shows a \"Shared secret\" for the key above — copy that below.")
+            Text("Connect write access to love tracks, add or remove your own tags on artists, albums, and tracks, and scrobble missed plays from Unscrobbled Plays. Your ALREADY-REGISTERED API account's page also shows a \"Shared secret\" for the key above — copy that below.")
                 .font(AppTypography.supporting)
                 .foregroundStyle(.secondary)
             Button("View my API accounts") { openAPIKeyPage() }

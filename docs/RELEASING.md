@@ -146,7 +146,7 @@ re-checks only the last 15 days before the previous sync and compares the totals
 differ it does not walk the whole history by itself (many minutes on a big library): it finishes, and a strip under the toolbar
 (`RecheckStrip`) says how much it differs, the likely reason and roughly how long a full check takes, with **Check now**, **Ignore**
 (Last.fm's total becomes the baseline until a Full Resync) and **Skip for now** (asks again at the next sync; so does quitting
-without answering). Before a release that touches `SyncEngine`, run `scripts/sync-recheck-test.sh` (Debug app built first; a few
+without answering). Before a release that touches Last.fm scrobbling (`LastfmWriteClient.scrobble`, Unscrobbled Plays), run `scripts/scrobble-test.sh` (Debug app built first; under a minute): it submits made-up plays through the real client to the stand-in server, which checks each request's signature itself, and compares what arrived with what was meant to be sent. Before a release that touches `SyncEngine`, run `scripts/sync-recheck-test.sh` (Debug app built first; a few
 minutes). It runs real syncs in an isolated test profile against the stand-in server's `late-plays` scenario, injecting new plays,
 late plays, recent and old deletions and a late play together with an old deletion, answers the prompt through
 `SCROBLYTICS_RECHECK_CHOICE` (Debug only), and checks after each launch the app's play count against the server's (no duplicates),

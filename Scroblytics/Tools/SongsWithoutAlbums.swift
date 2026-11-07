@@ -58,6 +58,20 @@ enum SongsWithoutAlbumsEngine {
         let siblings: [Sibling]
         /// Other albums the same song is on (scrobble history or elsewhere in the library).
         let hints: [AlbumHint]
+        /// How many tracks the release has according to a saved tracklist decision or a Last.fm tracklist already cached on this
+        /// Mac; nil when neither is known (nothing is looked up).
+        let knownTrackCount: Int?
+
+        enum SingleBasis: Sendable { case tracklist, name }
+
+        /// Why the row looks like a single, which is not a problem to fix: the known tracklist has exactly one track, or, with no
+        /// tracklist known, the album is named after its song. A known tracklist of several tracks always wins over the name (a real
+        /// album can share a song's name), so an album that is only partly in the library is never taken for a single.
+        var singleBasis: SingleBasis? {
+            if let knownTrackCount { return knownTrackCount == 1 ? .tracklist : nil }
+            return namedAfterSong ? .name : nil
+        }
+        var isSingle: Bool { singleBasis != nil }
     }
 
     struct Result: Sendable {
@@ -86,6 +100,23 @@ enum SongsWithoutAlbumsEngine {
         let range = NSRange(location: 0, length: (trimmed as NSString).length)
         let stripped = singleOrEP.stringByReplacingMatches(in: trimmed, options: [], range: range, withTemplate: "")
         return TextNormalization.normalizeAlbumName(stripped)
+    }
+
+    /// Letters and digits only, after dropping a trailing "- Single" / "- EP": "Song (2019)" and "Song 2019 - Single" are one name.
+    private nonisolated static func lettersOnly(_ album: String) -> String {
+        let trimmed = album.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(location: 0, length: (trimmed as NSString).length)
+        let stripped = singleOrEP.stringByReplacingMatches(in: trimmed, options: [], range: range, withTemplate: "")
+        return String(stripped.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))
+    }
+
+    /// Two album names that are the same release written differently: equal apart from "- Single", "- EP", an edition suffix or
+    /// punctuation. Music and Last.fm often name one single differently, so a decision saved under one name speaks for the other.
+    nonisolated static func sameRelease(_ a: String, _ b: String) -> Bool {
+        let base = baseName(a)
+        if !base.isEmpty, base == baseName(b) { return true }
+        let letters = lettersOnly(a)
+        return !letters.isEmpty && letters == lettersOnly(b)
     }
 
     // MARK: History
@@ -122,9 +153,40 @@ enum SongsWithoutAlbumsEngine {
         return byKey
     }
 
+    // MARK: Known tracklists
+
+    /// The number of tracks the release is known to have: a pasted tracklist the person saved, a saved match to a Last.fm album, or
+    /// the tracklist cached for the album's own name, read from `turnover` only (no lookups, nothing fetched). The album is tried
+    /// under each name given (the library's, then other spellings of the same release the song was scrobbled under) and under each
+    /// artist name given, because a decision or cached lookup is filed under whichever names asked. "Just use the
+    /// tracks I've played" says nothing about the release, so it is skipped.
+    nonisolated static func knownTrackCount(artists: [String], albums: [String], turnover: AlbumTurnoverEngine.Snapshot) -> Int? {
+        var tried = Set<String>()
+        for album in albums {
+          for artist in artists where tried.insert(plain(artist) + "\u{241F}" + plain(album)).inserted {
+            let group = AlbumGroup(artist: artist, displayName: album, normalizedName: TextNormalization.normalizeAlbumName(album), variants: [album], scrobbles: [])
+            let resolution = turnover.resolution(for: group)
+            switch resolution {
+            case .manual(let tracks)?:
+                if !tracks.isEmpty { return tracks.count }
+            case .observed?:
+                continue
+            default:
+                guard let request = AlbumTurnoverEngine.tracklistRequest(group: group, resolution: resolution),
+                      case .found(let list)? = turnover.tracklists[AlbumTurnoverEngine.tracklistCacheKey(artist: request.artist, album: request.album)],
+                      !list.tracks.isEmpty else { continue }
+                return list.tracks.count
+            }
+          }
+        }
+        return nil
+    }
+
     // MARK: Compute
 
-    nonisolated static func compute(scrobbles: [ScrobbleSnapshot], music: AppleMusicSnapshot?, now: Date = Date()) -> Result {
+    nonisolated static func compute(
+        scrobbles: [ScrobbleSnapshot], music: AppleMusicSnapshot?, turnover: AlbumTurnoverEngine.Snapshot = .empty, now: Date = Date()
+    ) -> Result {
         let history = history(from: scrobbles)
 
         // Library copies by song, split into those with and without an album.
@@ -183,6 +245,12 @@ enum SongsWithoutAlbumsEngine {
                 groups[gk] = g
             }
             albumCount = groups.count
+            // Every album name the scrobbles use, per artist (plain names), to find a release's other spellings.
+            var scrobbledAlbums: [String: [String: String]] = [:]
+            for sc in scrobbles where !sc.albumName.isEmpty && !sc.artistName.isEmpty {
+                let album = plain(sc.albumName)
+                if !album.isEmpty { scrobbledAlbums[plain(sc.artistName), default: [:]][album] = sc.albumName.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
             // Albums of the same artist by base name, for "looks like another edition".
             var byOwnerBase: [String: [(gk: String, album: String, songs: Int)]] = [:]
             for (gk, g) in groups {
@@ -200,17 +268,30 @@ enum SongsWithoutAlbumsEngine {
                 let thisPlain = plain(g.album)
                 let thisNormal = TextNormalization.normalizeAlbumName(g.album)
                 var byAlbum: [String: AlbumHint] = [:]
-                for (plainName, entry) in h?.albums ?? [:] where plainName != thisPlain && TextNormalization.normalizeAlbumName(entry.name) != thisNormal {
+                for (plainName, entry) in h?.albums ?? [:] where plainName != thisPlain && TextNormalization.normalizeAlbumName(entry.name) != thisNormal && !sameRelease(entry.name, g.album) {
                     byAlbum[plainName] = AlbumHint(album: entry.name, plays: entry.plays, inMusic: albumsOfSong[songKey]?[plainName] != nil)
                 }
                 for (plainName, display) in albumsOfSong[songKey] ?? [:]
-                where plainName != thisPlain && TextNormalization.normalizeAlbumName(display) != thisNormal && byAlbum[plainName] == nil {
+                where plainName != thisPlain && TextNormalization.normalizeAlbumName(display) != thisNormal && !sameRelease(display, g.album) && byAlbum[plainName] == nil {
                     byAlbum[plainName] = AlbumHint(album: display, plays: 0, inMusic: true)
+                }
+                // The same release under other names the artist's scrobbles use, and under the artist spellings they use: a match
+                // fixed on that album's page is filed there, not under the library's names. (Looked up by album, not through this
+                // song's plays: the single's own scrobble may carry a title the song doesn't merge with.)
+                let artists = [g.artist, track.artist] + (h?.spellings.values.sorted { ($0.plays, $1.artist) > ($1.plays, $0.artist) }.map(\.artist) ?? [])
+                var seenArtist = Set<String>()
+                var sameReleaseNames: [String] = []
+                for artist in artists where seenArtist.insert(plain(artist)).inserted {
+                    for (plainName, name) in (scrobbledAlbums[plain(artist)] ?? [:]).sorted(by: { $0.key < $1.key })
+                    where plainName != thisPlain && sameRelease(name, g.album) && !sameReleaseNames.contains(name) {
+                        sameReleaseNames.append(name)
+                    }
                 }
                 alone.append(AloneRow(
                     id: gk, artist: g.artist, album: g.album, track: track.name, trackArtist: track.artist,
                     cloudStatus: track.cloudStatus, plays: h?.plays ?? 0, lastPlayed: h?.last, namedAfterSong: named,
-                    siblings: siblings, hints: byAlbum.values.sorted { ($0.plays, $1.album) > ($1.plays, $0.album) }
+                    siblings: siblings, hints: byAlbum.values.sorted { ($0.plays, $1.album) > ($1.plays, $0.album) },
+                    knownTrackCount: knownTrackCount(artists: artists, albums: [g.album] + sameReleaseNames, turnover: turnover)
                 ))
             }
         }
@@ -224,8 +305,11 @@ enum SongsWithoutAlbumsRunner {
     static func run(container: ModelContainer) async throws -> SongsWithoutAlbumsEngine.Result {
         let apple = try await AppleMusicFavoritesReader.read(includeCloudStatus: true, includeAlbumArtist: true)
         let snapshots = try await offMain { try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container) }
+        // Saved match decisions and the Last.fm tracklists already cached here (read-only, no network), to tell a real single from a
+        // partly-imported album.
+        let turnover = await offMain { AlbumTurnoverEngine.loadSnapshot(context: ModelContext(container)) }
         return await Task.detached(priority: .userInitiated) {
-            SongsWithoutAlbumsEngine.compute(scrobbles: snapshots, music: apple)
+            SongsWithoutAlbumsEngine.compute(scrobbles: snapshots, music: apple, turnover: turnover)
         }.value
     }
 

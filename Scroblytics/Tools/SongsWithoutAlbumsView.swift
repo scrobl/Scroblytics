@@ -38,12 +38,12 @@ struct SongsWithoutAlbumsView: View {
     }
 
     enum AloneFilter: String, Codable, CaseIterable, Identifiable {
-        case all, namedAfterSong, onAnotherAlbum, anotherEdition
+        case all, singles, onAnotherAlbum, anotherEdition
         var id: Self { self }
         var label: String {
             switch self {
             case .all: "All"
-            case .namedAfterSong: "Named after the song"
+            case .singles: "Singles"
             case .onAnotherAlbum: "Also on another album"
             case .anotherEdition: "Looks like another edition"
             }
@@ -51,7 +51,7 @@ struct SongsWithoutAlbumsView: View {
         func matches(_ row: Engine.AloneRow) -> Bool {
             switch self {
             case .all: true
-            case .namedAfterSong: row.namedAfterSong
+            case .singles: row.isSingle
             case .onAnotherAlbum: !row.hints.isEmpty
             case .anotherEdition: !row.siblings.isEmpty
             }
@@ -75,12 +75,14 @@ struct SongsWithoutAlbumsView: View {
         var noAlbumFilter = NoAlbumFilter.all
         var aloneFilter = AloneFilter.all
         var sort = Sort.plays
+        /// Leave out singles (a release known to have one track, or an album named after its song when no tracklist is known), which aren't a problem.
+        var hideSingles = true
         /// Set after Music has been read once (permission is then granted), so a later visit may read it on open.
         var hasRun = false
 
         init() {}
 
-        private enum CodingKeys: String, CodingKey { case group, noAlbumFilter, aloneFilter, sort, hasRun }
+        private enum CodingKeys: String, CodingKey { case group, noAlbumFilter, aloneFilter, sort, hideSingles, hasRun }
 
         func encode(to encoder: Encoder) throws {
             var values = encoder.container(keyedBy: CodingKeys.self)
@@ -88,6 +90,7 @@ struct SongsWithoutAlbumsView: View {
             try values.encode(noAlbumFilter, forKey: .noAlbumFilter)
             try values.encode(aloneFilter, forKey: .aloneFilter)
             try values.encode(sort, forKey: .sort)
+            try values.encode(hideSingles, forKey: .hideSingles)
             try values.encode(hasRun, forKey: .hasRun)
         }
 
@@ -97,6 +100,7 @@ struct SongsWithoutAlbumsView: View {
             noAlbumFilter = (try? values.decodeIfPresent(NoAlbumFilter.self, forKey: .noAlbumFilter)) ?? .all
             aloneFilter = (try? values.decodeIfPresent(AloneFilter.self, forKey: .aloneFilter)) ?? .all
             sort = (try? values.decodeIfPresent(Sort.self, forKey: .sort)) ?? .plays
+            hideSingles = (try? values.decodeIfPresent(Bool.self, forKey: .hideSingles)) ?? true
             hasRun = (try? values.decodeIfPresent(Bool.self, forKey: .hasRun)) ?? false
         }
     }
@@ -122,8 +126,15 @@ struct SongsWithoutAlbumsView: View {
         }
     }
 
+    /// The albums a view lists: those the filter matches, minus the singles when they are hidden. The Singles view is the
+    /// singles themselves, so hiding never applies to it.
+    nonisolated static func listed(_ rows: [Engine.AloneRow], filter: AloneFilter, hideSingles: Bool) -> [Engine.AloneRow] {
+        let hiding = hideSingles && filter != .singles
+        return rows.filter { filter.matches($0) && !(hiding && $0.isSingle) }
+    }
+
     private var visibleAlone: [Engine.AloneRow] {
-        let rows = (result?.alone ?? []).filter { options.aloneFilter.matches($0) }
+        let rows = Self.listed(result?.alone ?? [], filter: options.aloneFilter, hideSingles: options.hideSingles)
         switch options.sort {
         case .plays: return rows.sorted { ($0.plays, $1.artist, $1.album) > ($1.plays, $0.artist, $0.album) }
         case .lastPlayed: return rows.sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
@@ -195,6 +206,10 @@ struct SongsWithoutAlbumsView: View {
             }
             .fixedSize()
             .disabled(!musicRead)
+            Toggle("Hide singles", isOn: $options.hideSingles)
+                .toggleStyle(.checkbox)
+                .disabled(!musicRead || options.aloneFilter == .singles)
+                .help("Leave out singles: a release whose tracklist has one track, or, when no tracklist is known, an album named after its song.")
         }
         Picker("Sort", selection: $options.sort) {
             ForEach(Sort.allCases) { Text($0.label).tag($0) }
@@ -216,12 +231,15 @@ struct SongsWithoutAlbumsView: View {
     private var headline: some View {
         let noAlbum = result?.noAlbum ?? []
         let alone = result?.alone ?? []
+        let singles = alone.filter(\.isSingle).count
+        let confirmedSingles = alone.filter { $0.singleBasis == .tracklist }.count
+        let listed = options.hideSingles ? alone.count - singles : alone.count
         return ToolHeadlineCard("SONGS WITHOUT ALBUMS") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 14) {
                     Label("\(noAlbum.count.formatted()) with no album", systemImage: "questionmark.square.dashed")
                     if musicRead {
-                        Label("\(alone.count.formatted()) alone on an album", systemImage: "square.stack")
+                        Label("\(listed.formatted()) alone on an album", systemImage: "square.stack")
                     }
                 }
                 .font(AppTypography.contentTitle)
@@ -229,7 +247,7 @@ struct SongsWithoutAlbumsView: View {
                     let inMusic = noAlbum.filter(\.emptyInMusic).count
                     let scrobbled = noAlbum.reduce(0) { $0 + $1.albumlessPlays }
                     if let tracks = result.musicTracks, let albums = result.musicAlbums {
-                        Text("\(inMusic.formatted()) in Music with an empty Album · \(scrobbled.formatted()) \(scrobbled == 1 ? "scrobble" : "scrobbles") with no album name · \(alone.count.formatted()) of \(albums.formatted()) library albums hold one song · read \(result.checkedAt.formatted(.relative(presentation: .named))) from \(tracks.formatted()) library songs")
+                        Text("\(inMusic.formatted()) in Music with an empty Album · \(scrobbled.formatted()) \(scrobbled == 1 ? "scrobble" : "scrobbles") with no album name · \(alone.count.formatted()) of \(albums.formatted()) library albums hold one song, \(singles.formatted()) of them are singles (\(confirmedSingles.formatted()) confirmed by a tracklist, the rest judged by name)\(options.hideSingles ? " and hidden" : "") · read \(result.checkedAt.formatted(.relative(presentation: .named))) from \(tracks.formatted()) library songs")
                             .font(AppTypography.compactMetadata).fontWeight(.regular).foregroundStyle(.secondary)
                     } else {
                         Text("\(scrobbled.formatted()) \(scrobbled == 1 ? "scrobble" : "scrobbles") with no album name. Read Music to also check your library.")
@@ -286,13 +304,20 @@ struct SongsWithoutAlbumsView: View {
     @ViewBuilder
     private var aloneList: some View {
         let rows = visibleAlone
-        Text("\(rows.count.formatted()) \(rows.count == 1 ? "album" : "albums")")
+        let hiddenSingles = options.hideSingles && options.aloneFilter != .singles ? (result?.alone ?? []).filter { options.aloneFilter.matches($0) && $0.isSingle }.count : 0
+        if options.aloneFilter == .singles {
+            Text("Showing only the singles, so Hide singles doesn’t apply here. Choose Show: All to leave them out.")
+                .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+        }
+        Text("\(rows.count.formatted()) \(rows.count == 1 ? "album" : "albums")\(hiddenSingles > 0 ? " · \(hiddenSingles.formatted()) \(hiddenSingles == 1 ? "single" : "singles") hidden" : "")")
             .font(AppTypography.metadata.monospacedDigit()).foregroundStyle(.secondary)
         if rows.isEmpty {
             ContentUnavailableView(
-                options.aloneFilter == .all ? "No one-song albums" : "Nothing here",
+                options.aloneFilter == .all ? "No one-song albums to look at" : "Nothing here",
                 systemImage: "checkmark.circle",
-                description: Text(options.aloneFilter == .all ? "Every album in your library holds more than one song." : "No albums match this view.")
+                description: Text(options.aloneFilter == .all
+                    ? (hiddenSingles > 0 ? "Every other album in your library holds more than one song. Turn off Hide singles to see the \(hiddenSingles.formatted()) \(hiddenSingles == 1 ? "single" : "singles")." : "Every album in your library holds more than one song.")
+                    : "No albums match this view.")
             )
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
@@ -334,8 +359,15 @@ struct SongsWithoutAlbumsView: View {
             searchArtist: row.trackArtist, searchTrack: row.track,
             onOpen: row.plays > 0 ? { navigation.goToTrack(TrackIdentity(artist: row.trackArtist, name: row.track, album: row.album, imageURL: nil)) } : nil
         ) {
-            if row.namedAfterSong {
-                Badge(text: "Named after the song", systemImage: "music.note", tint: .secondary)
+            switch row.singleBasis {
+            case .tracklist?:
+                Badge(text: "Single · its tracklist has 1 track", systemImage: "checkmark.seal", tint: .secondary)
+            case .name?:
+                Badge(text: "Likely single · named after the song", systemImage: "music.note", tint: .secondary)
+            case nil:
+                if let count = row.knownTrackCount {
+                    Badge(text: "Album has \(count.formatted()) tracks · 1 in Music", systemImage: "square.stack.3d.up", tint: .orange)
+                }
             }
             if let sibling = row.siblings.first {
                 Badge(text: "Maybe the same as “\(sibling.album)” (\(sibling.songs.formatted()) \(sibling.songs == 1 ? "song" : "songs"))", systemImage: "exclamationmark.triangle.fill", tint: .orange)

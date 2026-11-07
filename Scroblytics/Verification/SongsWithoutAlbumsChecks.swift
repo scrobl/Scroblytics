@@ -24,13 +24,17 @@ enum SongsWithoutAlbumsChecks {
                 out.append("NOALBUM_SCROBBLES \(result.noAlbum.reduce(0) { $0 + $1.albumlessPlays })")
                 out.append("ALONE \(result.alone.count)")
                 out.append("ALONE_NAMED_AFTER_SONG \(result.alone.filter(\.namedAfterSong).count)")
+                out.append("ALONE_SINGLES \(result.alone.filter(\.isSingle).count)")
+                out.append("ALONE_SINGLES_BY_TRACKLIST \(result.alone.filter { $0.singleBasis == .tracklist }.count)")
+                out.append("ALONE_KNOWN_TRACKLIST \(result.alone.filter { $0.knownTrackCount != nil }.count)")
+                out.append("ALONE_KNOWN_LONGER \(result.alone.filter { ($0.knownTrackCount ?? 0) > 1 }.count)")
                 out.append("ALONE_ON_ANOTHER_ALBUM \(result.alone.filter { !$0.hints.isEmpty }.count)")
                 out.append("ALONE_SIBLING \(result.alone.filter { !$0.siblings.isEmpty }.count)")
                 for r in result.noAlbum.sorted(by: { $0.id < $1.id }) {
                     out.append("ROW_NOALBUM\t\(r.artist)\t\(r.track)\t\(r.emptyInMusic)\t\(r.albumlessPlays)\t\(r.totalPlays)\t\(r.hints.map(\.album).joined(separator: " | "))")
                 }
                 for r in result.alone.sorted(by: { $0.id < $1.id }) {
-                    out.append("ROW_ALONE\t\(r.artist)\t\(r.album)\t\(r.trackArtist)\t\(r.track)\t\(r.plays)")
+                    out.append("ROW_ALONE\t\(r.artist)\t\(r.album)\t\(r.trackArtist)\t\(r.track)\t\(r.plays)\t\(r.knownTrackCount ?? -1)\t\(r.singleBasis.map { "\($0)" } ?? "-")")
                 }
                 try out.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
                 print("wrote \(path)")
@@ -48,6 +52,7 @@ enum SongsWithoutAlbumsChecks {
             historyChecks(check)
             musicChecks(check)
             aloneChecks(check)
+            singleChecks(check)
             crossCheck(check)
             HeadlessTask.finish(failures)
         }
@@ -186,6 +191,95 @@ enum SongsWithoutAlbumsChecks {
         check("the streaming copy's cloud status is available for the row", byAlbum["Twice Album"]?.cloudStatus == "uploaded" || byAlbum["Twice Album"]?.cloudStatus == "subscription")
         check("an album artist that is empty falls back to the track's artist (so compilation tracks without one are alone)",
               Engine.compute(scrobbles: [], music: library([song("Artist P", "P1", "No Album Artist"), song("Artist Q", "Q1", "No Album Artist")]), now: t0).alone.count == 2)
+    }
+
+    // MARK: Singles
+
+    private static func tracklist(_ artist: String, _ album: String, _ tracks: [String]) -> (String, AlbumTracklistResult) {
+        (AlbumTurnoverEngine.tracklistCacheKey(artist: artist, album: album), .found(AlbumTracklist(album: album, artist: artist, tracks: tracks)))
+    }
+
+    private static func singleChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let music = library([
+            song("Artist S", "Radio", "Radio Cut"),                                   // not named after its song; tracklist has 1 track
+            song("Artist T", "Hollow", "Hollow"),                                     // named after its song, but the tracklist has 9
+            song("Artist U", "Plain", "Plain"),                                       // named after its song, nothing known
+            song("Artist V", "Solo", "Odd Album"),                                    // not named after its song, nothing known
+            song("Artist W", "Manual Song", "Manual Album"),                          // a saved pasted tracklist of 1
+            song("Artist X", "Alias Song", "Alias Album"),                            // a saved match to another Last.fm album
+            song("Artist N", "Never Cached Album", "Never Cached Album"),                   // saved match whose tracklist isn't cached
+            song("Artist O", "Observed Song", "Observed Album"),                      // "just use what I've played"; a cache exists but is not used
+            song("Artist Y", "Why", "Why (Deluxe Edition)"),                          // cached under the plain name
+            song("Artist Z", "Zed", "Zed Album", albumArtist: "Artist Z Band"),       // cached under the track's artist
+            song("Artist M", "Missing", "Missing Album"),                             // a cached "no match"
+            song("Artist L", "Empty", "Empty Album"),                                 // a cached tracklist with no tracks
+        ])
+        var turnover = AlbumTurnoverEngine.Snapshot()
+        for (key, value) in [
+            tracklist("Artist S", "Radio Cut", ["Radio"]),
+            tracklist("Artist T", "Hollow", (1...9).map { "T\($0)" }),
+            tracklist("Artist X", "Alias Album Real", ["Alias Song"]),
+            tracklist("Artist O", "Observed Album", (1...12).map { "O\($0)" }),
+            tracklist("Artist Y", "Why", ["Why"]),
+            tracklist("Artist Z", "Zed Album", ["Zed"]),
+            tracklist("Artist L", "Empty Album", []),
+        ] { turnover.tracklists[key] = value }
+        turnover.tracklists[AlbumTurnoverEngine.tracklistCacheKey(artist: "Artist M", album: "Missing Album")] = .noMatch
+        turnover.resolutions[TextNormalization.albumIdentityKey(artist: "Artist W", album: "Manual Album")] = .manual(tracks: ["Manual Song"])
+        turnover.resolutions[TextNormalization.albumIdentityKey(artist: "Artist X", album: "Alias Album")] = .canonical(canonicalArtist: "Artist X", canonicalAlbum: "Alias Album Real")
+        turnover.resolutions[TextNormalization.albumIdentityKey(artist: "Artist N", album: "Never Cached Album")] = .canonical(canonicalArtist: "Artist N", canonicalAlbum: "Somewhere Else")
+        turnover.resolutions[TextNormalization.albumIdentityKey(artist: "Artist O", album: "Observed Album")] = .observed
+
+        let r = Engine.compute(scrobbles: [], music: music, turnover: turnover, now: t0)
+        let byAlbum = Dictionary(uniqueKeysWithValues: r.alone.map { ($0.album, $0) })
+        check("every one-song album is still listed with a tracklist snapshot", r.alone.count == 12, "\(r.alone.count)")
+
+        check("a cached one-track tracklist makes a single even when the name differs from the song",
+              byAlbum["Radio Cut"]?.singleBasis == .tracklist && byAlbum["Radio Cut"]?.knownTrackCount == 1 && byAlbum["Radio Cut"]?.namedAfterSong == false)
+        check("an album named after its song is not a single when its tracklist has several tracks",
+              byAlbum["Hollow"]?.namedAfterSong == true && byAlbum["Hollow"]?.knownTrackCount == 9 && byAlbum["Hollow"]?.isSingle == false)
+        check("with no tracklist known, an album named after its song is a single by its name", byAlbum["Plain"]?.singleBasis == .name && byAlbum["Plain"]?.knownTrackCount == nil)
+        check("with no tracklist known and a different name it is not a single", byAlbum["Odd Album"]?.isSingle == false && byAlbum["Odd Album"]?.knownTrackCount == nil)
+        check("a saved pasted tracklist counts", byAlbum["Manual Album"]?.knownTrackCount == 1 && byAlbum["Manual Album"]?.singleBasis == .tracklist)
+        check("a saved match to a Last.fm album uses that album's cached tracklist", byAlbum["Alias Album"]?.knownTrackCount == 1 && byAlbum["Alias Album"]?.isSingle == true)
+        check("a saved match whose tracklist isn't cached knows nothing (and nothing is fetched)", byAlbum["Never Cached Album"]?.knownTrackCount == nil && byAlbum["Never Cached Album"]?.isSingle == true)
+        check("\"just use the tracks I've played\" is no statement about the release", byAlbum["Observed Album"]?.knownTrackCount == nil && byAlbum["Observed Album"]?.isSingle == false)
+        check("an edition-suffixed album finds the tracklist cached under its plain name", byAlbum["Why (Deluxe Edition)"]?.knownTrackCount == 1)
+        check("the track's artist is tried when the album artist found nothing", byAlbum["Zed Album"]?.knownTrackCount == 1)
+        check("a cached \"no match\" and an empty tracklist know nothing", byAlbum["Missing Album"]?.knownTrackCount == nil && byAlbum["Empty Album"]?.knownTrackCount == nil)
+
+        // A decision saved on another spelling of the same release (the library says "(2019)", Last.fm "2019 - Single").
+        check("same release: punctuation, - Single and - EP differences", Engine.sameRelease("Song R (2019)", "Song R 2019 - Single") && Engine.sameRelease("Song R - EP", "Song R") && Engine.sameRelease("Song R (Deluxe Edition)", "Song R"))
+        check("same release: a different title is not", !Engine.sameRelease("Song R", "Song R Live") && !Engine.sameRelease("Greatest Hits", "Song R"))
+        var bridged = AlbumTurnoverEngine.Snapshot()
+        bridged.resolutions[TextNormalization.albumIdentityKey(artist: "Artist R", album: "Song R 2019 - Single")] = .canonical(canonicalArtist: "Artist R", canonicalAlbum: "Song R 2019 - Single")
+        let (key, value) = tracklist("Artist R", "Song R 2019 - Single", ["Song R (2019)"])
+        bridged.tracklists[key] = value
+        let bridgeMusic = library([song("Artist R", "Song R (2019)", "Song R (2019)"), song("Artist S2", "Other Song", "Other Song")])
+        // The song's plays are on a real album; the single's own scrobble has a title that doesn't merge with the song.
+        let bridgePlays = [play("Artist R", "Song R", "Greatest Hits", 2), play("Artist R", "Song R 2019", "Song R 2019 - Single", 1)]
+        let bridgedResult = Engine.compute(scrobbles: bridgePlays, music: bridgeMusic, turnover: bridged, now: t0)
+        let bridgedRow = bridgedResult.alone.first { $0.album == "Song R (2019)" }
+        check("a match saved on another spelling of the same release counts for the library's album", bridgedRow?.knownTrackCount == 1 && bridgedRow?.singleBasis == .tracklist, "\(String(describing: bridgedRow?.knownTrackCount))")
+        check("that other spelling is not offered as another album, but a different album the song is on still is", bridgedRow?.hints.map(\.album) == ["Greatest Hits"], "\(String(describing: bridgedRow?.hints))")
+        let unbridged = Engine.compute(scrobbles: [play("Artist R", "Song R (2019)", "Greatest Hits", 2)], music: bridgeMusic, turnover: bridged, now: t0)
+        check("a decision on a different album the song is on does not make this album a single", unbridged.alone.first { $0.album == "Song R (2019)" }?.knownTrackCount == nil)
+
+        // What a view lists
+        let rows = r.alone
+        let singleCount = rows.filter(\.isSingle).count
+        check("All with Hide singles on leaves the singles out", SongsWithoutAlbumsView.listed(rows, filter: .all, hideSingles: true).count == rows.count - singleCount && !SongsWithoutAlbumsView.listed(rows, filter: .all, hideSingles: true).contains { $0.isSingle })
+        check("All with Hide singles off lists every album", SongsWithoutAlbumsView.listed(rows, filter: .all, hideSingles: false).count == rows.count)
+        check("Likely singles lists exactly the singles whether or not they are hidden", SongsWithoutAlbumsView.listed(rows, filter: .singles, hideSingles: true).count == singleCount && SongsWithoutAlbumsView.listed(rows, filter: .singles, hideSingles: false).count == singleCount)
+
+        // The same library with nothing known behaves as before: singles come from the name alone.
+        let plain = Engine.compute(scrobbles: [], music: music, now: t0)
+        check("without a snapshot nothing has a known track count", plain.alone.allSatisfy { $0.knownTrackCount == nil })
+        check("without a snapshot only albums named after their song are singles", Set(plain.alone.filter(\.isSingle).map(\.album)) == ["Hollow", "Never Cached Album", "Plain", "Why (Deluxe Edition)"], "\(plain.alone.filter(\.isSingle).map(\.album).sorted())")
+        check("with a snapshot the singles are exactly those with a one-track tracklist, or named after the song and unknown",
+              Set(r.alone.filter(\.isSingle).map(\.album)) == ["Radio Cut", "Plain", "Manual Album", "Alias Album", "Never Cached Album", "Why (Deluxe Edition)", "Zed Album"],
+              "\(r.alone.filter(\.isSingle).map(\.album).sorted())")
     }
 
     // MARK: An independent count on generated data

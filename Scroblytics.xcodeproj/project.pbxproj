@@ -273,6 +273,7 @@
 		C1398B6C087166C2B86C46AF /* AutoPlaylistRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC0B6072860932169FC8397 /* AutoPlaylistRecipe.swift */; };
 		C150E7D2B0FB847984F6C4A6 /* TagManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16B8936C50A253B8D529B686 /* TagManagement.swift */; };
 		C20CA820AEA8ED72EC434DAE /* QueryMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59612875235DD5729636341 /* QueryMatcher.swift */; };
+		C342E9ED8E6DF95E206E9D14 /* ToolControlsFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BE2B08176C219BC7168672E /* ToolControlsFlow.swift */; };
 		C34D609D9C02A263D364CBE3 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FD509D061EB1E054BDDC1B /* UpdateChecker.swift */; };
 		C3FD085727D24472321DF53A /* WeatherTripsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6FC2918D272CDA0BC32E9DB /* WeatherTripsView.swift */; };
 		C52C4E57C397D971AC9B20A8 /* QueryClimbingFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A5DC3C154D1A3DFC9A794C /* QueryClimbingFields.swift */; };
@@ -399,6 +400,7 @@
 		0A85F1DB2C642CB47EB6A50E /* MostRecentMostOften.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MostRecentMostOften.swift; sourceTree = "<group>"; };
 		0AA6B32AB7724980D0CD927E /* HelpContentAskQuery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HelpContentAskQuery.swift; sourceTree = "<group>"; };
 		0BC21E3DDCA8E3061FB40CAE /* UnscrobbledPlaysChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnscrobbledPlaysChecks.swift; sourceTree = "<group>"; };
+		0BE2B08176C219BC7168672E /* ToolControlsFlow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolControlsFlow.swift; sourceTree = "<group>"; };
 		0D331B5EBEFF0959C30B3AE8 /* TopChartsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopChartsEngine.swift; sourceTree = "<group>"; };
 		0EDAC91A28ABC0E22C794D07 /* AskSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskSchema.swift; sourceTree = "<group>"; };
 		0F42BFDA67CDF54DAC09A6FD /* GlobalSearchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSearchEngine.swift; sourceTree = "<group>"; };
@@ -1089,6 +1091,7 @@
 				0447679B5B24CA01D26D67CD /* UnscrobbledPlaysView.swift */,
 				554B89E7B2079D5450BFCB5A /* UnscrobbledPlaysScrobbling.swift */,
 				C2313144945136882B6F87B5 /* UnscrobbledPlaysScrobbleSheet.swift */,
+				0BE2B08176C219BC7168672E /* ToolControlsFlow.swift */,
 			);
 			path = Tools;
 			sourceTree = "<group>";
@@ -1868,6 +1871,7 @@
 				4B1E44448BD818DA5D229026 /* ScrobblerWatchStore.swift in Sources */,
 				72B9ACF73390C097E9A34E86 /* ScrobblerWatchViews.swift in Sources */,
 				D292AF8E9186FC0E4F7F6F0C /* ScrobblerWatchChecks.swift in Sources */,
+				C342E9ED8E6DF95E206E9D14 /* ToolControlsFlow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

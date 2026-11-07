@@ -182,10 +182,7 @@ struct SongsWithoutAlbumsView: View {
     // MARK: Controls
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { controlItems }
-            VStack(alignment: .leading, spacing: 10) { controlItems }
-        }
+        ToolControlsFlow { controlItems }
     }
 
     @ViewBuilder
@@ -215,15 +212,17 @@ struct SongsWithoutAlbumsView: View {
             ForEach(Sort.allCases) { Text($0.label).tag($0) }
         }
         .fixedSize()
-        Spacer(minLength: 0)
-        if isReadingMusic { ProgressView().controlSize(.small) }
-        Button {
-            Task { await readMusic() }
-        } label: {
-            Label(musicRead ? "Read Music again" : "Read Music", systemImage: "arrow.clockwise")
+        HStack(spacing: 10) {
+            if isReadingMusic { ProgressView().controlSize(.small) }
+            Button {
+                Task { await readMusic() }
+            } label: {
+                Label(musicRead ? "Read Music again" : "Read Music", systemImage: "arrow.clockwise")
+            }
+            .disabled(isReadingMusic)
+            .help("Reads your Music library (about a second) and compares it with everything you’ve scrobbled. Nothing is changed.")
         }
-        .disabled(isReadingMusic)
-        .help("Reads your Music library (about a second) and compares it with everything you’ve scrobbled. Nothing is changed.")
+        .toolControlsTrailing()
     }
 
     // MARK: Headline

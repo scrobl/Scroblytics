@@ -25,6 +25,10 @@ enum LayoutSnapshots {
             snapshotPlaylistDialog(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_TOOLCONTROLS"] {
+            snapshotToolControls(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_SCROBBLERWATCH"] {
             snapshotScrobblerWatch(into: folder)
             return
@@ -314,6 +318,58 @@ enum LayoutSnapshots {
                     await render(UpdateStripLine(current: AppVersion("0.9.0")!, release: release, onView: {}, onSkip: {}, onDismiss: {}), width: width, scheme: scheme, name: "strip")
                 }
                 await render(Form { UpdateSettingsSection() }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings")
+            }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_TOOLCONTROLS=<folder>`: a tool's header controls (the Unscrobbled Plays set: a segmented switch, three
+    /// pickers, two checkboxes and the buttons) in `PageSettingsHeader` at several widths, to see them use the width and wrap as it shrinks.
+    @MainActor
+    private static func snapshotToolControls(into folder: String) {
+        struct Sample: View {
+            @State private var group = 0
+            @State private var show = 0
+            @State private var played = 4
+            @State private var sort = 0
+            @State private var variants = false
+            @State private var warn = true
+            var body: some View {
+                PageSettingsHeader("Unscrobbled Plays") {
+                    ToolControlsFlow {
+                        Picker("Group", selection: $group) { Text("Not scrobbled").tag(0); Text("Time differs").tag(1) }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                        Picker("Show", selection: $show) { Text("All").tag(0); Text("Never scrobbled").tag(1); Text("Played after its last scrobble").tag(2) }.fixedSize()
+                        Picker("Played", selection: $played) { Text("Any time").tag(0); Text("Last 14 days").tag(4) }.fixedSize()
+                        Picker("Sort", selection: $sort) { Text("Last played in Music").tag(0); Text("Largest gap").tag(1) }.fixedSize()
+                        Toggle("Match spelling variants", isOn: $variants).toggleStyle(.checkbox)
+                        Toggle("Warn me if scrobbling stops", isOn: $warn).toggleStyle(.checkbox)
+                        HStack(spacing: 10) {
+                            Button {} label: { Label("Scrobble 12…", systemImage: "arrow.up.circle") }
+                            Button {} label: { Label("Read Music again", systemImage: "arrow.clockwise") }
+                        }
+                        .toolControlsTrailing()
+                    }
+                }
+                .padding(16)
+            }
+        }
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            for scheme in ["dark", "light"] {
+                for width in [1000, 760, 520, 380] as [CGFloat] {
+                    let host = NSHostingView(rootView: Sample().frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: scheme == "dark" ? .darkAqua : .aqua)
+                    window.contentView = host
+                    window.setContentSize(NSSize(width: width, height: 200))
+                    for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                    window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "controls-\(scheme)-\(Int(width)).png"))
+                    }
+                }
             }
             exit(0)
         }

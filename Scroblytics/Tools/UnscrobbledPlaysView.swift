@@ -208,10 +208,7 @@ struct UnscrobbledPlaysView: View {
     // MARK: Controls
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { controlItems }
-            VStack(alignment: .leading, spacing: 10) { controlItems }
-        }
+        ToolControlsFlow { controlItems }
     }
 
     @ViewBuilder
@@ -242,26 +239,28 @@ struct UnscrobbledPlaysView: View {
         Toggle("Warn me if scrobbling stops", isOn: Binding(get: { watch.settings.enabled }, set: { watch.setEnabled($0) }))
             .toggleStyle(.checkbox)
             .help("After each sync, check whether Music has played several songs Last.fm never got, and show a warning if so. Off until you turn it on. Settings › Sync sets how many songs and how many days.")
-        Spacer(minLength: 0)
-        if isReading { ProgressView().controlSize(.small) }
-        if options.group == .notScrobbled, inputs != nil {
-            Button {
-                showingScrobble = true
-            } label: {
-                Label(scrobblable.isEmpty ? "Scrobble…" : "Scrobble \(scrobblable.count.formatted())…", systemImage: "arrow.up.circle")
+        HStack(spacing: 10) {
+            if isReading { ProgressView().controlSize(.small) }
+            if options.group == .notScrobbled, inputs != nil {
+                Button {
+                    showingScrobble = true
+                } label: {
+                    Label(scrobblable.isEmpty ? "Scrobble…" : "Scrobble \(scrobblable.count.formatted())…", systemImage: "arrow.up.circle")
+                }
+                .disabled(scrobblable.isEmpty)
+                .help(scrobblable.isEmpty
+                    ? "Nothing in this view can be scrobbled now: Last.fm takes plays from about the last 14 days. Set Played to Last 14 days to see them."
+                    : "Review these plays and submit them to Last.fm, timestamped with the time Music last played each song. You confirm the exact list first.")
             }
-            .disabled(scrobblable.isEmpty)
-            .help(scrobblable.isEmpty
-                ? "Nothing in this view can be scrobbled now: Last.fm takes plays from about the last 14 days. Set Played to Last 14 days to see them."
-                : "Review these plays and submit them to Last.fm, timestamped with the time Music last played each song. You confirm the exact list first.")
+            Button {
+                Task { await readMusic() }
+            } label: {
+                Label(inputs != nil ? "Read Music again" : "Read Music", systemImage: "arrow.clockwise")
+            }
+            .disabled(isReading)
+            .help("Reads your Music library (about a second) and compares each song’s last play with your scrobbles. Nothing is changed.")
         }
-        Button {
-            Task { await readMusic() }
-        } label: {
-            Label(inputs != nil ? "Read Music again" : "Read Music", systemImage: "arrow.clockwise")
-        }
-        .disabled(isReading)
-        .help("Reads your Music library (about a second) and compares each song’s last play with your scrobbles. Nothing is changed.")
+        .toolControlsTrailing()
     }
 
     // MARK: Headline

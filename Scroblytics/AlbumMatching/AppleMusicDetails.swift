@@ -17,6 +17,25 @@ struct AppleMusicDetailRow: Codable, Sendable, Equatable {
     var bpm: Int
     /// When the song was added to the library; nil when Music has no date.
     var dateAdded: Date?
+    /// How long Music says the song runs, in whole seconds; 0 when it has no length.
+    var seconds: Int = 0
+
+    private enum CodingKeys: String, CodingKey { case artist, title, album, albumArtist, genre, bpm, dateAdded, seconds }
+}
+
+extension AppleMusicDetailRow {
+    /// A read saved before lengths were kept has no `seconds`; it still loads (the length is just unknown until the next read).
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        artist = try values.decode(String.self, forKey: .artist)
+        title = try values.decode(String.self, forKey: .title)
+        album = try values.decode(String.self, forKey: .album)
+        albumArtist = try values.decode(String.self, forKey: .albumArtist)
+        genre = try values.decode(String.self, forKey: .genre)
+        bpm = try values.decode(Int.self, forKey: .bpm)
+        dateAdded = try values.decodeIfPresent(Date.self, forKey: .dateAdded)
+        seconds = try values.decodeIfPresent(Int.self, forKey: .seconds) ?? 0
+    }
 }
 
 /// One read of the library: every song in it (a song present in two copies, such as a file and a streaming copy, is two rows).
@@ -47,6 +66,7 @@ enum AppleMusicDetailsStorage {
         var key: String?
         var file: AppleMusicDetailsFile?
         var tempo: [String: Double] = [:]
+        var durations: [String: Int] = [:]
     }
     private nonisolated static let cache = Cache()
 
@@ -65,7 +85,16 @@ enum AppleMusicDetailsStorage {
         cache.key = key
         cache.file = file
         cache.tempo = AppleMusicDetailsIndex.tempoByKey(file.rows)
+        cache.durations = AppleMusicDetailsIndex.durationByKey(file.rows)
         return file
+    }
+
+    /// Music's length for each song (`AppleMusicDetailsIndex.durationByKey`) from the saved read; empty when there is none.
+    nonisolated static func durationMap(from url: URL = defaultURL()) -> [String: Int] {
+        guard load(from: url) != nil else { return [:] }
+        cache.lock.lock()
+        defer { cache.lock.unlock() }
+        return cache.durations
     }
 
     /// Music's tempo tag for each song (`AppleMusicDetailsIndex.tempoByKey`) from the saved read; empty when there is none. Computed once per
@@ -90,6 +119,7 @@ enum AppleMusicDetailsStorage {
         cache.key = nil
         cache.file = nil
         cache.tempo = [:]
+        cache.durations = [:]
         cache.lock.unlock()
     }
 }
@@ -286,6 +316,24 @@ struct AppleMusicDetailsIndex: Sendable {
             if da != db { return da > db }
             return a.key > b.key
         }?.key
+    }
+
+    // MARK: Length
+
+    /// Music's length for each song, keyed the way lengths are everywhere (`DurationEngine.cacheKey`), for songs whose length is usable. Like tempo it
+    /// belongs to a recording, so only identical titles count, and a song whose copies disagree by more than 2 seconds (a studio and a live take under
+    /// one title, say) gets none rather than a guess.
+    nonisolated static func durationByKey(_ rows: [AppleMusicDetailRow]) -> [String: Int] {
+        var values: [String: [Int]] = [:]
+        for row in rows where row.seconds > 0 && !row.title.isEmpty {
+            values[DurationEngine.cacheKey(artist: row.artist, track: row.title), default: []].append(row.seconds)
+        }
+        var out: [String: Int] = [:]
+        for (key, list) in values {
+            guard let low = list.min(), let high = list.max(), high - low <= 2 else { continue }
+            out[key] = list.sorted()[list.count / 2]
+        }
+        return out
     }
 
     // MARK: Tempo

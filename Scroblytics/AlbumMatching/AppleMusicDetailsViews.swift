@@ -9,7 +9,7 @@ struct AppleMusicDetailsSettingsSection: View {
 
     var body: some View {
         Section("Apple Music library details") {
-            Toggle("Keep date added, genre and tempo from Apple Music", isOn: Binding(get: { store.enabled }, set: { store.setEnabled($0) }))
+            Toggle("Keep date added, genre, tempo and length from Apple Music", isOn: Binding(get: { store.enabled }, set: { store.setEnabled($0) }))
             if store.enabled {
                 HStack(alignment: .firstTextBaseline) {
                     Button("Refresh Now") { store.refresh(force: true) }.disabled(store.isReading)
@@ -25,7 +25,7 @@ struct AppleMusicDetailsSettingsSection: View {
             if store.readAt != nil {
                 Button("Forget What Was Read…", role: .destructive) { confirmingForget = true }
             }
-            Text("Reads from your Music library, while Music is open and after a sync, when each song was added to it, its genre and its tempo tag, and keeps them on this Mac. Query can then ask about them, song, album and artist pages show them, and a tempo tag fills in where no tempo was found online. It reads when the number of songs changes or the last read is over 12 hours old. Songs are matched to Last.fm by exact title; where the library has several possible partners, nothing is taken. Nothing leaves your Mac.")
+            Text("Reads from your Music library, while Music is open and after a sync, when each song was added to it, its genre, its tempo tag and its length, and keeps them on this Mac. Query can then ask about them, song, album and artist pages show them, and a tempo tag or length fills in where none was found online. It reads when the number of songs changes or the last read is over 12 hours old. Songs are matched to Last.fm by exact title; where the library has several possible partners, nothing is taken. Nothing leaves your Mac.")
                 .font(AppTypography.supporting).foregroundStyle(.secondary)
             HelpLinkButton(articleID: "apple-music-details", title: "About Apple Music library details")
         }

@@ -92,6 +92,11 @@ enum DurationEngine {
         if let existingTrack = try context.fetch(descriptor).first, let override = existingTrack.durationOverrideSeconds {
             return override
         }
+        // A length found online wins; the Apple Music library's fills in where nothing is cached, without a lookup.
+        var cached = FetchDescriptor<TrackDurationCacheEntry>(predicate: #Predicate { $0.cacheKey == key })
+        cached.fetchLimit = 1
+        if let row = try context.fetch(cached).first, let seconds = row.seconds { return seconds }
+        if let seconds = AppleMusicDetailsStorage.durationMap()[key] { return seconds }
         return try await getCachedDeezerDuration(context: context, client: client, artist: artist, track: track, album: album)
     }
 
@@ -114,21 +119,24 @@ enum DurationEngine {
         var cachedMisses: Set<String> = []
         /// `cacheKey` → user override (`Track.durationOverrideSeconds`).
         var overrides: [String: Int] = [:]
+        /// `cacheKey` → the length in the Apple Music library (`AppleMusicDetailsStorage.durationMap`): fills in only where Deezer had nothing.
+        var music: [String: Int] = [:]
 
         nonisolated static let empty = Snapshot()
 
-        /// Override > cached Deezer value > cached miss > pending — the same
-        /// chain `resolvedDuration` documents.
+        /// Override > cached Deezer value > the length in the Apple Music library > cached miss > pending — the same
+        /// chain `resolvedDuration` documents. Music's length beats "nothing found online" and means the track never needs a lookup.
         nonisolated func resolution(forKey key: String) -> Resolution {
             if let override = overrides[key] { return .seconds(override) }
             if let seconds = cachedSeconds[key] { return .seconds(seconds) }
+            if let seconds = music[key] { return .seconds(seconds) }
             if cachedMisses.contains(key) { return .noMatch }
             return .pending
         }
 
         /// Every key with a usable runtime — the lookup `timeListenedSeconds` sums over.
         nonisolated var secondsLookup: [String: Int] {
-            cachedSeconds.merging(overrides) { _, override in override }
+            music.merging(cachedSeconds) { _, cached in cached }.merging(overrides) { _, override in override }
         }
     }
 
@@ -141,6 +149,7 @@ enum DurationEngine {
         for track in (try? context.fetch(FetchDescriptor<Track>())) ?? [] {
             if let seconds = track.durationOverrideSeconds { snapshot.overrides[track.identityKey] = seconds }
         }
+        snapshot.music = AppleMusicDetailsStorage.durationMap()
         return snapshot
     }
 

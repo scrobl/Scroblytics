@@ -34,6 +34,7 @@ enum AppleMusicDetailsChecks {
             matchChecks(check)
             valueChecks(check)
             tempoChecks(check)
+            lengthChecks(check)
             storageChecks(check)
             crossCheck(check)
             HeadlessTask.finish(failures)
@@ -46,9 +47,9 @@ enum AppleMusicDetailsChecks {
     private static func day(_ n: Int) -> Date { t0.addingTimeInterval(Double(n) * 86_400) }
 
     private static func row(
-        _ artist: String, _ title: String, album: String = "Album", albumArtist: String = "", genre: String = "", bpm: Int = 0, added: Int? = nil
+        _ artist: String, _ title: String, album: String = "Album", albumArtist: String = "", genre: String = "", bpm: Int = 0, added: Int? = nil, seconds: Int = 0
     ) -> AppleMusicDetailRow {
-        AppleMusicDetailRow(artist: artist, title: title, album: album, albumArtist: albumArtist, genre: genre, bpm: bpm, dateAdded: added.map(day))
+        AppleMusicDetailRow(artist: artist, title: title, album: album, albumArtist: albumArtist, genre: genre, bpm: bpm, dateAdded: added.map(day), seconds: seconds)
     }
 
     private static func play(_ artist: String, _ track: String, _ n: Int = 1) -> [ScrobbleSnapshot] {
@@ -152,6 +153,35 @@ enum AppleMusicDetailsChecks {
         check("only identical titles get a tempo: a spelling variant is a different key", Index.tempoByKey([row("A", "S (feat. X)", bpm: 100)])[key] == nil)
     }
 
+    // MARK: Length
+
+    private static func lengthChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let key = DurationEngine.cacheKey(artist: "A", track: "S")
+        check("a single length is used", Index.durationByKey([row("A", "S", seconds: 215)])[key] == 215)
+        check("copies within 2 seconds of each other give the middle one", Index.durationByKey([row("A", "S", seconds: 215), row("A", "S", seconds: 216), row("A", "S", seconds: 217)])[key] == 216)
+        check("copies that disagree by more than 2 seconds (two different takes) give none, rather than a guess", Index.durationByKey([row("A", "S", seconds: 215), row("A", "S", seconds: 290)])[key] == nil)
+        check("a length of zero means no length, and a copy without one is ignored", Index.durationByKey([row("A", "S", seconds: 0)])[key] == nil && Index.durationByKey([row("A", "S"), row("A", "S", seconds: 200)])[key] == 200)
+        check("the key is the one lengths use everywhere, so case and spacing around the names don't matter", Index.durationByKey([row(" a ", " s ", seconds: 100)])[key] == 100)
+        check("only identical titles get a length: a spelling variant is a different key", Index.durationByKey([row("A", "S (feat. X)", seconds: 100)])[key] == nil)
+
+        // Where Music's length sits among the sources: yours > found online > Music's > "nothing found online" > not looked up.
+        var snapshot = DurationEngine.Snapshot()
+        snapshot.overrides = ["entered": 250]
+        snapshot.cachedSeconds = ["entered": 200, "online": 200]
+        snapshot.cachedMisses = ["missed"]
+        snapshot.music = ["entered": 190, "online": 190, "missed": 190, "unlooked": 190]
+        check("a length you entered beats everything", snapshot.resolution(forKey: "entered") == .seconds(250))
+        check("a length found online beats the one in Music", snapshot.resolution(forKey: "online") == .seconds(200))
+        check("Music's length fills in where nothing was found online", snapshot.resolution(forKey: "missed") == .seconds(190))
+        check("…and where the track hasn't been looked up, so it never needs a lookup", snapshot.resolution(forKey: "unlooked") == .seconds(190))
+        check("without it, a miss is still a miss and an unknown is still pending", snapshot.resolution(forKey: "nothing") == .pending && DurationEngine.Snapshot(cachedMisses: ["m"]).resolution(forKey: "m") == .noMatch)
+        let lookup = snapshot.secondsLookup
+        check("the lookup time-listened sums over follows the same order", lookup["entered"] == 250 && lookup["online"] == 200 && lookup["missed"] == 190 && lookup["unlooked"] == 190)
+        let plays = (0..<3).map { _ in ScrobbleSnapshot(artistName: "A", albumName: "Al", trackName: "S", imageURL: nil, playedAt: t0) }
+        check("time listened counts a Music length for each play", DurationEngine.timeListenedSeconds(scrobbles: plays, lookup: [key: 215]) == 645)
+    }
+
     // MARK: Storage
 
     private static func storageChecks(_ report: (String, Bool, String) -> Void) {
@@ -160,7 +190,7 @@ enum AppleMusicDetailsChecks {
         let url = folder.appending(path: "library-details.json")
         defer { try? FileManager.default.removeItem(at: folder) }
         check("with no file there is nothing", AppleMusicDetailsStorage.load(from: url) == nil)
-        let file = AppleMusicDetailsFile(readAt: t0, rows: [row("A", "S", album: "Al", albumArtist: "AA", genre: "Rock", bpm: 99, added: 7), row("B", "T")])
+        let file = AppleMusicDetailsFile(readAt: t0, rows: [row("A", "S", album: "Al", albumArtist: "AA", genre: "Rock", bpm: 99, added: 7, seconds: 215), row("B", "T")])
         do { try AppleMusicDetailsStorage.save(file, to: url) } catch { check("a read can be saved", false, "\(error)"); return }
         let back = AppleMusicDetailsStorage.load(from: url)
         check("a saved read comes back exactly, dates included", back?.rows == file.rows && back?.readAt == t0)
@@ -171,6 +201,13 @@ enum AppleMusicDetailsChecks {
         check("a changed file is read afresh, not served from the earlier copy", AppleMusicDetailsStorage.load(from: url)?.rows.map(\.artist) == ["C"])
         AppleMusicDetailsStorage.delete(at: url)
         check("deleting it leaves nothing", AppleMusicDetailsStorage.load(from: url) == nil)
+        check("a read saved before lengths were kept still loads, with the length unknown", {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let old = "{\"version\":1,\"readAt\":0,\"rows\":[{\"artist\":\"A\",\"title\":\"S\",\"album\":\"Al\",\"albumArtist\":\"\",\"genre\":\"Rock\",\"bpm\":90}]}"
+            try? Data(old.utf8).write(to: url)
+            let loaded = AppleMusicDetailsStorage.load(from: url)
+            return loaded?.rows.first?.seconds == 0 && loaded?.rows.first?.genre == "Rock" && loaded?.rows.first?.dateAdded == nil
+        }())
         check("a file in an unknown format is ignored, not trusted", {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try? Data("{\"version\":99,\"readAt\":0,\"rows\":[]}".utf8).write(to: url)
@@ -276,6 +313,16 @@ enum AppleMusicDetailsChecks {
         let scrobbles = try await offMain { try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container) }
         let snapshots = QuerySnapshots(bpm: BPMEngine.loadSnapshot(context: container.mainContext), appleMusic: AppleMusicDetailsSnapshot.load())
         out.append("SAVED rows=\(rows.count) scrobbles=\(scrobbles.count)")
+        let durations = DurationEngine.loadSnapshot(context: container.mainContext)
+        var seen = Set<String>()
+        var filled: [(String, Int)] = []
+        for s in scrobbles where !s.trackName.isEmpty {
+            let key = DurationEngine.cacheKey(artist: s.artistName, track: s.trackName)
+            guard seen.insert(key).inserted else { continue }
+            if durations.cachedSeconds[key] == nil, durations.overrides[key] == nil, case .seconds(let seconds) = durations.resolution(forKey: key) { filled.append((key, seconds)) }
+        }
+        out.append("DURATION_FILLED_FROM_MUSIC \(filled.count) distinct=\(seen.count)")
+        for (key, seconds) in filled { out.append("DUR\t\(key)\t\(seconds)") }
         let loadStarted = Date()
         _ = AppleMusicDetailsStorage.load()
         let coldLoad = Date().timeIntervalSince(loadStarted)
@@ -326,7 +373,7 @@ enum AppleMusicDetailsChecks {
         let started = Date()
         let rows = try await AppleMusicFavoritesReader.readLibraryDetails()
         out.append(String(format: "READ %.2fs rows=%d", Date().timeIntervalSince(started), rows.count))
-        out.append("WITH_DATE \(rows.filter { $0.dateAdded != nil }.count) WITH_GENRE \(rows.filter { !$0.genre.isEmpty }.count) WITH_BPM \(rows.filter { $0.bpm > 0 }.count)")
+        out.append("WITH_DATE \(rows.filter { $0.dateAdded != nil }.count) WITH_GENRE \(rows.filter { !$0.genre.isEmpty }.count) WITH_BPM \(rows.filter { $0.bpm > 0 }.count) WITH_SECONDS \(rows.filter { $0.seconds > 0 }.count) USABLE_LENGTHS \(Index.durationByKey(rows).count)")
         let scrobbles = try await offMain { try await ScrobbleHistoryCache.shared.snapshots(container: container) }
         let buildStarted = Date()
         let index = Index(rows: rows, scrobbles: scrobbles)

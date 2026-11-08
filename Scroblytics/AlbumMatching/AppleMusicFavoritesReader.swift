@@ -246,7 +246,7 @@ enum AppleMusicFavoritesReader {
         return count
     }
 
-    /// Every song's artist, title, album, album artist, genre, tempo tag and the date it was added, for `AppleMusicDetailsIndex`. About six
+    /// Every song's artist, title, album, album artist, genre, tempo tag, length and the date it was added, for `AppleMusicDetailsIndex`. About six
     /// seconds on a 19,000-song library: JavaScript for Automation fetches the text columns in a moment, but its dates come back an hour off
     /// for songs from before a daylight-saving change, so the dates are read in AppleScript (whose arithmetic matches Last.fm's own
     /// timestamps, see `readRecentlyPlayed`), at the same time. Read-only; the two reads are checked to be of the same library.
@@ -258,26 +258,27 @@ enum AppleMusicFavoritesReader {
             async let dateRead = AppleMusicMatcher.runAppleScript(libraryDatesScript, arguments: [])
             let (text, dates) = try await (textRead, dateRead)
             let columns = text.trimmingCharacters(in: .newlines).components(separatedBy: columnSep)
-            guard columns.count == 7, let total = Int(columns[0]) else { throw ReadError.unexpectedOutput }
+            guard columns.count == 8, let total = Int(columns[0]) else { throw ReadError.unexpectedOutput }
             let names = items(columns[1]), artists = items(columns[2]), albumArtists = items(columns[3])
-            let albums = items(columns[4]), genres = items(columns[5]), tempos = items(columns[6])
+            let albums = items(columns[4]), genres = items(columns[5]), tempos = items(columns[6]), lengths = items(columns[7])
             // `items` drops an all-empty column to nothing, so a column that is empty for every song is rebuilt as that many blanks.
             func padded(_ list: [String]) -> [String] { list.isEmpty ? Array(repeating: "", count: total) : list }
-            let albumArtistList = padded(albumArtists), albumList = padded(albums), genreList = padded(genres), tempoList = padded(tempos)
+            let albumArtistList = padded(albumArtists), albumList = padded(albums), genreList = padded(genres), tempoList = padded(tempos), lengthList = padded(lengths)
             let dateText = dates.trimmingCharacters(in: .newlines)
             if dateText == "MISMATCH" { continue }
             let dateList = items(dateText)
             guard names.count == total, artists.count == total, albumArtistList.count == total, albumList.count == total, genreList.count == total,
-                  tempoList.count == total, dateList.count == total else { continue }
+                  tempoList.count == total, lengthList.count == total, dateList.count == total else { continue }
             var rows: [AppleMusicDetailRow] = []
             rows.reserveCapacity(total)
             for i in 0..<total {
                 let tempo = Int(Double(tempoList[i]) ?? 0)
+                let length = Int((Double(lengthList[i]) ?? 0).rounded())
                 var added: Date?
                 if let seconds = Double(dateList[i]) { added = Date(timeIntervalSince1970: seconds) }
                 rows.append(AppleMusicDetailRow(
                     artist: artists[i], title: names[i], album: albumList[i], albumArtist: albumArtistList[i], genre: genreList[i],
-                    bpm: tempo, dateAdded: added
+                    bpm: tempo, dateAdded: added, seconds: length
                 ))
             }
             return rows
@@ -288,9 +289,9 @@ enum AppleMusicFavoritesReader {
     private static let libraryTextScript = """
     function run(argv) {
       var tracks = Application("Music").libraryPlaylists[0].tracks;
-      var names = tracks.name(), artists = tracks.artist(), albumArtists = tracks.albumArtist(), albums = tracks.album(), genres = tracks.genre(), tempos = tracks.bpm();
+      var names = tracks.name(), artists = tracks.artist(), albumArtists = tracks.albumArtist(), albums = tracks.album(), genres = tracks.genre(), tempos = tracks.bpm(), lengths = tracks.duration();
       var rs = String.fromCharCode(30), gs = String.fromCharCode(29);
-      return String(names.length) + gs + names.join(rs) + gs + artists.join(rs) + gs + albumArtists.join(rs) + gs + albums.join(rs) + gs + genres.join(rs) + gs + tempos.join(rs);
+      return String(names.length) + gs + names.join(rs) + gs + artists.join(rs) + gs + albumArtists.join(rs) + gs + albums.join(rs) + gs + genres.join(rs) + gs + tempos.join(rs) + gs + lengths.join(rs);
     }
     """
 

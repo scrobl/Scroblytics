@@ -1,7 +1,7 @@
 import Foundation
 
 /// Registry fields that WRAP `DurationEngine`. Precedence (override > cached
-/// Deezer value > confirmed miss > unresolved) is `DurationEngine.Snapshot.resolution`
+/// Deezer value > Apple Music library length > confirmed miss > unresolved) is `DurationEngine.Snapshot.resolution`
 /// — the same function `resolveDurationLookup` uses — and Time Listened is the
 /// engine's own `timeListenedSeconds` sum, called once per entity.
 extension QueryFieldRegistry {

@@ -98,13 +98,14 @@ extension HelpContent {
         HelpArticle(
             id: "apple-music-details",
             title: "Apple Music library details",
-            summary: "Date added, genre and tempo from your Music library, for Query and the song, album and artist pages.",
+            summary: "Date added, genre, tempo and length from your Music library, for Query, the song, album and artist pages, and where a tempo or length was missing.",
             blocks: [
-                .paragraph("Last.fm knows when a song was scrobbled, not when you got it. Your Music library does, and it also holds each song's genre and tempo tag. Turn on **Settings › Sync › Apple Music library details** and Scroblytics reads those three things, keeps them in a file on this Mac, and uses them in three places. It only reads: nothing is changed in Music or on Last.fm, and nothing leaves your Mac."),
+                .paragraph("Last.fm knows when a song was scrobbled, not when you got it. Your Music library does, and it also holds each song's genre, tempo tag and length. Turn on **Settings › Sync › Apple Music library details** and Scroblytics reads those four things, keeps them in a file on this Mac, and uses them in the places below. It only reads: nothing is changed in Music or on Last.fm, and nothing leaves your Mac."),
                 .heading("Where it shows up"),
                 .bullets([
                     "**Query** gains two fields, **Date added to Apple Music** and **Apple Music genre**, for songs, albums and artists (an album or artist gets the earliest date added and the most common genre among its songs). A song that isn't in your library, and everything before the first read, has no value.",
                     "**Song, album and artist pages** show **Added to Music** and **Genre** tiles once a read has been saved. A song that isn't in your library says so.",
+                    "**Length** gets one more source, the same way. The song's length in your library fills in where Deezer had nothing and you entered none, so those songs get a length on their page, in **Time listened** and out of the Missing Data list, and are never looked up on Deezer. A length you entered wins, and a length found online wins over the one in your library. Songs missing a length that this can't fill (no identical title, or copies that disagree by more than 2 seconds) can still use Missing Data's **Import from Apple Music**, which matches more loosely.",
                     "**Tempo** gets one more source. The tempo tag in your library fills in where no tempo was found online and you entered none, so those songs show it on their page and in the **BPM**, **Tempo range** and **Tempo source** fields (the source reads Apple Music), and are never looked up online. A tempo you entered wins, and a tempo found online wins over the tag.",
                 ]),
                 .heading("When it reads"),
@@ -112,8 +113,8 @@ extension HelpContent {
                 .heading("How songs are matched"),
                 .paragraph("A Last.fm song is just an artist name and a title, so matching it to a library song is done cautiously."),
                 .steps([
-                    "**The same artist and title** (capitals and spacing don't matter) is the song. If the library has two copies, such as a file and a streaming copy, the earliest date added counts, the genre most copies carry, and a tempo only when the copies agree to within 2 BPM.",
-                    "**A different spelling of the same song** (the library says “Title”, Last.fm says “Title (feat. Someone)”) is matched only when it pairs one to one: exactly one library title and exactly one Last.fm title are left once the identical ones are paired. Tempo is the exception: it belongs to a recording, so only identical titles ever get a tempo.",
+                    "**The same artist and title** (capitals and spacing don't matter) is the song. If the library has two copies, such as a file and a streaming copy, the earliest date added counts, the genre most copies carry, and a tempo only when the copies agree to within 2 BPM (a length, 2 seconds).",
+                    "**A different spelling of the same song** (the library says “Title”, Last.fm says “Title (feat. Someone)”) is matched only when it pairs one to one: exactly one library title and exactly one Last.fm title are left once the identical ones are paired. Tempo and length are the exception: they belong to a recording, so only identical titles ever get them.",
                     "**Anything else is skipped.** When the library has more than one title a Last.fm song could be, it gets nothing from Music, and **Songs that couldn't be matched** in Settings lists them with the candidates, so you can make the titles agree. A library title that already belongs to an identical Last.fm title is never lent to another spelling.",
                 ]),
                 .paragraph("Date added is the date in your library as Music records it. If part of your library was imported or rebuilt in one go, many songs share that date."),

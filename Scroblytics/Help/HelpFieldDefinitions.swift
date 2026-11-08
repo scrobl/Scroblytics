@@ -201,7 +201,7 @@ enum HelpFieldDefinitions {
     // MARK: Duration
 
     private static let duration: [String: String] = [
-        "duration": "The track’s length. You type it in minutes (it is stored in seconds). A length you entered wins over the one found online (Deezer). “No value” means none could be found and won’t be retried; a lookup still running matches neither a value nor “is missing”. See [Plays and time listened](help://metrics-plays-time).",
+        "duration": "The track’s length. You type it in minutes (it is stored in seconds). A length you entered wins over the one found online (Deezer), and a length found online wins over the one in your Apple Music library, which is used where nothing was found. “No value” means none could be found and won’t be retried; a lookup still running matches neither a value nor “is missing”. See [Plays and time listened](help://metrics-plays-time).",
         "timeListened": "Σ track length × plays over the tracks played in the period (or date scope). You type it in hours. A track with no length found contributes 0, and while any played track’s length is still being looked up the result is pending, so a partial total is never compared.",
     ]
 

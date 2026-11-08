@@ -19,6 +19,8 @@ comfortable with that. The same information is available inside the app under **
   Actions, a Last.fm session key) are stored in your **macOS Keychain**, never in the database, in backups or in logs.
 - **Your Music library.** With your permission the app reads your Music app through macOS's scripting interface for features
   such as matching albums, auditing loved tracks, finding gaps and exporting playlists. That information is not sent anywhere.
+  If you turn on *Apple Music library details* in Settings, the app keeps a copy of when each song was added to your library, its
+  genre and its tempo tag in a file beside the database (`Scroblytics/MusicLibrary/`), never in backups, which you can delete in Settings.
   The app changes Music only when you ask it to: *Create Apple Music Playlist* (which creates a playlist, or adds tracks to one
   you pick, from tracks already in your library), the Loved Status Audit's *Remove from Favorites…* (after you confirm), and the
   Release Year Audit's *Update Apple Music* (which changes the Year of the tracks it lists, after you confirm).

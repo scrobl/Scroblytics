@@ -44,7 +44,7 @@ struct ArtistDetailView: View {
                     entity: .artist, name: identity.name, subtitle: nil, tertiary: nil,
                     imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
-                    facts: EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? [],
+                    facts: AppleMusicDetailsLookup.facts(model.appleMusic, entity: "artist") + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -69,7 +69,7 @@ struct ArtistDetailView: View {
         .navigationTitle(identity.name)
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { return }
+            if model.isLoaded(for: identity.id) { await model.loadAppleMusic(); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             model.loadStats(range: range)
@@ -77,7 +77,8 @@ struct ArtistDetailView: View {
             async let tags: Void = model.loadTags()
             async let time: Void = model.loadTimeListened(range: range)
             async let lean: Void = model.loadWeatherLean(range: range)
-            _ = await (ranks, tags, time, lean)
+            async let music: Void = model.loadAppleMusic()
+            _ = await (ranks, tags, time, lean, music)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }

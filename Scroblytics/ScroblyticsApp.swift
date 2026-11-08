@@ -172,6 +172,7 @@ struct ScroblyticsApp: App {
         SongsWithoutAlbumsChecks.runHeadlessIfRequested(container: modelContainer)
         UnscrobbledPlaysChecks.runHeadlessIfRequested(container: modelContainer)
         ScrobblerWatchChecks.runHeadlessIfRequested(container: modelContainer)
+        AppleMusicDetailsChecks.runHeadlessIfRequested(container: modelContainer)
         Task { @MainActor in ProgressSimulator.startIfRequested() }
         TestProfile.seedAccountIfRequested()
         TestProfile.seedRealLastfmAccountIfRequested()

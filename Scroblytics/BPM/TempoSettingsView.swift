@@ -13,7 +13,7 @@ struct TempoSettingsView: View {
     var body: some View {
         Form {
             Section("Tempo sources") {
-                Text("A track’s tempo (BPM) is looked up on GetSongBPM first, then on Deezer. A tempo you enter on the track page always wins. GetSongBPM finds more tracks and adds time signature and key. The app includes its own GetSongBPM key; you can use your own below instead.")
+                Text("A track’s tempo (BPM) is looked up on GetSongBPM first, then on Deezer. A tempo you enter on the track page always wins, and the tempo tag in your Apple Music library fills in where nothing was found online (Settings › Sync). GetSongBPM finds more tracks and adds time signature and key. The app includes its own GetSongBPM key; you can use your own below instead.")
                     .font(AppTypography.supporting).foregroundStyle(.secondary)
                 HelpLinkButton(articleID: "tempo-lookup", title: "How tempo lookup works")
             }

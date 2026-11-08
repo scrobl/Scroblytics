@@ -19,7 +19,7 @@ enum QueryHeadlessRunner {
         let snapshots = QuerySnapshots(
             popularity: popularity?.snapshot ?? .empty, durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates,
             turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, flaggedKeys: loaded.flaggedKeys,
-            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, weather: loaded.weather, images: loaded.images
+            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, appleMusic: loaded.appleMusic, weather: loaded.weather, images: loaded.images
         )
         let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
             let inScope = validated.spec.countedPlays(scrobbles, weather: snapshots.weather)

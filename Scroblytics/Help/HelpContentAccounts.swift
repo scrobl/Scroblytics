@@ -96,6 +96,30 @@ extension HelpContent {
             ]
         ),
         HelpArticle(
+            id: "apple-music-details",
+            title: "Apple Music library details",
+            summary: "Date added, genre and tempo from your Music library, for Query and the song, album and artist pages.",
+            blocks: [
+                .paragraph("Last.fm knows when a song was scrobbled, not when you got it. Your Music library does, and it also holds each song's genre and tempo tag. Turn on **Settings › Sync › Apple Music library details** and Scroblytics reads those three things, keeps them in a file on this Mac, and uses them in three places. It only reads: nothing is changed in Music or on Last.fm, and nothing leaves your Mac."),
+                .heading("Where it shows up"),
+                .bullets([
+                    "**Query** gains two fields, **Date added to Apple Music** and **Apple Music genre**, for songs, albums and artists (an album or artist gets the earliest date added and the most common genre among its songs). A song that isn't in your library, and everything before the first read, has no value.",
+                    "**Song, album and artist pages** show **Added to Music** and **Genre** tiles once a read has been saved. A song that isn't in your library says so.",
+                    "**Tempo** gets one more source. The tempo tag in your library fills in where no tempo was found online and you entered none, so those songs show it on their page and in the **BPM**, **Tempo range** and **Tempo source** fields (the source reads Apple Music), and are never looked up online. A tempo you entered wins, and a tempo found online wins over the tag.",
+                ]),
+                .heading("When it reads"),
+                .paragraph("Off until you turn it on, because the first read asks macOS for permission to control Music. After that it never opens Music or reads on a timer of its own. After each sync, and only while Music is already open, it asks Music how many songs the library holds. If the number has changed (songs were added or removed), or the last read is over 12 hours old (which is how an edited genre or tempo tag is noticed), it reads the whole library, which takes about eight seconds in the background. **Refresh Now** reads at once. A song added while Music was closed shows up at the first sync after Music is opened. **Forget What Was Read** deletes the file."),
+                .heading("How songs are matched"),
+                .paragraph("A Last.fm song is just an artist name and a title, so matching it to a library song is done cautiously."),
+                .steps([
+                    "**The same artist and title** (capitals and spacing don't matter) is the song. If the library has two copies, such as a file and a streaming copy, the earliest date added counts, the genre most copies carry, and a tempo only when the copies agree to within 2 BPM.",
+                    "**A different spelling of the same song** (the library says “Title”, Last.fm says “Title (feat. Someone)”) is matched only when it pairs one to one: exactly one library title and exactly one Last.fm title are left once the identical ones are paired. Tempo is the exception: it belongs to a recording, so only identical titles ever get a tempo.",
+                    "**Anything else is skipped.** When the library has more than one title a Last.fm song could be, it gets nothing from Music, and **Songs that couldn't be matched** in Settings lists them with the candidates, so you can make the titles agree. A library title that already belongs to an identical Last.fm title is never lent to another spelling.",
+                ]),
+                .paragraph("Date added is the date in your library as Music records it. If part of your library was imported or rebuilt in one go, many songs share that date."),
+            ]
+        ),
+        HelpArticle(
             id: "tempo-lookup",
             title: "Tempo (BPM) and its sources",
             summary: "Where a track’s tempo comes from, how to correct it, and the optional GetSongBPM key.",
@@ -106,6 +130,7 @@ extension HelpContent {
                     "**Your correction.** A tempo you enter on the track page always wins, and is included in a [backup](help://data-backup).",
                     "**GetSongBPM**, using the key built into the app (or your own, if you save one in Settings › Tempo). It also supplies a **time signature** and **key** (the Time signature and Musical key fields). A result is accepted only if its artist and title match the track, so a different artist’s song of the same name is not used.",
                     "**Deezer**, which needs no sign-in. It is the fallback when GetSongBPM has no match or can’t be used.",
+                    "**Apple Music**, the tempo tag in your own library, if you have turned on [Apple Music library details](help://apple-music-details). It is used only where nothing was found online and you entered nothing, and only for a song with the same artist and title; those songs are then never looked up online.",
                 ]),
                 .paragraph("When neither source has a tempo, “no value” is remembered and the track is looked up again after about three months. A lookup that fails for a temporary reason (no connection, a rate limit) is never remembered as “no value”; it is retried. GetSongBPM’s allowance (3,000 lookups an hour) is shared by every copy of the app, so each Mac looks up GetSongBPM slowly, about one track every seven seconds, so working through 1,500 tracks takes a few hours. You can quit at any time; it carries on at the next launch."),
                 .heading("Correcting a tempo"),
@@ -140,7 +165,7 @@ extension HelpContent {
                 ]),
                 .heading("Things that stay on your Mac"),
                 .bullets([
-                    "Your **Apple Music / Music app** library. The app reads it through Music’s own scripting for Fix Album Match, Loved Status Audit, Library Gaps, Songs Without Albums, Unscrobbled Plays (and its optional check after each sync), importing durations, and playlist export. None of it is sent anywhere. Scroblytics changes Music only when you ask it to: **Create Apple Music Playlist** makes a playlist (or adds to one you pick) from tracks already in your library; if you turn on **Keep this playlist updated after each sync** for a playlist, Scroblytics then changes that one playlist (found by its Music ID, never the rest of your library) after each sync, only while Music is open and never launching it (see [Auto-Updating Playlists](help://tool-auto-playlists)); the Loved Status Audit’s **Remove from Favorites…** un-favorites entries that aren’t in your library, after you confirm; and the Release Year Audit’s **Update Apple Music** sets the Year of the tracks it lists to the year shown in Scroblytics, after you confirm.",
+                    "Your **Apple Music / Music app** library. The app reads it through Music’s own scripting for Fix Album Match, Loved Status Audit, Library Gaps, Songs Without Albums, Unscrobbled Plays (and its optional check after each sync), the optional Apple Music library details, importing durations, and playlist export. None of it is sent anywhere. Scroblytics changes Music only when you ask it to: **Create Apple Music Playlist** makes a playlist (or adds to one you pick) from tracks already in your library; if you turn on **Keep this playlist updated after each sync** for a playlist, Scroblytics then changes that one playlist (found by its Music ID, never the rest of your library) after each sync, only while Music is open and never launching it (see [Auto-Updating Playlists](help://tool-auto-playlists)); the Loved Status Audit’s **Remove from Favorites…** un-favorites entries that aren’t in your library, after you confirm; and the Release Year Audit’s **Update Apple Music** sets the Year of the tracks it lists to the year shown in Scroblytics, after you confirm.",
                     "Your **database, images and preferences**. See [Where your data lives](help://data-storage).",
                     "A small **activity log** of what the app did (no music, no account name, no keys), used only by [Report a Problem](help://report-a-problem). It is sent nowhere unless you choose to share it.",
                 ]),

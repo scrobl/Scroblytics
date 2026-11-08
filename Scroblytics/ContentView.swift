@@ -302,6 +302,7 @@ struct ContentView: View {
             await flaggedTracksStore.load(container: modelContainer)
             await libraryGapBadgeStore.load(container: modelContainer)
             ScrobblerWatchStore.shared.start(container: modelContainer)
+            AppleMusicDetailsStore.shared.start(container: modelContainer)
             await popularityStore.start(container: modelContainer, work: backgroundWork, warm: !DebugFlags.offline && !ConnectivityGate.isOffline)
             await tagStore.start(container: modelContainer, work: backgroundWork, warm: (!DebugFlags.offline || DebugFlags.tagSweep) && !ConnectivityGate.isOffline)
             await seedReleaseDates()

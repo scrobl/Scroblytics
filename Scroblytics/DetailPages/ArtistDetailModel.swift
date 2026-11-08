@@ -23,6 +23,16 @@ final class ArtistDetailModel {
     var timeListenedSeconds: Int?
     /// What weather this artist is played in more than usual (Settings › Weather); no tile unless there is something to say.
     var weatherLean = EntityWeatherLean.Result.unavailable
+    /// What the saved read of the Apple Music library says about this artist (earliest date added, common genre); nil until a read has been saved.
+    var appleMusic: AppleMusicDetailsInfo?
+
+    func loadAppleMusic() async {
+        guard let context else { return }
+        let requested = identity
+        let info = await AppleMusicDetailsLookup.artist(requested.name, container: context.container)
+        guard !Task.isCancelled, identity.id == requested.id else { return }
+        appleMusic = info
+    }
 
     func loadWeatherLean(range: DateRange) async {
         guard let context else { return }
@@ -42,6 +52,7 @@ final class ArtistDetailModel {
         yourTags = .loading
         timeListenedSeconds = nil
         weatherLean = .unavailable
+        appleMusic = nil
     }
 
     func loadOldestScrobbleDate() {

@@ -208,9 +208,11 @@ enum HelpFieldDefinitions {
     // MARK: Tempo
 
     private static let tempo: [String: String] = [
-        "bpm": "The track’s tempo in beats per minute. A tempo you entered wins over the one found online (GetSongBPM, then Deezer). “No value” means none could be found; it is looked up again after about three months. A lookup still running matches neither a value nor “is missing”.",
+        "bpm": "The track’s tempo in beats per minute. A tempo you entered wins over the one found online (GetSongBPM, then Deezer), and a tempo found online wins over the tag in your Apple Music library, which is used where nothing was found. “No value” means none could be found; it is looked up again after about three months. A lookup still running matches neither a value nor “is missing”.",
         "tempoBucket": "The track’s tempo as a preset range: Slow (under 90 BPM), Moderate (90 up to 120), Upbeat (120 up to 140), Fast (140 up to 160) or Very fast (160 and over). Use BPM for an exact span.",
-        "bpmSource": "Where the track’s tempo came from: GetSongBPM, Deezer, or Entered by you. A track with no tempo never matches, not even “is not”.",
+        "musicDateAdded": "When the song was added to your Apple Music library; for an album or artist, the earliest of its songs. Last.fm only knows when a song was scrobbled, so this is how to ask about when you got something. It comes from the saved read of your library (Settings › Sync › Apple Music library details), so a song that isn’t in your library, and everything before the first read, has no value.",
+        "musicGenre": "The genre your Apple Music library holds for the song; for an album or artist, the genre most of its songs carry. It comes from the saved read of your library (Settings › Sync › Apple Music library details), so a song that isn’t in your library, and everything before the first read, has no value.",
+        "bpmSource": "Where the track’s tempo came from: GetSongBPM, Deezer, Apple Music (the tempo tag in your library), or Entered by you. A track with no tempo never matches, not even “is not”.",
         "timeSignature": "The track’s time signature, such as 4/4 or 3/4, as GetSongBPM reports it. Tempos found by Deezer or entered by you carry none unless GetSongBPM also knew the track, so those show no value.",
         "musicalKey": "The track’s musical key, such as Cm or F#, as GetSongBPM reports it. Tempos found by Deezer or entered by you carry none unless GetSongBPM also knew the track, so those show no value.",
     ]

@@ -8,7 +8,7 @@ import Foundation
 /// may omit fields that do not apply, but must not reorder the remaining ones.
 /// Every selectable field must also show its required `QueryField.help` tooltip.
 enum QueryFieldGroup: Int, CaseIterable, Sendable, Comparable {
-    case identity, scrobble, session, flags, tags, volume, ranking, engagement, recency, sentiment, dates, context, duration, tempo, metadata, similarity
+    case identity, scrobble, session, flags, tags, volume, ranking, engagement, recency, sentiment, dates, context, duration, tempo, metadata, similarity, appleMusic
 
     var title: String {
         switch self {
@@ -28,6 +28,7 @@ enum QueryFieldGroup: Int, CaseIterable, Sendable, Comparable {
         case .tempo: "Tempo"
         case .metadata: "Album metadata"
         case .similarity: "Similar sounds"
+        case .appleMusic: "Apple Music"
         }
     }
 

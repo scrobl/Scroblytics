@@ -60,6 +60,8 @@ struct QuerySnapshots: Sendable {
     var entityTags: EntityTagsSnapshot = .empty
     /// Saved Apple Music library status (Library Gaps); empty where nothing loads it.
     var libraryPresence: LibraryPresenceSnapshot = .empty
+    /// What Apple Music knows about each song (date added, genre), from the saved read of the library; empty until it has been read.
+    var appleMusic: AppleMusicDetailsSnapshot = .empty
     /// The weather at each hour for the person's home place (Settings › Weather); empty while weather is off or not downloaded.
     var weather: WeatherSnapshot = .empty
     var images: ImageStatusSnapshot = .empty

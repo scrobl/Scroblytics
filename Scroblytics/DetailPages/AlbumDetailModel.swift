@@ -42,6 +42,8 @@ final class AlbumDetailModel {
     var stats: EntityStats?
     var errorMessage: String?
     var yearlyTopRanks: [TopChartsEngine.YearlyRank] = []
+    /// What the saved read of the Apple Music library says about this album (earliest date added, common genre); nil until a read has been saved.
+    var appleMusic: AppleMusicDetailsInfo?
     var communityTags: TagsLoadState = .loading
     var yourTags: TagsLoadState = .loading
     var timeListenedSeconds: Int?
@@ -62,10 +64,19 @@ final class AlbumDetailModel {
         weatherLean = result
     }
 
+    func loadAppleMusic() async {
+        guard let context else { return }
+        let requested = identity
+        let info = await AppleMusicDetailsLookup.album(artist: requested.artist, album: requested.name, container: context.container)
+        guard !Task.isCancelled, identity.id == requested.id else { return }
+        appleMusic = info
+    }
+
     func bind(identity: AlbumIdentity, context: ModelContext) {
         self.identity = identity
         self.context = context
         weatherLean = .unavailable
+        appleMusic = nil
         stats = nil
         errorMessage = nil
         yearlyTopRanks = []

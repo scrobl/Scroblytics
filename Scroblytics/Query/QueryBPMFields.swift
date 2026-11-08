@@ -31,7 +31,7 @@ extension QueryFieldRegistry {
         bucket.choices = TempoBucket.allCases.map(\.rawValue)
         var source = tempoField(
             id: "bpmSource", name: "Tempo source", type: .text,
-            help: "Where the track’s tempo came from: GetSongBPM, Deezer, or entered by you. A track with no tempo never matches.",
+            help: "Where the track’s tempo came from: GetSongBPM, Deezer, Apple Music (the tempo tag in your library), or entered by you. A track with no tempo never matches.",
             column: .standard(for: .text, width: 130)
         ) { .text($0.source.label) }
         source.choices = BPMSource.allCases.map(\.label)

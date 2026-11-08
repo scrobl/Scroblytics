@@ -151,7 +151,7 @@ extension QueryFieldRegistry {
     // MARK: The registry the app uses
 
     /// Every field of artists, albums and tracks (what a play's inherited fields are made from).
-    static let itemFields = coreFields + fadingFields + popularityFields + durationFields + bpmFields + releaseDateFields + climbingFields + milestoneFields + turnoverFields + lovedFields + libraryFields + flaggedFields + tagFields + imageFields + matchFields + editionFields + weatherFields
+    static let itemFields = coreFields + fadingFields + popularityFields + durationFields + bpmFields + releaseDateFields + climbingFields + milestoneFields + turnoverFields + lovedFields + libraryFields + flaggedFields + tagFields + imageFields + matchFields + editionFields + weatherFields + appleMusicFields
 
     static let standard = QueryFieldRegistry(fields: itemFields + scrobbleFields + scrobbleSessionFields + sessionFields + inheritedScrobbleFields)
 }

@@ -6,12 +6,15 @@ enum BPMSource: String, Sendable, CaseIterable {
     case getSongBPM = "getsongbpm"
     case deezer
     case manual
+    /// The tempo tag in the person's own Apple Music library (`AppleMusicDetailsStorage`): used only where nothing was found online.
+    case appleMusic = "applemusic"
 
     var label: String {
         switch self {
         case .getSongBPM: "GetSongBPM"
         case .deezer: "Deezer"
         case .manual: "Entered by you"
+        case .appleMusic: "Apple Music"
         }
     }
 }
@@ -72,6 +75,8 @@ enum BPMEngine {
         var cached: [String: Resolved] = [:]
         var cachedMisses: Set<String> = []
         var overrides: [String: Double] = [:]
+        /// Tempo tags from the Apple Music library, by `cacheKey`: fills in only where the lookups found nothing.
+        var music: [String: Double] = [:]
 
         nonisolated static let empty = Snapshot()
 
@@ -84,6 +89,8 @@ enum BPMEngine {
                 return .value(resolved)
             }
             if let resolved = cached[key] { return .value(resolved) }
+            // Music's own tag beats "nothing found online", and means the track never needs a lookup at all.
+            if let bpm = music[key] { return .value(Resolved(bpm: bpm, source: .appleMusic)) }
             if cachedMisses.contains(key) { return .noMatch }
             return .pending
         }
@@ -111,6 +118,7 @@ enum BPMEngine {
         for track in (try? context.fetch(FetchDescriptor<Track>())) ?? [] {
             if let bpm = track.bpmOverride { snapshot.overrides[track.identityKey] = bpm }
         }
+        snapshot.music = AppleMusicDetailsStorage.tempoMap()
         return snapshot
     }
 
@@ -120,6 +128,7 @@ enum BPMEngine {
         var track = FetchDescriptor<Track>(predicate: #Predicate { $0.identityKey == key })
         track.fetchLimit = 1
         if let bpm = (try? context.fetch(track).first)?.bpmOverride { snapshot.overrides[key] = bpm }
+        if let bpm = AppleMusicDetailsStorage.tempoMap()[key] { snapshot.music[key] = bpm }
         var entry = FetchDescriptor<TrackBPMCacheEntry>(predicate: #Predicate { $0.cacheKey == key })
         entry.fetchLimit = 1
         if let cached = try? context.fetch(entry).first {

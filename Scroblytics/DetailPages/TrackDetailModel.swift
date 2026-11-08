@@ -31,11 +31,21 @@ final class TrackDetailModel {
     var resolvedBPM: BPMEngine.Resolved?
     var overrideBPM: Double?
     var isLoadingBPM = false
+    /// What the saved read of the Apple Music library says about this song (date added, genre); nil until a read has been saved.
+    var appleMusic: AppleMusicDetailsInfo?
     var releaseDate: String?
     var primaryAlbum: String?
     var isLoadingReleaseDate = false
     var isTogglingLoved = false
     var lovedError: String?
+
+    func loadAppleMusic() async {
+        guard let context else { return }
+        let requested = identity
+        let info = await AppleMusicDetailsLookup.track(artist: requested.artist, track: requested.name, container: context.container)
+        guard !Task.isCancelled, identity.id == requested.id else { return }
+        appleMusic = info
+    }
 
     /// Points the model at a track and clears what belonged to the previous one.
     func bind(identity: TrackIdentity, context: ModelContext) {
@@ -54,6 +64,7 @@ final class TrackDetailModel {
         resolvedBPM = nil
         overrideBPM = nil
         isLoadingBPM = false
+        appleMusic = nil
         releaseDate = nil
         primaryAlbum = nil
         isLoadingReleaseDate = false
@@ -242,6 +253,6 @@ final class TrackDetailModel {
                 corrected: resolvedBPM != nil && overrideBPM != nil, systemImage: "metronome",
                 help: resolvedBPM.map { "From \($0.source.label)" }, onEdit: onEditTempo
             ),
-        ]
+        ] + AppleMusicDetailsLookup.facts(appleMusic, entity: "song")
     }
 }

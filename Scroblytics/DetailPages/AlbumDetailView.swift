@@ -48,6 +48,7 @@ struct AlbumDetailView: View {
                     // with none (or one whose turnover is still loading) has nothing to fix yet.
                     onFixAlbumMatch: model.currentGroup == nil ? nil : { showingFixSheet = true },
                     facts: model.facts(onEditReleaseDate: { showingReleaseDateEdit = true }, onFixAlbumMatch: { showingFixSheet = true })
+                        + AppleMusicDetailsLookup.facts(model.appleMusic, entity: "album")
                         + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
                     sharePeriodLabel: periodLabel
                 ) {
@@ -79,7 +80,7 @@ struct AlbumDetailView: View {
         .navigationTitle(identity.name)
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { return }
+            if model.isLoaded(for: identity.id) { await model.loadAppleMusic(); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
@@ -93,7 +94,8 @@ struct AlbumDetailView: View {
             async let release: Void = model.loadReleaseDate()
             async let ranks: Void = model.loadYearlyTopRanks()
             async let lean: Void = model.loadWeatherLean(range: current)
-            _ = await (turnover, stats, tags, time, release, ranks, lean)
+            async let music: Void = model.loadAppleMusic()
+            _ = await (turnover, stats, tags, time, release, ranks, lean, music)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }

@@ -56,6 +56,11 @@ extension HelpContent {
                     blocks: [.fieldGroup(.tempo)]),
         HelpArticle(id: "fields-album", title: "Album metadata", summary: "How an album matched Last.fm.",
                     blocks: [.fieldGroup(.metadata)]),
+        HelpArticle(id: "fields-apple-music", title: "Apple Music", summary: "When a song was added to your library, and its genre.",
+                    blocks: [
+                        .paragraph("These fields come from the saved read of your Music library, so they work while Music is closed, and have no value until it has been read. See [Apple Music library details](help://apple-music-details). Tempo from the same read appears in the [Tempo](help://fields-tempo) fields."),
+                        .fieldGroup(.appleMusic),
+                    ]),
         HelpArticle(id: "fields-similar", title: "Similar sounds", summary: "Match score fields, available only for Similar Sounds results.",
                     blocks: [
                         .paragraph("These two fields only mean something for a generated pool of similar music, so they appear in the [Similar Sounds](help://tool-similar-sounds) refinement conditions and not in the Query tab’s pickers."),

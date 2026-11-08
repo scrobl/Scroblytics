@@ -25,6 +25,10 @@ enum LayoutSnapshots {
             snapshotPlaylistDialog(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_MUSICDETAILS"] {
+            snapshotMusicDetails(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_TOOLCONTROLS"] {
             snapshotToolControls(into: folder)
             return
@@ -319,6 +323,65 @@ enum LayoutSnapshots {
                 }
                 await render(Form { UpdateSettingsSection() }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings")
             }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_MUSICDETAILS=<folder>`: the Added to Music and Genre tiles beside the page's other tiles (in the three states they can
+    /// be in), the Settings › Sync "Apple Music library details" section off and on, and the sheet of songs that couldn't be matched, light and dark.
+    @MainActor
+    private static func snapshotMusicDetails(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let appearance = scheme == "dark" ? NSAppearance.Name.darkAqua : .aqua
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                }
+            }
+            let base: [DetailFact] = [
+                DetailFact(id: "released", label: "Released", value: .text("Mar 14, 1994"), systemImage: "calendar"),
+                DetailFact(id: "length", label: "Length", value: .text("3:42"), systemImage: "clock"),
+                DetailFact(id: "tempo", label: "Tempo", value: .text("118 BPM"), detail: "4/4 · Cm", mayHaveDetail: true, systemImage: "metronome", help: "From Apple Music"),
+            ]
+            let inLibrary = AppleMusicDetailsInfo(added: Date(timeIntervalSince1970: 1_700_000_000), genre: "Alternative", inLibrary: true, matchedTitle: nil)
+            let viaSpelling = AppleMusicDetailsInfo(added: Date(timeIntervalSince1970: 1_600_000_000), genre: "Indie Rock", inLibrary: true, matchedTitle: "Song")
+            let notThere = AppleMusicDetailsInfo(added: nil, genre: nil, inLibrary: false, matchedTitle: nil)
+            let suite = UserDefaults(suiteName: "apple-music-details-snapshot")!
+            suite.removePersistentDomain(forName: "apple-music-details-snapshot")
+            let off = AppleMusicDetailsStore(defaults: suite)
+            try? AppleMusicDetailsStorage.save(AppleMusicDetailsFile(readAt: Date().addingTimeInterval(-600), rows: [
+                AppleMusicDetailRow(artist: "A", title: "S", album: "Al", albumArtist: "", genre: "Rock", bpm: 100, dateAdded: Date()),
+            ]))
+            suite.set(true, forKey: AppleMusicDetailsStore.enabledKey)
+            let on = AppleMusicDetailsStore(defaults: suite)
+            let songs = [
+                AppleMusicDetailsIndex.Unmatched(artist: "Artist A", track: "Song (feat. Z)", plays: 42, candidates: ["Artist A — Song (feat. X)", "Artist A — Song (feat. Y)"]),
+                AppleMusicDetailsIndex.Unmatched(artist: "Artist B", track: "Other Song (Remastered)", plays: 7, candidates: ["Artist B — Other Song", "Artist B — Other Song (Live)", "Artist B — Other Song (Demo)"]),
+            ]
+            for scheme in ["dark", "light"] {
+                for width in [900, 520, 380] as [CGFloat] {
+                    await render(VStack(alignment: .leading, spacing: 12) {
+                        DetailFactGrid(facts: base + AppleMusicDetailsLookup.facts(inLibrary, entity: "song"), reservesDetailLine: true)
+                        DetailFactGrid(facts: base + AppleMusicDetailsLookup.facts(viaSpelling, entity: "song"), reservesDetailLine: true)
+                        DetailFactGrid(facts: base + AppleMusicDetailsLookup.facts(notThere, entity: "song"), reservesDetailLine: true)
+                    }.padding(16), width: width, scheme: scheme, name: "tiles")
+                }
+                await render(Form { AppleMusicDetailsSettingsSection(store: off) }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings-off")
+                await render(Form { AppleMusicDetailsSettingsSection(store: on) }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings-on")
+                await render(AppleMusicUnmatchedSheet(songs: songs), width: 560, scheme: scheme, name: "unmatched")
+            }
+            AppleMusicDetailsStorage.delete()
+            suite.removePersistentDomain(forName: "apple-music-details-snapshot")
             exit(0)
         }
     }

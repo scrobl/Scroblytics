@@ -77,7 +77,7 @@ struct TrackDetailView: View {
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
             // The weather may have changed meanwhile (a trip added, a download finished): that alone is read again.
-            if model.isLoaded(for: identity.id) { await model.loadWeather(); await model.loadWeatherLean(range: range); return }
+            if model.isLoaded(for: identity.id) { await model.loadWeather(); await model.loadWeatherLean(range: range); await model.loadAppleMusic(); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
@@ -90,7 +90,8 @@ struct TrackDetailView: View {
             async let release: Void = model.loadReleaseDate()
             async let weather: Void = model.loadWeather()
             async let lean: Void = model.loadWeatherLean(range: current)
-            _ = await (ranks, tags, duration, release, weather, lean)
+            async let music: Void = model.loadAppleMusic()
+            _ = await (ranks, tags, duration, release, weather, lean, music)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
@@ -102,6 +103,7 @@ struct TrackDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await model.loadWeather(); await model.loadWeatherLean(range: range) } }
         .onReceive(NotificationCenter.default.publisher(for: BPMEngine.progressNotification)) { _ in model.loadBPM() }
+        .onReceive(NotificationCenter.default.publisher(for: .appleMusicDetailsDidUpdate)) { _ in Task { await model.loadAppleMusic(); model.loadBPM() } }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await model.loadDuration() }
         }

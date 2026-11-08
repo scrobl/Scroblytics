@@ -273,10 +273,7 @@ private struct AlbumTurnoversHeaderControls: View {
     let onRefresh: () -> Void
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { controls }
-            VStack(alignment: .leading, spacing: 8) { controls }
-        }
+        ToolControlsFlow { controls }
     }
 
     @ViewBuilder

@@ -202,40 +202,21 @@ struct LovedStatusAuditView: View {
 
     // MARK: Controls
 
-    /// Three layouts, each used only when it fits at its natural size, so nothing is ever squeezed or overlaps:
-    /// everything on one row; the filter segments on a row of their own with the other controls beneath; and, in a narrow
-    /// window, the filter as a menu.
+    /// The controls flow across the whole width and wrap onto more rows as the window narrows (`ToolControlsFlow`), the buttons staying at
+    /// the right of their row. The filter is the segmented control while it fits the width, and a menu when the window is narrower than that.
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+        ToolControlsFlow {
+            ViewThatFits(in: .horizontal) {
                 wideFilterPicker
-                agreementToggle
-                Spacer(minLength: 0)
+                compactFilterPicker
+            }
+            agreementToggle
+            HStack(spacing: 12) {
                 runningIndicator
                 decisionsButton
                 auditButton
             }
-
-            VStack(alignment: .leading, spacing: 10) {
-                wideFilterPicker
-                otherControls
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                compactFilterPicker
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                otherControls
-            }
-        }
-    }
-
-    private var otherControls: some View {
-        HStack(spacing: 12) {
-            agreementToggle
-            Spacer(minLength: 0)
-            runningIndicator
-            decisionsButton
-            auditButton
+            .toolControlsTrailing()
         }
     }
 

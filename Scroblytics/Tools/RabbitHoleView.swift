@@ -172,10 +172,7 @@ struct RabbitHoleView: View {
     }
 
     private var headerControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { headerButtons }
-            VStack(alignment: .leading, spacing: 8) { headerButtons }
-        }
+        ToolControlsFlow { headerButtons }
     }
 
     @ViewBuilder
@@ -236,10 +233,7 @@ struct RabbitHoleView: View {
             disclosureRow("Filters", summary: filtersSummary, isOpen: $options.showFilters)
             if options.showFilters {
                 VStack(alignment: .leading, spacing: 12) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 12) { capPickers }
-                        VStack(alignment: .leading, spacing: 8) { capPickers }
-                    }
+                    ToolControlsFlow { capPickers }
                     QueryConditionsEditor(
                         groups: $options.groups,
                         registry: .similarSounds,
@@ -253,10 +247,7 @@ struct RabbitHoleView: View {
             Divider()
             disclosureRow("Style", summary: styleSummary, isOpen: $options.showStyle)
             if options.showStyle {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 16) { knobControls }
-                    VStack(alignment: .leading, spacing: 8) { knobControls }
-                }
+                ToolControlsFlow { knobControls }
                 .padding(.bottom, options.knobs.newMusic > 0 && options.groups.contains { !$0.isEmpty } ? 0 : 4)
                 if options.knobs.newMusic > 0, options.groups.contains(where: { !$0.isEmpty }) {
                     Text("New music is paused while Filters has conditions: they describe your own listening, which new tracks don't have.")

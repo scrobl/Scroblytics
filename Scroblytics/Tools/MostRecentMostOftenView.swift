@@ -102,10 +102,7 @@ struct MostRecentMostOftenView: View {
     }
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { pickers }
-            VStack(alignment: .leading, spacing: 10) { pickers }
-        }
+        ToolControlsFlow { pickers }
     }
 
     @ViewBuilder

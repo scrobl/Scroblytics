@@ -178,10 +178,7 @@ struct SimilarSoundsView: View {
 
     /// Simple controls over what comes back: order, how many songs, and at most how many per artist / album.
     private var arrangementControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { arrangementPickers }
-            VStack(alignment: .leading, spacing: 8) { arrangementPickers }
-        }
+        ToolControlsFlow { arrangementPickers }
     }
 
     @ViewBuilder

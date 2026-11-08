@@ -189,32 +189,20 @@ struct ReleaseYearAuditView: View {
 
     // MARK: Controls
 
+    /// The controls flow across the whole width and wrap as the window narrows (`ToolControlsFlow`), the buttons staying at the right of
+    /// their row. The filter is the segmented control while it fits the width, and a menu when the window is narrower than that.
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+        ToolControlsFlow {
+            ViewThatFits(in: .horizontal) {
                 wideFilterPicker
-                Spacer(minLength: 0)
+                compactFilterPicker
+            }
+            HStack(spacing: 12) {
                 runningIndicator
                 decisionsButton
                 auditButton
             }
-            VStack(alignment: .leading, spacing: 10) {
-                wideFilterPicker
-                otherControls
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                compactFilterPicker.frame(maxWidth: .infinity, alignment: .leading)
-                otherControls
-            }
-        }
-    }
-
-    private var otherControls: some View {
-        HStack(spacing: 12) {
-            Spacer(minLength: 0)
-            runningIndicator
-            decisionsButton
-            auditButton
+            .toolControlsTrailing()
         }
     }
 

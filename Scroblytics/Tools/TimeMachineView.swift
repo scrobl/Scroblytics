@@ -167,10 +167,7 @@ struct TimeMachineView: View {
     }
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { controlItems }
-            VStack(alignment: .leading, spacing: 10) { controlItems }
-        }
+        ToolControlsFlow { controlItems }
     }
 
     @ViewBuilder

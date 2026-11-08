@@ -70,7 +70,7 @@ struct AutoPlaylistsView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 12) {
+        ToolControlsFlow {
             Button("Add Playlist…", systemImage: "plus") { isAdding = true }
             Button("Refresh All Now", systemImage: "arrow.clockwise") {
                 Task {
@@ -80,8 +80,8 @@ struct AutoPlaylistsView: View {
             }
             .disabled(lists.filter(\.isEnabled).isEmpty || scheduler.isRefreshing)
             if scheduler.isRefreshing { ProgressView().controlSize(.small) }
-            Spacer()
             HelpLinkButton(articleID: "tool-auto-playlists")
+                .toolControlsTrailing()
         }
     }
 

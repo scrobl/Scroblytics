@@ -89,10 +89,7 @@ struct TripsView: View {
     // MARK: Controls and summary
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { pickers }
-            VStack(alignment: .leading, spacing: 10) { pickers }
-        }
+        ToolControlsFlow { pickers }
     }
 
     @ViewBuilder private var pickers: some View {

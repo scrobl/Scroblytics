@@ -334,15 +334,26 @@ enum LayoutSnapshots {
             @State private var sort = 0
             @State private var variants = false
             @State private var warn = true
+            @State private var search = ""
             var body: some View {
                 PageSettingsHeader("Unscrobbled Plays") {
                     ToolControlsFlow {
+                        // The Loved Audit / Release Year Audit filter: a wide segmented switch while it fits, a menu when it doesn't.
+                        ViewThatFits(in: .horizontal) {
+                            Picker("Filter", selection: $show) { ForEach(["All", "1–2 years", "3+ years", "Your own dates", "Mixed years"].indices, id: \.self) { Text(["All", "1–2 years", "3+ years", "Your own dates", "Mixed years"][$0]).tag($0) } }
+                                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                            Picker("Filter", selection: $show) { ForEach(["All", "1–2 years", "3+ years", "Your own dates", "Mixed years"].indices, id: \.self) { Text(["All", "1–2 years", "3+ years", "Your own dates", "Mixed years"][$0]).tag($0) } }
+                                .pickerStyle(.menu)
+                        }
                         Picker("Group", selection: $group) { Text("Not scrobbled").tag(0); Text("Time differs").tag(1) }.pickerStyle(.segmented).labelsHidden().fixedSize()
                         Picker("Show", selection: $show) { Text("All").tag(0); Text("Never scrobbled").tag(1); Text("Played after its last scrobble").tag(2) }.fixedSize()
                         Picker("Played", selection: $played) { Text("Any time").tag(0); Text("Last 14 days").tag(4) }.fixedSize()
                         Picker("Sort", selection: $sort) { Text("Last played in Music").tag(0); Text("Largest gap").tag(1) }.fixedSize()
                         Toggle("Match spelling variants", isOn: $variants).toggleStyle(.checkbox)
                         Toggle("Warn me if scrobbling stops", isOn: $warn).toggleStyle(.checkbox)
+                        TextField("Filter flagged tracks…", text: $search).textFieldStyle(.roundedBorder).frame(minWidth: 190)
+                        Text("Climbing metrics update in steps — comparing to 30 days ago, so a long sentence like this one has to wrap in a narrow window.")
+                            .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                         HStack(spacing: 10) {
                             Button {} label: { Label("Scrobble 12…", systemImage: "arrow.up.circle") }
                             Button {} label: { Label("Read Music again", systemImage: "arrow.clockwise") }

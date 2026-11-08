@@ -117,10 +117,7 @@ struct GoalsView: View {
 
     @ViewBuilder
     private var header: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { headerControls }
-            VStack(alignment: .leading, spacing: 10) { headerControls }
-        }
+        ToolControlsFlow { headerControls }
     }
 
     @ViewBuilder
@@ -137,18 +134,20 @@ struct GoalsView: View {
         }
         if isLoading { ProgressView().controlSize(.small) }
         if let goal = selectedGoal {
-            Spacer(minLength: 0)
-            ShareButton(card: { shareCard(for: goal) }, isEnabled: result != nil && resultGoalID == goal.id)
-            Button { scheduleReload() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                .help("Work the numbers out again from your latest history and loved tracks")
-                .disabled(isLoading)
-            Button("Edit…") { editor = .edit(goal) }
-            Button("Delete…", role: .destructive) { deleting = goal }
+            HStack(spacing: 10) {
+                ShareButton(card: { shareCard(for: goal) }, isEnabled: result != nil && resultGoalID == goal.id)
+                Button { scheduleReload() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    .help("Work the numbers out again from your latest history and loved tracks")
+                    .disabled(isLoading)
+                Button("Edit…") { editor = .edit(goal) }
+                Button("Delete…", role: .destructive) { deleting = goal }
+            }
+            .toolControlsTrailing()
         } else {
             Text(state.goals.isEmpty ? "Hear a set of tracks by a date." : "Open a goal for its chart, forecasts and the tracks still to hear.")
                 .font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(2)
-            Spacer(minLength: 0)
             Button("New Goal…") { editor = .new }
+                .toolControlsTrailing()
         }
     }
 

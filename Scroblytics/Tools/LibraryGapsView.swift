@@ -159,10 +159,7 @@ struct LibraryGapsView: View {
     // MARK: Controls
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { controlItems }
-            VStack(alignment: .leading, spacing: 10) { controlItems }
-        }
+        ToolControlsFlow { controlItems }
     }
 
     @ViewBuilder
@@ -180,15 +177,17 @@ struct LibraryGapsView: View {
         Toggle("Group by artist", isOn: $options.groupByArtist).toggleStyle(.checkbox)
             .disabled(lastCheck == nil)
             .onChange(of: options.groupByArtist) { expandedArtists = [] }
-        Spacer(minLength: 0)
-        if isChecking { ProgressView().controlSize(.small) }
-        Button {
-            Task { await check() }
-        } label: {
-            Label(lastCheck == nil ? "Check library" : "Check again", systemImage: "arrow.clockwise")
+        HStack(spacing: 10) {
+            if isChecking { ProgressView().controlSize(.small) }
+            Button {
+                Task { await check() }
+            } label: {
+                Label(lastCheck == nil ? "Check library" : "Check again", systemImage: "arrow.clockwise")
+            }
+            .disabled(isChecking)
+            .help("Reads your Music library (about a second) and compares it with everything you’ve scrobbled.")
         }
-        .disabled(isChecking)
-        .help("Reads your Music library (about a second) and compares it with everything you’ve scrobbled.")
+        .toolControlsTrailing()
     }
 
     // MARK: Start / headline

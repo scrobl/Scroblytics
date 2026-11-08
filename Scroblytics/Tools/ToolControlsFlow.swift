@@ -35,7 +35,13 @@ struct ToolControlsFlow: Layout {
 
     private func arrange(width proposed: CGFloat?, subviews: Subviews) -> Arrangement {
         let limit = proposed ?? .infinity
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        var sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        // A control wider than the whole row (a long sentence, say) is asked again for a size that fits, so text wraps instead of overflowing.
+        if limit.isFinite {
+            for index in sizes.indices where sizes[index].width > limit {
+                sizes[index] = subviews[index].sizeThatFits(ProposedViewSize(width: limit, height: nil))
+            }
+        }
         var rows: [[Int]] = [[]]
         var x: CGFloat = 0
         for index in subviews.indices {

@@ -350,6 +350,9 @@ enum BPMEngine {
         return nil
     }
 
+    /// Tells every screen that shows tempos to look again: the tags Apple Music contributes changed (a new read, or a different choice of copy).
+    static func announceChange() { postProgress(isComplete: pending.isEmpty) }
+
     private static func postProgress(isComplete: Bool) {
         NotificationCenter.default.post(name: progressNotification, object: Progress(remaining: pending.count, isComplete: isComplete))
     }

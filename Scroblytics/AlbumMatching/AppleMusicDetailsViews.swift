@@ -17,6 +17,10 @@ struct AppleMusicDetailsSettingsSection: View {
                         .font(AppTypography.supporting).foregroundStyle(store.problem == nil ? Color.secondary : Color.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Toggle("Use Apple Music’s length instead of the online one", isOn: Binding(get: { store.lengthWins }, set: { store.setLengthWins($0) }))
+                    .help("Where Apple Music and the online source (Deezer) both have a length for a song, use the one in your library. Off: the online length is used and Apple Music’s fills in only where none was found. A length you entered yourself always wins. Time listened and Missing Data change as soon as you switch it.")
+                Text("Where Apple Music and the online source (Deezer) both have a length. It changes time listened and what Missing Data lists, as soon as you switch it; a length you entered always wins.")
+                    .font(AppTypography.supporting).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !store.unmatched.isEmpty {
                     Button("Songs that couldn’t be matched (\(store.unmatched.count.formatted()))…") { showingUnmatched = true }
                         .help("Last.fm songs the library has more than one possible partner for. Nothing is taken from Music for them.")
@@ -25,7 +29,7 @@ struct AppleMusicDetailsSettingsSection: View {
             if store.readAt != nil {
                 Button("Forget What Was Read…", role: .destructive) { confirmingForget = true }
             }
-            Text("Reads from your Music library, while Music is open and after a sync, when each song was added to it, its genre, its tempo tag and its length, and keeps them on this Mac. Query can then ask about them, song, album and artist pages show them, and a tempo tag or length fills in where none was found online. It reads when the number of songs changes or the last read is over 12 hours old. Songs are matched to Last.fm by exact title; where the library has several possible partners, nothing is taken. Nothing leaves your Mac.")
+            Text("Reads from your Music library, while Music is open and after a sync, when each song was added to it, its genre, its tempo tag and its length, and keeps them on this Mac. Query can then ask about them, song, album and artist pages show them, and a tempo tag or length fills in where none was found online. It reads when the number of songs changes or the last read is over 12 hours old. Songs are matched to Last.fm by artist and title, and when the library holds a song more than once (a studio album, a compilation, a live record) the copy on the album you scrobbled it under is the one used; where the library has several possible partners and no album settles it, nothing is taken. Nothing leaves your Mac.")
                 .font(AppTypography.supporting).foregroundStyle(.secondary)
             HelpLinkButton(articleID: "apple-music-details", title: "About Apple Music library details")
         }

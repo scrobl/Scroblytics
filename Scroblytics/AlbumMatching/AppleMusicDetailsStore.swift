@@ -21,10 +21,15 @@ final class AppleMusicDetailsStore {
     static let shared = AppleMusicDetailsStore()
 
     nonisolated static let enabledKey = "appleMusicDetails.enabled"
+    /// Whether Apple Music's length is used instead of the one found online (Deezer) where both exist. Off by default, because turning it on
+    /// changes lengths and time listened that were already counted.
+    nonisolated static let lengthWinsKey = "appleMusicDetails.lengthWins"
+    nonisolated static var lengthWinsEnabled: Bool { UserDefaults.standard.bool(forKey: lengthWinsKey) }
     /// How old a read may get before the next sync reads again even though the number of songs hasn't changed.
     nonisolated static let fullRefreshInterval: TimeInterval = 12 * 3600
 
     private(set) var enabled = UserDefaults.standard.bool(forKey: AppleMusicDetailsStore.enabledKey)
+    private(set) var lengthWins = UserDefaults.standard.bool(forKey: AppleMusicDetailsStore.lengthWinsKey)
     private(set) var readAt: Date?
     private(set) var songCount = 0
     private(set) var isReading = false
@@ -41,6 +46,7 @@ final class AppleMusicDetailsStore {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         enabled = defaults.bool(forKey: Self.enabledKey)
+        lengthWins = defaults.bool(forKey: Self.lengthWinsKey)
         refreshSummary()
     }
 
@@ -60,6 +66,14 @@ final class AppleMusicDetailsStore {
         defaults.set(on, forKey: Self.enabledKey)
         problem = nil
         if on { refresh(force: true) }
+    }
+
+    /// Chooses whose length is used where Apple Music and the online source both have one, and tells the screens showing lengths.
+    func setLengthWins(_ on: Bool) {
+        guard lengthWins != on else { return }
+        lengthWins = on
+        defaults.set(on, forKey: Self.lengthWinsKey)
+        DurationEngine.announceChange()
     }
 
     /// Deletes the saved read (Settings › Forget). The matching goes with it; Query and the pages show nothing from Music until the next read.
@@ -84,8 +98,9 @@ final class AppleMusicDetailsStore {
     /// a read the person asked for.
     func refresh(force: Bool) {
         guard enabled, !isReading, let container else { return }
-        guard AppleMusicFavoritesReader.isMusicRunning else {
-            if force { problem = "Music isn’t open. Open Music, then try again." }
+        let musicOpen = AppleMusicFavoritesReader.isMusicRunning
+        guard musicOpen || !force else {
+            problem = "Music isn’t open. Open Music, then try again."
             return
         }
         isReading = true
@@ -94,16 +109,22 @@ final class AppleMusicDetailsStore {
             do {
                 let saved = AppleMusicDetailsStorage.load()
                 var changed = false
-                let count = try await AppleMusicFavoritesReader.libraryTrackCount()
-                let stale = saved.map { Date().timeIntervalSince($0.readAt) >= Self.fullRefreshInterval || $0.rows.count != count } ?? true
-                if force || stale {
-                    let rows = try await AppleMusicFavoritesReader.readLibraryDetails()
-                    let file = AppleMusicDetailsFile(readAt: Date(), rows: rows)
-                    try await offMain { try AppleMusicDetailsStorage.save(file) }
-                    changed = true
+                if musicOpen {
+                    let count = try await AppleMusicFavoritesReader.libraryTrackCount()
+                    let stale = saved.map { Date().timeIntervalSince($0.readAt) >= Self.fullRefreshInterval || $0.rows.count != count } ?? true
+                    if force || stale {
+                        let rows = try await AppleMusicFavoritesReader.readLibraryDetails()
+                        let albums = await Self.rankedAlbums(rows: rows, container: container)
+                        let file = AppleMusicDetailsFile(readAt: Date(), rows: rows, albums: albums ?? saved?.albums ?? [:])
+                        try await offMain { try AppleMusicDetailsStorage.save(file) }
+                        changed = true
+                    }
                 }
+                // The history moves with every sync, so which album a song is scrobbled under can change without the library changing:
+                // keep the ranking current (a small write, and only when something differs), Music open or not.
+                if await self?.updateAlbums(container: container) == true { changed = true }
                 self?.refreshSummary()
-                if changed { NotificationCenter.default.post(name: .appleMusicDetailsDidUpdate, object: nil) }
+                if changed { Self.announceChange() }
                 await self?.recomputeUnmatched(container: container)
                 self?.isReading = false
             } catch {
@@ -111,6 +132,32 @@ final class AppleMusicDetailsStore {
                 self?.isReading = false
             }
         }
+    }
+
+    /// Everything that shows tempo, length, genre or date added looks again.
+    private static func announceChange() {
+        NotificationCenter.default.post(name: .appleMusicDetailsDidUpdate, object: nil)
+        DurationEngine.announceChange()
+        BPMEngine.announceChange()
+    }
+
+    /// The albums each repeated library song is scrobbled under (`AppleMusicDetailsFile.albums`), worked out from the whole history; nil if
+    /// the history can't be read.
+    private nonisolated static func rankedAlbums(rows: [AppleMusicDetailRow], container: ModelContainer) async -> [String: [String]]? {
+        try? await offMain {
+            let scrobbles = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+            return AppleMusicDetailsIndex.albumsForRepeatedSongs(rows: rows, scrobbles: scrobbles)
+        }
+    }
+
+    /// Brings the saved ranking up to date with the history. True when it changed what tempo or length some song resolves to.
+    private func updateAlbums(container: ModelContainer) async -> Bool {
+        guard let file = AppleMusicDetailsStorage.load(), let albums = await Self.rankedAlbums(rows: file.rows, container: container), albums != file.albums else { return false }
+        let updated = AppleMusicDetailsFile(version: file.version, readAt: file.readAt, rows: file.rows, albums: albums)
+        let before = (AppleMusicDetailsStorage.tempoMap(), AppleMusicDetailsStorage.durationMap())
+        do { try await offMain { try AppleMusicDetailsStorage.save(updated) } } catch { return false }
+        let after = (AppleMusicDetailsStorage.tempoMap(), AppleMusicDetailsStorage.durationMap())
+        return before.0 != after.0 || before.1 != after.1
     }
 
     /// Works out which Last.fm songs were skipped for being unclear (the history can change after a sync without the library changing).
@@ -152,8 +199,9 @@ enum AppleMusicDetailsLookup {
     static func track(artist: String, track: String, container: ModelContainer) async -> AppleMusicDetailsInfo? {
         await lookup(container: container) { index in
             let match = index.match(artist: artist, track: track)
-            guard case .matched(let indexes, let viaSpelling) = match else { return AppleMusicDetailsInfo(added: nil, genre: nil, inLibrary: false, matchedTitle: nil) }
-            let rows = indexes.map { index.rows[$0] }
+            guard case .matched(_, let viaSpelling) = match else { return AppleMusicDetailsInfo(added: nil, genre: nil, inLibrary: false, matchedTitle: nil) }
+            // The copy on the album the song is scrobbled under, when the library holds it more than once.
+            let rows = index.rows(artist: artist, track: track)
             return AppleMusicDetailsInfo(
                 added: AppleMusicDetailsIndex.earliestAdded(rows), genre: AppleMusicDetailsIndex.commonGenre(rows), inLibrary: true,
                 matchedTitle: viaSpelling ? rows.first?.title : nil

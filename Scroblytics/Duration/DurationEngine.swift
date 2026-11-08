@@ -92,11 +92,14 @@ enum DurationEngine {
         if let existingTrack = try context.fetch(descriptor).first, let override = existingTrack.durationOverrideSeconds {
             return override
         }
-        // A length found online wins; the Apple Music library's fills in where nothing is cached, without a lookup.
+        // A length found online wins unless the person chose Apple Music's (Settings › Sync); either way Music's length fills in where
+        // nothing is cached, without a lookup.
+        let music = AppleMusicDetailsStorage.durationMap()[key]
+        if AppleMusicDetailsStore.lengthWinsEnabled, let seconds = music { return seconds }
         var cached = FetchDescriptor<TrackDurationCacheEntry>(predicate: #Predicate { $0.cacheKey == key })
         cached.fetchLimit = 1
         if let row = try context.fetch(cached).first, let seconds = row.seconds { return seconds }
-        if let seconds = AppleMusicDetailsStorage.durationMap()[key] { return seconds }
+        if let seconds = music { return seconds }
         return try await getCachedDeezerDuration(context: context, client: client, artist: artist, track: track, album: album)
     }
 
@@ -119,15 +122,20 @@ enum DurationEngine {
         var cachedMisses: Set<String> = []
         /// `cacheKey` → user override (`Track.durationOverrideSeconds`).
         var overrides: [String: Int] = [:]
-        /// `cacheKey` → the length in the Apple Music library (`AppleMusicDetailsStorage.durationMap`): fills in only where Deezer had nothing.
+        /// `cacheKey` → the length in the Apple Music library (`AppleMusicDetailsStorage.durationMap`): fills in only where Deezer had nothing,
+        /// unless `musicWins`.
         var music: [String: Int] = [:]
+        /// The person chose Apple Music's length over the one found online (Settings › Sync › Apple Music library details). Off by default.
+        var musicWins = false
 
         nonisolated static let empty = Snapshot()
 
-        /// Override > cached Deezer value > the length in the Apple Music library > cached miss > pending — the same
-        /// chain `resolvedDuration` documents. Music's length beats "nothing found online" and means the track never needs a lookup.
+        /// Override > (the Apple Music library's length, when `musicWins`) > cached Deezer value > the length in the Apple Music library > cached
+        /// miss > pending — the same chain `resolvedDuration` documents. Music's length beats "nothing found online" and means the track never
+        /// needs a lookup.
         nonisolated func resolution(forKey key: String) -> Resolution {
             if let override = overrides[key] { return .seconds(override) }
+            if musicWins, let seconds = music[key] { return .seconds(seconds) }
             if let seconds = cachedSeconds[key] { return .seconds(seconds) }
             if let seconds = music[key] { return .seconds(seconds) }
             if cachedMisses.contains(key) { return .noMatch }
@@ -136,7 +144,10 @@ enum DurationEngine {
 
         /// Every key with a usable runtime — the lookup `timeListenedSeconds` sums over.
         nonisolated var secondsLookup: [String: Int] {
-            music.merging(cachedSeconds) { _, cached in cached }.merging(overrides) { _, override in override }
+            let merged = musicWins
+                ? cachedSeconds.merging(music) { _, fromMusic in fromMusic }
+                : music.merging(cachedSeconds) { _, cached in cached }
+            return merged.merging(overrides) { _, override in override }
         }
     }
 
@@ -150,6 +161,7 @@ enum DurationEngine {
             if let seconds = track.durationOverrideSeconds { snapshot.overrides[track.identityKey] = seconds }
         }
         snapshot.music = AppleMusicDetailsStorage.durationMap()
+        snapshot.musicWins = AppleMusicDetailsStore.lengthWinsEnabled
         return snapshot
     }
 
@@ -310,6 +322,10 @@ enum DurationEngine {
         }
         return FetchResult(key: key, seconds: nil, succeeded: false)
     }
+
+    /// Tells every screen that shows lengths or time listened to look again: the lengths Apple Music contributes changed (a new read, or the
+    /// setting that lets them win over the ones found online).
+    static func announceChange() { postProgress(isComplete: pending.isEmpty) }
 
     private static func postProgress(isComplete: Bool) {
         NotificationCenter.default.post(

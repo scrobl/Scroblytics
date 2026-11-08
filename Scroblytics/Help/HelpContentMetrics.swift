@@ -12,7 +12,7 @@ extension HelpContent {
                 .steps([
                     "A length you entered yourself (Edit track duration, or imported from Apple Music) always wins.",
                     "Otherwise the length found on Deezer, cached once found. Deezer is the only source looked up automatically; it is searched five ways (exact artist and title, a looser form, with bracketed notes removed, with apostrophes spaced, and finally the album’s tracklist).",
-                    "Where Deezer has nothing, the length in your Apple Music library, if you turned on [Apple Music library details](help://apple-music-details) (only for a song with the same artist and title, and only when its copies agree to within 2 seconds). Those songs are never looked up on Deezer.",
+                    "Where Deezer has nothing, the length in your Apple Music library, if you turned on [Apple Music library details](help://apple-music-details) (only for a song with the same artist and title: the copy on the album you play it under, or, when no album settles it, only if its copies agree to within 2 seconds). Those songs are never looked up on Deezer. If you switch on **Use Apple Music’s length instead of the online one** (Settings › Sync), your library’s length comes before Deezer’s wherever it has one.",
                     "If neither has anything, that “no match” is remembered and not retried. Add a length by hand, or use Missing Data › Import from Apple Music.",
                 ]),
                 .paragraph("Last.fm itself gives no track lengths, and MusicBrainz is never consulted for them. Apple Music is consulted only through Apple Music library details, or when you press Missing Data › Import from Apple Music."),

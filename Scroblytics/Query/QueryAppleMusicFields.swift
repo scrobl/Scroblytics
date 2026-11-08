@@ -24,7 +24,7 @@ extension QueryFieldRegistry {
         QueryField(
             id: "musicDateAdded", name: "Date added to Apple Music", group: .appleMusic, type: .date, targets: [.track, .album, .artist],
             column: .standard(for: .date),
-            help: "When the song was added to your Apple Music library; for an album or artist, the earliest of its songs. Last.fm only knows when a song was scrobbled, so this is the way to ask about when you got something. Songs that aren't in your library, and everything until the library has been read in Settings, have no value."
+            help: "When the song was added to your Apple Music library (the copy on the album you play it under, if the library holds it more than once); for an album or artist, the earliest of its songs. Last.fm only knows when a song was scrobbled, so this is the way to ask about when you got something. Songs that aren't in your library, and everything until the library has been read in Settings, have no value."
         ) { run, _, entities in
             guard let index = musicIndex(run) else { return Dictionary(uniqueKeysWithValues: entities.map { ($0.id, QueryCell.missing) }) }
             return Dictionary(uniqueKeysWithValues: entities.map { entity in
@@ -35,7 +35,7 @@ extension QueryFieldRegistry {
         QueryField(
             id: "musicGenre", name: "Apple Music genre", group: .appleMusic, type: .text, targets: [.track, .album, .artist],
             column: .standard(for: .text, width: 150),
-            help: "The genre Apple Music holds for the song; for an album or artist, the genre most of its songs carry. Songs that aren't in your library, and everything until the library has been read in Settings, have no value."
+            help: "The genre Apple Music holds for the song (the copy on the album you play it under, if the library holds it more than once); for an album or artist, the genre most of its songs carry. Songs that aren't in your library, and everything until the library has been read in Settings, have no value."
         ) { run, _, entities in
             guard let index = musicIndex(run) else { return Dictionary(uniqueKeysWithValues: entities.map { ($0.id, QueryCell.missing) }) }
             return Dictionary(uniqueKeysWithValues: entities.map { entity in

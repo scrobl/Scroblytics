@@ -43,6 +43,22 @@ struct AppleMusicDetailsFile: Codable, Sendable {
     var version = 1
     var readAt: Date
     var rows: [AppleMusicDetailRow]
+    /// For each song the library holds more than once (`BPMEngine.cacheKey`), the albums Last.fm has it scrobbled under, most played first
+    /// (plain names, at most three). It lets the tempo and length that other parts of the app read pick the copy on the album you actually
+    /// play, without those parts having the history at hand. Kept current by `AppleMusicDetailsStore`; absent in a file saved before it existed.
+    var albums: [String: [String]] = [:]
+
+    private enum CodingKeys: String, CodingKey { case version, readAt, rows, albums }
+}
+
+extension AppleMusicDetailsFile {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        readAt = try values.decode(Date.self, forKey: .readAt)
+        rows = try values.decode([AppleMusicDetailRow].self, forKey: .rows)
+        albums = try values.decodeIfPresent([String: [String]].self, forKey: .albums) ?? [:]
+    }
 }
 
 /// Where the read is kept, and a decoded copy shared by everything that asks for it until the file changes.
@@ -84,8 +100,8 @@ enum AppleMusicDetailsStorage {
         guard let file = try? decoder.decode(AppleMusicDetailsFile.self, from: data), file.version == 1 else { return nil }
         cache.key = key
         cache.file = file
-        cache.tempo = AppleMusicDetailsIndex.tempoByKey(file.rows)
-        cache.durations = AppleMusicDetailsIndex.durationByKey(file.rows)
+        cache.tempo = AppleMusicDetailsIndex.tempoByKey(file.rows, albums: file.albums)
+        cache.durations = AppleMusicDetailsIndex.durationByKey(file.rows, albums: file.albums)
         return file
     }
 
@@ -164,8 +180,10 @@ struct AppleMusicDetailsSnapshot: Sendable {
 /// Matches Last.fm songs, albums and artists to the library rows, and answers the three questions Query and the detail pages ask.
 ///
 /// A song is matched like this, and never more loosely:
-/// 1. **Same artist and title** (ignoring capitals and spacing): that is the song. Date added is the earliest across its copies, genre the
-///    one most of them carry.
+/// 1. **Same artist and title** (ignoring capitals and spacing): that is the song. When the library holds it more than once, **the album
+///    decides which copy**: the copy on the album Last.fm has it scrobbled under (the most played one the library has a copy of) is the
+///    version, and the other copies are ignored (`pickVersion`). Only when no scrobbled album has a copy does it fall back to all the copies,
+///    where date added is the earliest, genre the one most carry, and tempo and length are used only if the copies agree.
 /// 2. **A different spelling of the same song** (the library says "Title", Last.fm says "Title (feat. Someone)" or a remaster tag): matched
 ///    only when it pairs one to one, that is, exactly one library title and exactly one Last.fm title are left over once the identical
 ///    ones are paired off. Otherwise there is more than one possible partner.
@@ -198,6 +216,8 @@ struct AppleMusicDetailsIndex: Sendable {
     private let scrobbledTitles: [String: (artist: String, track: String, plays: Int)]
     private let byAlbum: [String: [Int]]
     private let byArtist: [String: [Int]]
+    /// `exactKey` → the albums a song is scrobbled under, most played first (plain names).
+    private let albumsByKey: [String: [String]]
 
     nonisolated init(rows: [AppleMusicDetailRow], scrobbles: [ScrobbleSnapshot]) {
         self.rows = rows
@@ -221,9 +241,12 @@ struct AppleMusicDetailsIndex: Sendable {
             }
         }
         var titles: [String: (artist: String, track: String, plays: Int)] = [:]
-        for s in scrobbles where !s.trackName.isEmpty && !s.artistName.isEmpty {
-            let key = UnscrobbledPlaysEngine.exactKey(artist: s.artistName, track: s.trackName)
-            if let existing = titles[key] { titles[key] = (existing.artist, existing.track, existing.plays + 1) } else { titles[key] = (s.artistName, s.trackName, 1) }
+        var albumCounts: [String: [String: Int]] = [:]
+        // Distinct songs first (a long history repeats the same few thousand), so a name is normalized once per song, not once per play.
+        for song in Self.distinctSongs(scrobbles) {
+            let key = UnscrobbledPlaysEngine.exactKey(artist: song.artist, track: song.track)
+            if let existing = titles[key] { titles[key] = (existing.artist, existing.track, existing.plays + song.plays) } else { titles[key] = (song.artist, song.track, song.plays) }
+            for (name, count) in song.albums where !name.isEmpty { albumCounts[key, default: [:]][Self.plain(name), default: 0] += count }
         }
         var scrobbledFuzzy: [String: Set<String>] = [:]
         for (key, title) in titles where exact[key] == nil {
@@ -237,6 +260,7 @@ struct AppleMusicDetailsIndex: Sendable {
         scrobbledTitles = titles
         byAlbum = album.mapValues { Array(Set($0)).sorted() }
         byArtist = artist.mapValues { Array(Set($0)).sorted() }
+        albumsByKey = albumCounts.mapValues(Self.ranked)
     }
 
     /// Case-insensitive, whitespace-collapsed: the same rule as `UnscrobbledPlaysEngine.exactKey` applies to each half.
@@ -262,10 +286,74 @@ struct AppleMusicDetailsIndex: Sendable {
         return .ambiguous(candidates: leftoverLibrary.compactMap { libraryDisplay[$0] })
     }
 
-    /// The library rows of a song's match, or none.
+    /// The library rows that are this song, or none: every copy the match found, narrowed to the copy on the album the song is scrobbled
+    /// under when the library holds it more than once (`pickVersion`).
     nonisolated func rows(artist: String, track: String) -> [AppleMusicDetailRow] {
         guard case .matched(let indexes, _) = match(artist: artist, track: track) else { return [] }
-        return indexes.map { rows[$0] }
+        let copies = indexes.map { rows[$0] }
+        let albums = albumsByKey[UnscrobbledPlaysEngine.exactKey(artist: artist, track: track)] ?? []
+        return Self.pickVersion(copies, albums: albums)
+    }
+
+    /// Which copies of a song are "the song" when the library holds it more than once (a studio album, a greatest hits, a live record).
+    /// The album decides: walking the albums Last.fm has the song under, most played first, the first one the library has a copy on wins,
+    /// and only the copies on it count: first those whose album name is identical, then those the app's album-name rule treats as the same
+    /// (edition suffixes and punctuation ignored). With no scrobbled album, or none the library has a copy on, every copy is kept and the
+    /// callers' cautious rules apply (tempo and length need agreeing copies).
+    nonisolated static func pickVersion(_ copies: [AppleMusicDetailRow], albums: [String]) -> [AppleMusicDetailRow] {
+        guard copies.count > 1, !albums.isEmpty else { return copies }
+        for album in albums {
+            let exact = copies.filter { plain($0.album) == album }
+            if !exact.isEmpty { return exact }
+            let key = albumKey(album)
+            guard !key.isEmpty else { continue }
+            let near = copies.filter { albumKey($0.album) == key }
+            if !near.isEmpty { return near }
+        }
+        return copies
+    }
+
+    // MARK: Scrobbled albums
+
+    /// One distinct Last.fm song with its play count and how many plays each album name got.
+    struct ScrobbledSong: Sendable {
+        let artist: String
+        let track: String
+        var plays: Int
+        var albums: [String: Int]
+    }
+
+    /// The history folded to its distinct songs (identical artist and title text), without normalizing a name for every play.
+    nonisolated static func distinctSongs(_ scrobbles: [ScrobbleSnapshot]) -> [ScrobbledSong] {
+        var songs: [String: ScrobbledSong] = [:]
+        for s in scrobbles where !s.trackName.isEmpty && !s.artistName.isEmpty {
+            let key = s.artistName + "\u{0}" + s.trackName
+            if songs[key] == nil { songs[key] = ScrobbledSong(artist: s.artistName, track: s.trackName, plays: 0, albums: [:]) }
+            songs[key]?.plays += 1
+            if !s.albumName.isEmpty { songs[key]?.albums[s.albumName, default: 0] += 1 }
+        }
+        return Array(songs.values)
+    }
+
+    /// Album names most played first (ties alphabetical), at most three, as plain names.
+    nonisolated static func ranked(_ counts: [String: Int]) -> [String] {
+        Array(counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(3).map(\.key))
+    }
+
+    /// For every song the library holds more than once (`BPMEngine.cacheKey`), the albums it is scrobbled under, most played first. Only those
+    /// songs need it: with one copy there is nothing to choose between. This is what `AppleMusicDetailsFile.albums` keeps.
+    nonisolated static func albumsForRepeatedSongs(rows: [AppleMusicDetailRow], scrobbles: [ScrobbleSnapshot]) -> [String: [String]] {
+        var copies: [String: Int] = [:]
+        for row in rows where !row.title.isEmpty { copies[BPMEngine.cacheKey(artist: row.artist, track: row.title), default: 0] += 1 }
+        let repeated = Set(copies.filter { $0.value > 1 }.keys)
+        guard !repeated.isEmpty else { return [:] }
+        var counts: [String: [String: Int]] = [:]
+        for song in distinctSongs(scrobbles) where !song.albums.isEmpty {
+            let key = BPMEngine.cacheKey(artist: song.artist, track: song.track)
+            guard repeated.contains(key) else { continue }
+            for (name, count) in song.albums { counts[key, default: [:]][plain(name), default: 0] += count }
+        }
+        return counts.mapValues(ranked)
     }
 
     /// An album's name for matching: the app's usual album-name rule (which ignores capitals, punctuation and edition suffixes), except that
@@ -321,15 +409,14 @@ struct AppleMusicDetailsIndex: Sendable {
     // MARK: Length
 
     /// Music's length for each song, keyed the way lengths are everywhere (`DurationEngine.cacheKey`), for songs whose length is usable. Like tempo it
-    /// belongs to a recording, so only identical titles count, and a song whose copies disagree by more than 2 seconds (a studio and a live take under
-    /// one title, say) gets none rather than a guess.
-    nonisolated static func durationByKey(_ rows: [AppleMusicDetailRow]) -> [String: Int] {
-        var values: [String: [Int]] = [:]
-        for row in rows where row.seconds > 0 && !row.title.isEmpty {
-            values[DurationEngine.cacheKey(artist: row.artist, track: row.title), default: []].append(row.seconds)
-        }
+    /// belongs to a recording, so only identical titles count. A song the library holds more than once uses the copy on the album it is scrobbled
+    /// under (`albums`, from `albumsForRepeatedSongs`); if that doesn't settle it, a song whose copies disagree by more than 2 seconds (a studio
+    /// and a live take under one title, say) gets none rather than a guess.
+    nonisolated static func durationByKey(_ rows: [AppleMusicDetailRow], albums: [String: [String]] = [:]) -> [String: Int] {
         var out: [String: Int] = [:]
-        for (key, list) in values {
+        for (key, group) in rowsByKey(rows) {
+            let version = pickVersion(group, albums: albums[key] ?? [])
+            let list = version.map(\.seconds).filter { $0 > 0 }
             guard let low = list.min(), let high = list.max(), high - low <= 2 else { continue }
             out[key] = list.sorted()[list.count / 2]
         }
@@ -339,18 +426,23 @@ struct AppleMusicDetailsIndex: Sendable {
     // MARK: Tempo
 
     /// Music's tempo tag for each song, keyed the way tempo is everywhere (`BPMEngine.cacheKey`), for songs whose tag is usable. Tempo
-    /// belongs to a recording, so only identical titles count (no spelling variants), and a song whose copies disagree by more than
-    /// 2 BPM gets none rather than a guess.
-    nonisolated static func tempoByKey(_ rows: [AppleMusicDetailRow]) -> [String: Double] {
-        var values: [String: [Int]] = [:]
-        for row in rows where row.bpm > 0 && !row.title.isEmpty {
-            values[BPMEngine.cacheKey(artist: row.artist, track: row.title), default: []].append(row.bpm)
-        }
+    /// belongs to a recording, so only identical titles count (no spelling variants). A song the library holds more than once uses the copy on
+    /// the album it is scrobbled under; if that doesn't settle it, a song whose copies disagree by more than 2 BPM gets none rather than a guess.
+    nonisolated static func tempoByKey(_ rows: [AppleMusicDetailRow], albums: [String: [String]] = [:]) -> [String: Double] {
         var out: [String: Double] = [:]
-        for (key, list) in values {
+        for (key, group) in rowsByKey(rows) {
+            let version = pickVersion(group, albums: albums[key] ?? [])
+            let list = version.map(\.bpm).filter { $0 > 0 }
             guard let low = list.min(), let high = list.max(), high - low <= 2 else { continue }
             out[key] = Double(list.sorted()[list.count / 2])
         }
         return out
+    }
+
+    /// The rows grouped by song the way tempo and length are keyed (`BPMEngine.cacheKey`; the two keys are the same rule).
+    private nonisolated static func rowsByKey(_ rows: [AppleMusicDetailRow]) -> [String: [AppleMusicDetailRow]] {
+        var groups: [String: [AppleMusicDetailRow]] = [:]
+        for row in rows where !row.title.isEmpty { groups[BPMEngine.cacheKey(artist: row.artist, track: row.title), default: []].append(row) }
+        return groups
     }
 }

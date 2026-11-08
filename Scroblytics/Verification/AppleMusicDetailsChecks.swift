@@ -35,6 +35,7 @@ enum AppleMusicDetailsChecks {
             valueChecks(check)
             tempoChecks(check)
             lengthChecks(check)
+            versionChecks(check)
             storageChecks(check)
             crossCheck(check)
             HeadlessTask.finish(failures)
@@ -182,6 +183,106 @@ enum AppleMusicDetailsChecks {
         check("time listened counts a Music length for each play", DurationEngine.timeListenedSeconds(scrobbles: plays, lookup: [key: 215]) == 645)
     }
 
+    // MARK: Which copy is the song (album and title together)
+
+    private static func playOn(_ artist: String, _ track: String, album: String, _ n: Int = 1) -> [ScrobbleSnapshot] {
+        (0..<n).map { ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track, imageURL: nil, playedAt: t0.addingTimeInterval(Double($0))) }
+    }
+
+    /// The copy-picking rule (`pickVersion`), through the Index (pages and Query) and through the maps the tempo and length engines read.
+    @MainActor
+    private static func versionChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let key = BPMEngine.cacheKey(artist: "A", track: "Song")
+        let studio = row("A", "Song", album: "Studio Album", genre: "Rock", bpm: 100, added: 1, seconds: 200)
+        let live = row("A", "Song", album: "Live Record", genre: "Live", bpm: 140, added: 50, seconds: 300)
+        let hits = row("A", "Song", album: "Greatest Hits", genre: "Pop", bpm: 101, added: 30, seconds: 201)
+        func maps(_ rows: [AppleMusicDetailRow], _ plays: [ScrobbleSnapshot]) -> (tempo: Double?, seconds: Int?, albums: [String: [String]]) {
+            let albums = Index.albumsForRepeatedSongs(rows: rows, scrobbles: plays)
+            return (Index.tempoByKey(rows, albums: albums)[key], Index.durationByKey(rows, albums: albums)[DurationEngine.cacheKey(artist: "A", track: "Song")], albums)
+        }
+
+        // The album you play it under decides, for every field.
+        let liveRows = [studio, live]
+        let livePlays = playOn("A", "Song", album: "Live Record", 6) + playOn("A", "Song", album: "Studio Album", 2)
+        let liveIndex = Index(rows: liveRows, scrobbles: livePlays)
+        check("a song on two albums is the copy on the album it is mostly scrobbled under", liveIndex.rows(artist: "A", track: "Song") == [live])
+        let liveMaps = maps(liveRows, livePlays)
+        check("…and its tempo and length are that copy's, though the copies disagree", liveMaps.tempo == 140 && liveMaps.seconds == 300, "\(String(describing: liveMaps.tempo)) \(String(describing: liveMaps.seconds))")
+        check("…and its date added and genre are that copy's too", Index.earliestAdded(liveIndex.rows(artist: "A", track: "Song")) == day(50) && Index.commonGenre(liveIndex.rows(artist: "A", track: "Song")) == "Live")
+        let studioPlays = playOn("A", "Song", album: "Live Record", 2) + playOn("A", "Song", album: "Studio Album", 6)
+        check("scrobbled mostly under the other album, the other copy wins", Index(rows: liveRows, scrobbles: studioPlays).rows(artist: "A", track: "Song") == [studio] && maps(liveRows, studioPlays).tempo == 100)
+
+        // Without the album the old cautious rule applies: copies that disagree give nothing; copies that agree are used together.
+        let noAlbum = Index(rows: liveRows, scrobbles: playOn("A", "Song", album: "", 5))
+        check("a song scrobbled with no album keeps every copy", noAlbum.rows(artist: "A", track: "Song").count == 2)
+        let noAlbumMaps = maps(liveRows, playOn("A", "Song", album: "", 5))
+        check("…and disagreeing copies give no tempo or length", noAlbumMaps.tempo == nil && noAlbumMaps.seconds == nil && noAlbumMaps.albums.isEmpty)
+        let agreeing = maps([studio, hits], playOn("A", "Song", album: "Elsewhere", 4))
+        check("a scrobbled album the library has no copy on falls back: agreeing copies are still used", agreeing.tempo == 101 && agreeing.seconds == 201, "\(String(describing: agreeing.tempo))")
+        check("…and with no copy on that album, disagreeing copies give nothing", maps(liveRows, playOn("A", "Song", album: "Elsewhere", 4)).tempo == nil)
+
+        // The most played album the library has a copy on wins, not simply the most played album.
+        let ranking = playOn("A", "Song", album: "Not In Library", 9) + playOn("A", "Song", album: "Live Record", 3) + playOn("A", "Song", album: "Studio Album", 1)
+        check("an album with no copy is skipped for the next most played one that has one", Index(rows: liveRows, scrobbles: ranking).rows(artist: "A", track: "Song") == [live] && maps(liveRows, ranking).tempo == 140)
+        let tie = playOn("A", "Song", album: "Studio Album", 3) + playOn("A", "Song", album: "Live Record", 3)
+        check("equal plays on two albums go alphabetically, the same every time", maps(liveRows, tie).albums[key] == ["live record", "studio album"] && Index(rows: liveRows, scrobbles: tie).rows(artist: "A", track: "Song") == [live])
+
+        // Album names compare the way the rest of the app does.
+        let edition = row("A", "Song", album: "Studio Album (Deluxe Edition)", bpm: 130, seconds: 250)
+        let exactWins = Index(rows: [studio, edition], scrobbles: playOn("A", "Song", album: "Studio Album (Deluxe Edition)", 3))
+        check("an identical album name is preferred over one that differs only by an edition note", exactWins.rows(artist: "A", track: "Song") == [edition])
+        let nearOnly = Index(rows: [edition, live], scrobbles: playOn("A", "Song", album: "Studio Album", 3))
+        check("an album that differs only by an edition note still counts as the same album", nearOnly.rows(artist: "A", track: "Song") == [edition])
+        check("capitals and spacing in the scrobbled album don't matter", Index(rows: liveRows, scrobbles: playOn("A", "Song", album: "  LIVE   record ", 3)).rows(artist: "A", track: "Song") == [live])
+
+        // Songs that don't need it are untouched.
+        let single = Index(rows: [studio], scrobbles: playOn("A", "Song", album: "Some Other Album", 5))
+        check("a song with one copy is used whatever album it is scrobbled under", single.rows(artist: "A", track: "Song") == [studio])
+        check("the saved ranking holds only songs the library has more than once", maps([studio], playOn("A", "Song", album: "Studio Album", 2)).albums.isEmpty)
+        check("an artist or album question still sees every copy", liveIndex.rows(artist: "A").count == 2 && liveIndex.rows(artist: "A", album: "Studio Album").count == 1)
+
+        // The ranking itself.
+        let many = playOn("A", "Song", album: "One", 5) + playOn("a", "song", album: "Two", 4) + playOn("A", "Song", album: "Three", 3) + playOn("A", "Song", album: "Four", 2) + playOn("B", "Other", album: "One", 9)
+        let ranked = Index.albumsForRepeatedSongs(rows: [studio, live, row("B", "Other")], scrobbles: many)
+        check("the ranking merges spellings that differ only in case, keeps three albums, most played first", ranked[key] == ["one", "two", "three"], "\(ranked)")
+        check("…and leaves out a song the library holds once", ranked[BPMEngine.cacheKey(artist: "B", track: "Other")] == nil)
+
+        // The file keeps it, and an older file without it still loads.
+        let folder = FileManager.default.temporaryDirectory.appending(path: "musicdetails-albums-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let url = folder.appending(path: "library-details.json")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = AppleMusicDetailsFile(readAt: t0, rows: liveRows, albums: liveMaps.albums)
+        try? AppleMusicDetailsStorage.save(file, to: url)
+        check("the saved ranking comes back with the file", AppleMusicDetailsStorage.load(from: url)?.albums == liveMaps.albums)
+        check("the maps other parts read follow the saved ranking", AppleMusicDetailsStorage.tempoMap(from: url)[key] == 140 && AppleMusicDetailsStorage.durationMap(from: url)[DurationEngine.cacheKey(artist: "A", track: "Song")] == 300)
+        let without = AppleMusicDetailsFile(readAt: t0.addingTimeInterval(5), rows: liveRows)
+        try? AppleMusicDetailsStorage.save(without, to: url)
+        check("a file saved without the ranking loads, and disagreeing copies then give no tempo", AppleMusicDetailsStorage.load(from: url)?.albums.isEmpty == true && AppleMusicDetailsStorage.tempoMap(from: url)[key] == nil)
+
+        // Whose length wins.
+        var snapshot = DurationEngine.Snapshot()
+        snapshot.overrides = ["entered": 250]
+        snapshot.cachedSeconds = ["entered": 200, "both": 200, "onlineOnly": 200]
+        snapshot.cachedMisses = ["missed"]
+        snapshot.music = ["entered": 190, "both": 190, "missed": 190, "musicOnly": 190]
+        check("by default the length found online beats Music's", snapshot.resolution(forKey: "both") == .seconds(200) && snapshot.secondsLookup["both"] == 200)
+        snapshot.musicWins = true
+        check("with Music's length chosen, it beats the one found online", snapshot.resolution(forKey: "both") == .seconds(190) && snapshot.secondsLookup["both"] == 190)
+        check("…a length you entered still beats both", snapshot.resolution(forKey: "entered") == .seconds(250) && snapshot.secondsLookup["entered"] == 250)
+        check("…and songs Music has no length for keep the online one", snapshot.resolution(forKey: "onlineOnly") == .seconds(200) && snapshot.secondsLookup["onlineOnly"] == 200)
+        check("…and Music still fills in where nothing was found online", snapshot.resolution(forKey: "missed") == .seconds(190) && snapshot.resolution(forKey: "musicOnly") == .seconds(190))
+        let scratch = UserDefaults(suiteName: "musicdetails-check-\(UUID().uuidString)")!
+        let store = AppleMusicDetailsStore(defaults: scratch)
+        check("the choice is off until made", !store.lengthWins && scratch.bool(forKey: AppleMusicDetailsStore.lengthWinsKey) == false)
+        var announced = 0
+        let token = NotificationCenter.default.addObserver(forName: DurationEngine.progressNotification, object: nil, queue: nil) { _ in announced += 1 }
+        store.setLengthWins(true)
+        store.setLengthWins(true)
+        NotificationCenter.default.removeObserver(token)
+        check("turning it on is remembered and tells the screens showing lengths (once)", store.lengthWins && scratch.bool(forKey: AppleMusicDetailsStore.lengthWinsKey) && announced == 1, "announced \(announced)")
+    }
+
     // MARK: Storage
 
     private static func storageChecks(_ report: (String, Bool, String) -> Void) {
@@ -309,8 +410,17 @@ enum AppleMusicDetailsChecks {
     private static func queryDump(container: ModelContainer, path: String) async throws {
         var out: [String] = []
         let rows = try await AppleMusicFavoritesReader.readLibraryDetails()
-        try AppleMusicDetailsStorage.save(AppleMusicDetailsFile(readAt: Date(), rows: rows))
         let scrobbles = try await offMain { try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container) }
+        let albums = Index.albumsForRepeatedSongs(rows: rows, scrobbles: scrobbles)
+        try AppleMusicDetailsStorage.save(AppleMusicDetailsFile(readAt: Date(), rows: rows, albums: albums))
+        out.append("ALBUMS_KEPT songs=\(albums.count)")
+        // Every library song's tempo and length as the engines read them (for an independent comparison).
+        let tempoMap = AppleMusicDetailsStorage.tempoMap(), durationMap = AppleMusicDetailsStorage.durationMap()
+        var listed = Set<String>()
+        for r in rows where !r.title.isEmpty && listed.insert(r.artist + "\u{1F}" + r.title).inserted {
+            let key = BPMEngine.cacheKey(artist: r.artist, track: r.title)
+            out.append("MAPS\t\(r.artist)\t\(r.title)\t\(tempoMap[key].map { String(Int($0)) } ?? "")\t\(durationMap[key].map(String.init) ?? "")")
+        }
         let snapshots = QuerySnapshots(bpm: BPMEngine.loadSnapshot(context: container.mainContext), appleMusic: AppleMusicDetailsSnapshot.load())
         out.append("SAVED rows=\(rows.count) scrobbles=\(scrobbles.count)")
         let durations = DurationEngine.loadSnapshot(context: container.mainContext)
@@ -321,6 +431,23 @@ enum AppleMusicDetailsChecks {
             guard seen.insert(key).inserted else { continue }
             if durations.cachedSeconds[key] == nil, durations.overrides[key] == nil, case .seconds(let seconds) = durations.resolution(forKey: key) { filled.append((key, seconds)) }
         }
+        // The length choice on the whole history: how many songs it changes and what it does to the total time listened.
+        var online = durations, music = durations
+        online.musicWins = false
+        music.musicWins = true
+        let onlineLookup = online.secondsLookup, musicLookup = music.secondsLookup
+        var differ = 0, differByMore = 0, bothPresent = 0
+        for key in seen {
+            if let c = durations.cachedSeconds[key], durations.overrides[key] == nil, let m = durations.music[key] {
+                bothPresent += 1
+                if c != m { differ += 1 }
+                if abs(c - m) > 3 { differByMore += 1 }
+            }
+        }
+        let totalOnline = DurationEngine.timeListenedSeconds(scrobbles: scrobbles, lookup: onlineLookup)
+        let totalMusic = DurationEngine.timeListenedSeconds(scrobbles: scrobbles, lookup: musicLookup)
+        let changedKeys = seen.filter { onlineLookup[$0] != musicLookup[$0] }.count
+        out.append("LENGTH_CHOICE songs_with_both=\(bothPresent) differ=\(differ) differ_over_3s=\(differByMore) lookup_changes=\(changedKeys) time_listened_online=\(totalOnline) time_listened_music=\(totalMusic)")
         out.append("DURATION_FILLED_FROM_MUSIC \(filled.count) distinct=\(seen.count)")
         for (key, seconds) in filled { out.append("DUR\t\(key)\t\(seconds)") }
         let loadStarted = Date()

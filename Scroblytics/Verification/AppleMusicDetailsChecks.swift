@@ -36,6 +36,7 @@ enum AppleMusicDetailsChecks {
             tempoChecks(check)
             lengthChecks(check)
             versionChecks(check)
+            tasteChecks(check)
             storageChecks(check)
             crossCheck(check)
             HeadlessTask.finish(failures)
@@ -187,6 +188,62 @@ enum AppleMusicDetailsChecks {
 
     private static func playOn(_ artist: String, _ track: String, album: String, _ n: Int = 1) -> [ScrobbleSnapshot] {
         (0..<n).map { ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track, imageURL: nil, playedAt: t0.addingTimeInterval(Double($0))) }
+    }
+
+    /// The Taste chart's source: tags, the genre Apple Music holds, or both. Made-up plays through the real engine, against a hand count.
+    @MainActor
+    private static func tasteChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func plays(_ artist: String, _ track: String, _ n: Int, offset: Int) -> [ScrobbleSnapshot] {
+            (0..<n).map { ScrobbleSnapshot(artistName: artist, albumName: "Album", trackName: track, imageURL: nil, playedAt: t0.addingTimeInterval(Double(offset + $0))) }
+        }
+        let scrobbles = plays("A", "S1", 5, offset: 0) + plays("A", "S2", 3, offset: 10) + plays("B", "S3", 2, offset: 20) + plays("B", "S4", 4, offset: 30)
+        var tags = EntityTagsSnapshot.empty
+        tags.entityCommunity[EntityTagKey.make(kind: .track, artist: "A", name: "S1")] = ["indie", "rock"]
+        tags.entityCommunity[EntityTagKey.make(kind: .track, artist: "A", name: "S2")] = []
+        tags.artistCommunity[EntityTagsSnapshot.artistKey("A")] = []
+        tags.entityCommunity[EntityTagKey.make(kind: .track, artist: "B", name: "S4")] = ["folk"]
+        tags.personalSynced = true
+        // S3 has no tags looked up yet. S1 and S2 are in the library (genres Rock and Pop); S3 and S4 are not.
+        let file = AppleMusicDetailsFile(readAt: t0, rows: [row("A", "S1", genre: "Rock"), row("A", "S2", genre: "Pop")])
+        let snapshots = QuerySnapshots(entityTags: tags, appleMusic: AppleMusicDetailsSnapshot(file: file))
+        let range = DateRange(from: t0.addingTimeInterval(-86_400), to: t0.addingTimeInterval(86_400))
+        func counts(_ source: TrendsTasteSource, music: QuerySnapshots = snapshots) -> TrendsTags {
+            TrendsTagsEngine.compute(scrobbles: scrobbles, snapshots: music, range: range, compareRange: nil, metric: .plays, limit: 20, now: t0.addingTimeInterval(100), source: source)
+        }
+        func table(_ result: TrendsTags) -> [String: Int] { Dictionary(uniqueKeysWithValues: result.rows.map { ($0.tag, $0.plays) }) }
+
+        let byTags = counts(.tags)
+        check("tags only: each play counts toward every tag of its song, as before", table(byTags) == ["indie": 5, "rock": 5, "folk": 4], "\(table(byTags))")
+        check("…the song whose tags are not looked up yet is pending; a song Last.fm has no tags for is neither tagged nor pending", byTags.pendingPlays == 2 && byTags.taggedPlays == 9 && byTags.totalPlays == 14 && byTags.source == .tags, "\(byTags.pendingPlays) \(byTags.taggedPlays) \(byTags.totalPlays)")
+        let byGenre = counts(.appleMusic)
+        check("Apple Music genre only: each play counts toward its song's genre (lowercase, like the tags)", table(byGenre) == ["rock": 5, "pop": 3], "\(table(byGenre))")
+        check("…songs not in the library have no genre and are left out of the coverage, never pending", byGenre.taggedPlays == 8 && byGenre.pendingPlays == 0 && byGenre.totalPlays == 14 && byGenre.source == .appleMusic, "\(byGenre.taggedPlays) \(byGenre.pendingPlays)")
+        let both = counts(.both)
+        check("both: a genre that is also a tag is one name for the song (rock counts 5, not 10), and every name is listed", table(both) == ["indie": 5, "rock": 5, "folk": 4, "pop": 3], "\(table(both))")
+        check("…a song counts as pending only when it has neither tags nor a genre yet", both.pendingPlays == 2 && both.taggedPlays == 12, "\(both.pendingPlays) \(both.taggedPlays)")
+        let unread = counts(.appleMusic, music: QuerySnapshots(entityTags: tags))
+        check("before the library has been read there is no genre, so the chart is empty rather than wrong", unread.rows.isEmpty && unread.taggedPlays == 0)
+        let timeListened = TrendsTagsEngine.compute(scrobbles: scrobbles, snapshots: snapshots, range: range, compareRange: nil, metric: .timeListened, limit: 20, now: t0.addingTimeInterval(100), source: .appleMusic)
+        check("time listened works with genres too (weights wait for track lengths, never count as zero)", timeListened.pendingRuntime == 8 && timeListened.rows.isEmpty, "\(timeListened.pendingRuntime) \(timeListened.rows.count)")
+
+        // Clicking a bar opens Query on exactly what the bar counted.
+        func opened(_ name: String, _ source: TrendsTasteSource) -> [String: Int] {
+            let spec = TrendsDrill.taste(from: range.from, to: range.to, target: .track, name: name, source: source)
+            guard let validated = try? spec.validate(against: .standard) else { return ["invalid": 1] }
+            let run = QueryRun(target: .track, asOf: t0.addingTimeInterval(100), scrobbles: spec.countedPlays(scrobbles), allTimeScrobbles: scrobbles, snapshots: snapshots)
+            let result = QueryEngine.evaluate(validated, run: run)
+            guard let playsKey = result.columns.first(where: { $0.field.id == "plays" })?.cacheKey else { return ["no plays column": 1] }
+            return Dictionary(uniqueKeysWithValues: result.rows.map { row in
+                var n = 0
+                if case .value(.number(let v))? = row.cells[playsKey] { n = Int(v) }
+                return (row.entity.name, n)
+            })
+        }
+        check("a genre bar opens the songs of that genre with their plays (the bar's total)", opened("rock", .appleMusic) == ["S1": 5] && opened("Pop", .appleMusic) == ["S2": 3], "\(opened("rock", .appleMusic)) \(opened("Pop", .appleMusic))")
+        check("a tag bar opens the songs with that tag", opened("folk", .tags) == ["S4": 4])
+        check("with both, a bar opens the songs that have the name as a tag or as their genre, once each", opened("rock", .both) == ["S1": 5] && opened("pop", .both) == ["S2": 3] && opened("indie", .both) == ["S1": 5], "\(opened("rock", .both))")
+        check("the saved choice reads back, and anything else is tags", TrendsTasteSource(rawValue: "appleMusic") == .appleMusic && TrendsTasteSource(rawValue: "nonsense") == nil && TrendsTasteSource.allCases.count == 3)
     }
 
     /// The copy-picking rule (`pickVersion`), through the Index (pages and Query) and through the maps the tempo and length engines read.

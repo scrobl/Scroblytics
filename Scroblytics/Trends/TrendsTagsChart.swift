@@ -17,6 +17,9 @@ struct TrendsTagsChart: View {
     let openQuery: (QuerySpec, String) -> Void
 
     @AppStorage("trends.tags.metric") private var metricRaw = TrendsMetric.plays.rawValue
+    /// Whether the bars count tags, the genre Apple Music holds, or both; remembered between launches.
+    @AppStorage("trends.tags.source") private var sourceRaw = TrendsTasteSource.tags.rawValue
+    private var source: TrendsTasteSource { TrendsTasteSource(rawValue: sourceRaw) ?? .tags }
     /// Which kind of thing a click opens in Query; remembered between launches.
     @AppStorage("trends.tags.drillTarget") private var drillTargetRaw = QueryTarget.track.rawValue
     private var drillTarget: QueryTarget { QueryTarget(rawValue: drillTargetRaw) ?? .track }
@@ -26,7 +29,7 @@ struct TrendsTagsChart: View {
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
     @State private var tags: TrendsTags?
     @State private var isLoading = true
-    private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
+    private struct ComputeKey: Equatable { let metric: TrendsMetric; let source: TrendsTasteSource; let inputs: Inputs }
     private struct NativeKey: Equatable { let compute: ComputeKey; let ready: Bool }
 
     private func maxValue(_ tags: TrendsTags) -> Int { tags.rows.map { max($0.plays, $0.comparePlays ?? 0) }.max() ?? 0 }
@@ -35,6 +38,11 @@ struct TrendsTagsChart: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
+                Picker("Source", selection: $sourceRaw) {
+                    ForEach(TrendsTasteSource.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                .help("What the bars count: Last.fm and your own tags, the genre Apple Music holds for each song, or both together")
                 Spacer()
                 Picker("Metric", selection: $metricRaw) {
                     ForEach(TrendsMetric.allCases) { Text($0.label).tag($0.rawValue) }
@@ -43,20 +51,34 @@ struct TrendsTagsChart: View {
             }
             if let tags {
                 if tags.rows.isEmpty {
-                    ContentUnavailableView(
-                        tags.pendingPlays > 0 ? "Tags are still being looked up" : "No tagged plays in this period",
-                        systemImage: "tag",
-                        description: Text(tags.pendingPlays > 0
-                            ? "Tags come from Last.fm and are fetched in the background; this fills in as they arrive."
-                            : "Try a wider date range.")
-                    )
-                    .frame(minHeight: 160)
+                    if tags.source == .appleMusic, inputs.snapshots.appleMusic.isEmpty {
+                        ContentUnavailableView(
+                            "Apple Music’s genres haven’t been read yet",
+                            systemImage: "music.note.list",
+                            description: Text("Turn on Apple Music library details in Settings › Sync, with Music open, and read your library. Or choose Tags above.")
+                        )
+                        .frame(minHeight: 160)
+                    } else {
+                        ContentUnavailableView(
+                            tags.pendingPlays > 0 ? "Tags are still being looked up" : (tags.source == .appleMusic ? "No plays on songs with an Apple Music genre in this period" : "No tagged plays in this period"),
+                            systemImage: tags.source == .appleMusic ? "music.note.list" : "tag",
+                            description: Text(tags.pendingPlays > 0
+                                ? "Tags come from Last.fm and are fetched in the background; this fills in as they arrive."
+                                : "Try a wider date range.")
+                        )
+                        .frame(minHeight: 160)
+                    }
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(tags.rows) { row in tagRow(row, tags) }
                     }
                     .shareChartArea()
-                    if tags.lookedUpShare < 0.995 {
+                    if tags.source == .appleMusic, tags.totalPlays > 0, tags.taggedPlays < tags.totalPlays {
+                        let share = Double(tags.taggedPlays) / Double(tags.totalPlays)
+                        Label("Apple Music’s genre is known for \((share * 100).formatted(.number.precision(.fractionLength(0))))% of this period’s plays: the songs found in your library. The rest aren’t counted.", systemImage: "info.circle")
+                            .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    }
+                    if tags.source != .appleMusic, tags.lookedUpShare < 0.995 {
                         Label("Tags are known for \((tags.lookedUpShare * 100).formatted(.number.precision(.fractionLength(0))))% of this period’s plays so far — the rest are still being looked up, so these totals will grow.", systemImage: "hourglass")
                             .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                     }
@@ -65,7 +87,7 @@ struct TrendsTagsChart: View {
                             .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 12) {
-                        Text("Click a tag to see what you played, as")
+                        Text("Click a bar to see what you played, as")
                             .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                         Picker("Open as", selection: drillTargetBinding) {
                             Text("Artists").tag(QueryTarget.artist)
@@ -89,8 +111,8 @@ struct TrendsTagsChart: View {
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
-        .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
-        .shareNative(id: NativeKey(compute: ComputeKey(metric: metric, inputs: inputs), ready: tags != nil)) {
+        .task(id: ComputeKey(metric: metric, source: source, inputs: inputs), priority: .utility) { await recompute() }
+        .shareNative(id: NativeKey(compute: ComputeKey(metric: metric, source: source, inputs: inputs), ready: tags != nil)) {
             guard let tags, !tags.rows.isEmpty else { return nil }
             return TrendsShareCharts2.taste(tags: tags, metric: metric)
         }
@@ -106,8 +128,8 @@ struct TrendsTagsChart: View {
         let tint: Color = diff.map { $0 > 0 ? .green : $0 < 0 ? .red : .accentColor } ?? .accentColor
         let maxValue = maxValue(tags)
         return Button {
-            let spec = TrendsDrill.spec(from: tags.range.from, to: tags.range.to, target: drillTarget, tag: row.tag)
-            openQuery(spec, "Scrobbles tagged “\(row.tag)” · " + TrendsDrill.rangeLabel(from: tags.range.from, to: tags.range.to))
+            let spec = TrendsDrill.taste(from: tags.range.from, to: tags.range.to, target: drillTarget, name: row.tag, source: tags.source)
+            openQuery(spec, TrendsDrill.tasteLabel(name: row.tag, source: tags.source) + " · " + TrendsDrill.rangeLabel(from: tags.range.from, to: tags.range.to))
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -136,14 +158,14 @@ struct TrendsTagsChart: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Open the \(drillTarget.rawValue)s tagged “\(row.tag)” in Query")
+        .help(tags.source == .appleMusic ? "Open the \(drillTarget.rawValue)s in the genre “\(row.tag)” in Query" : "Open the \(drillTarget.rawValue)s tagged “\(row.tag)” in Query")
     }
 
     private func recompute() async {
         isLoading = true
-        let (metric, inputs) = (self.metric, self.inputs)
+        let (metric, inputs, source) = (self.metric, self.inputs, self.source)
         let computed = await TrendsComputeGate.shared.run {
-            TrendsTagsEngine.compute(scrobbles: inputs.scrobbles, snapshots: inputs.snapshots, range: inputs.range, compareRange: inputs.compareRange, metric: metric)
+            TrendsTagsEngine.compute(scrobbles: inputs.scrobbles, snapshots: inputs.snapshots, range: inputs.range, compareRange: inputs.compareRange, metric: metric, source: source)
         }
         guard !Task.isCancelled, let computed else { return }
         tags = computed

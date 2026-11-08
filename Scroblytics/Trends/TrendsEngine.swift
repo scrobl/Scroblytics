@@ -142,6 +142,22 @@ extension TrendsEngine {
     }
 }
 
+/// Where the Taste chart gets the names it counts: the tags (Last.fm's community tags, and your own), the genre Apple Music holds for
+/// each song, or both together.
+enum TrendsTasteSource: String, CaseIterable, Identifiable, Sendable {
+    case tags, appleMusic, both
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .tags: "Tags"
+        case .appleMusic: "Apple Music genre"
+        case .both: "Both"
+        }
+    }
+    nonisolated var usesTags: Bool { self != .appleMusic }
+    nonisolated var usesGenre: Bool { self != .tags }
+}
+
 /// "Top tags": the tags your plays fall under in the period, and how each compares with the comparison period.
 /// Computed BY the Query engine — every track with its plays and its `tags` — so a tag's total is exactly the
 /// plays of the tracks Query lists when you click it, and a track's tags mean what they mean everywhere else
@@ -164,6 +180,8 @@ struct TrendsTags: Sendable {
     let metric: TrendsMetric
     /// Time listened only: plays counted (their tags are known) whose runtime isn't resolved, so left out of the weight.
     let pendingRuntime: Int
+    /// Where the names come from. With Apple Music's genre, `taggedPlays` is the plays on songs that have a genre.
+    var source: TrendsTasteSource = .tags
 
     /// Share of the period's plays whose tags have been looked up (tagged or known to have none).
     var lookedUpShare: Double { totalPlays == 0 ? 1 : Double(totalPlays - pendingPlays) / Double(totalPlays) }
@@ -172,15 +190,15 @@ struct TrendsTags: Sendable {
 enum TrendsTagsEngine {
     static func compute(
         scrobbles: [ScrobbleSnapshot], snapshots: QuerySnapshots, range: DateRange, compareRange: DateRange?,
-        metric: TrendsMetric = .plays, limit: Int = 10, now: Date = Date()
+        metric: TrendsMetric = .plays, limit: Int = 10, now: Date = Date(), source: TrendsTasteSource = .tags
     ) -> TrendsTags {
-        let main = weights(scrobbles: scrobbles, snapshots: snapshots, range: range, metric: metric, now: now)
-        let compare = compareRange.map { weights(scrobbles: scrobbles, snapshots: snapshots, range: $0, metric: metric, now: now) }
+        let main = weights(scrobbles: scrobbles, snapshots: snapshots, range: range, metric: metric, now: now, source: source)
+        let compare = compareRange.map { weights(scrobbles: scrobbles, snapshots: snapshots, range: $0, metric: metric, now: now, source: source) }
         let top = main.perTag.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(limit)
         return TrendsTags(
             rows: top.map { entry in TrendsTags.Row(tag: entry.key, plays: entry.value, comparePlays: compare.map { $0.perTag[entry.key] ?? 0 }) },
             range: range, compareRange: compareRange,
-            totalPlays: main.total, taggedPlays: main.tagged, pendingPlays: main.pending, metric: metric, pendingRuntime: main.pendingRuntime
+            totalPlays: main.total, taggedPlays: main.tagged, pendingPlays: main.pending, metric: metric, pendingRuntime: main.pendingRuntime, source: source
         )
     }
 
@@ -189,19 +207,22 @@ enum TrendsTagsEngine {
         var total = 0, tagged = 0, pending = 0, pendingRuntime = 0
     }
 
-    private static func weights(scrobbles: [ScrobbleSnapshot], snapshots: QuerySnapshots, range: DateRange, metric: TrendsMetric, now: Date) -> Weights {
+    private static func weights(scrobbles: [ScrobbleSnapshot], snapshots: QuerySnapshots, range: DateRange, metric: TrendsMetric, now: Date, source: TrendsTasteSource) -> Weights {
         var spec = QuerySpec(target: .track)
         spec.period = QueryPeriod(from: range.from, to: range.to)
         spec.groups = [[QueryCondition("plays", .greaterThan, [.number(0)])]]
         let valueField = metric == .plays ? "plays" : "timeListened"
-        spec.columns = [QueryFieldRef("plays")] + (valueField == "plays" ? [] : [QueryFieldRef(valueField)]) + [QueryFieldRef("tags")]
+        spec.columns = [QueryFieldRef("plays")] + (valueField == "plays" ? [] : [QueryFieldRef(valueField)])
+            + (source.usesTags ? [QueryFieldRef("tags")] : []) + (source.usesGenre ? [QueryFieldRef("musicGenre")] : [])
         spec.asOf = now
         guard let validated = try? spec.validate(against: .standard) else { return Weights() }
         let run = QueryRun(target: .track, asOf: now, scrobbles: spec.countedPlays(scrobbles), allTimeScrobbles: scrobbles, snapshots: snapshots)
         let result = QueryEngine.evaluate(validated, run: run)
         guard let playsKey = result.columns.first(where: { $0.field.id == "plays" })?.cacheKey,
-              let valueKey = result.columns.first(where: { $0.field.id == valueField })?.cacheKey,
-              let tagsKey = result.columns.first(where: { $0.field.id == "tags" })?.cacheKey else { return Weights() }
+              let valueKey = result.columns.first(where: { $0.field.id == valueField })?.cacheKey else { return Weights() }
+        let tagsKey = result.columns.first(where: { $0.field.id == "tags" })?.cacheKey
+        let genreKey = result.columns.first(where: { $0.field.id == "musicGenre" })?.cacheKey
+        guard !source.usesTags || tagsKey != nil, !source.usesGenre || genreKey != nil else { return Weights() }
 
         var out = Weights()
         for row in result.rows {
@@ -214,13 +235,26 @@ enum TrendsTagsEngine {
             case .pending?: value = nil
             default: value = metric == .plays ? plays : 0
             }
-            switch row.cells[tagsKey] ?? .missing {
-            case .value(.tags(let tags)):
+            // The names this song counts under: its tags and/or its Apple Music genre, each once (a genre that is also a tag is one name).
+            var names = Set<String>()
+            var known = false, waiting = false
+            if let tagsKey {
+                switch row.cells[tagsKey] ?? .missing {
+                case .value(.tags(let tags)): known = true; names.formUnion(tags)
+                case .pending: waiting = true
+                default: break
+                }
+            }
+            if let genreKey, case .value(.text(let genre))? = row.cells[genreKey] {
+                let name = genre.trimmingCharacters(in: .whitespaces).lowercased()
+                if !name.isEmpty { known = true; names.insert(name) }
+            }
+            if known {
                 out.tagged += plays
                 guard let value else { out.pendingRuntime += plays; continue }
-                for tag in tags { out.perTag[tag, default: 0] += value }
-            case .pending: out.pending += plays
-            default: break
+                for name in names { out.perTag[name, default: 0] += value }
+            } else if waiting {
+                out.pending += plays
             }
         }
         return out

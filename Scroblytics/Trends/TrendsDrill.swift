@@ -22,6 +22,31 @@ enum TrendsDrill {
         return spec
     }
 
+    /// What a Taste bar opens: what was played in the period under that name, whether the name is a tag, Apple Music's genre or either
+    /// (with both, a song counts if the name is one of its tags or its genre, which is how the bar was counted). Genre text is matched
+    /// without regard to case, like every text field in Query.
+    static func taste(from: Date, to: Date, target: QueryTarget, name: String, source: TrendsTasteSource) -> QuerySpec {
+        var spec = Self.spec(from: from, to: to, target: target)
+        let played = spec.groups[0]
+        let byTag = played + [QueryCondition("tags", .tagsIsAny, [.tags([name])])]
+        let byGenre = played + [QueryCondition("musicGenre", .textIs, [.text(name)])]
+        switch source {
+        case .tags: spec.groups = [byTag]
+        case .appleMusic: spec.groups = [byGenre]
+        case .both: spec.groups = [byTag, byGenre]
+        }
+        return spec
+    }
+
+    /// The label Query shows for a Taste bar's click.
+    static func tasteLabel(name: String, source: TrendsTasteSource) -> String {
+        switch source {
+        case .tags: "Scrobbles tagged “\(name)”"
+        case .appleMusic: "Scrobbles in the Apple Music genre “\(name)”"
+        case .both: "Scrobbles tagged or in the genre “\(name)”"
+        }
+    }
+
     /// The entities whose `metric` falls in a histogram bar — over the same period the chart was drawn for.
     static func longTailBin(target: QueryTarget, metric: LongTailMetric, bin: LongTailBin, range: DateRange) -> QuerySpec {
         var spec = QuerySpec(target: target)

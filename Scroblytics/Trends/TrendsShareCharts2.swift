@@ -146,9 +146,20 @@ enum TrendsShareCharts2 {
 
     // MARK: Taste
 
+    /// The small print under a Taste card: how much of the period the names cover, or how a play is counted.
+    private static func tasteFootnote(_ tags: TrendsTags) -> String {
+        func percent(_ share: Double) -> String { (share * 100).formatted(.number.precision(.fractionLength(0))) }
+        if tags.source == .appleMusic {
+            guard tags.totalPlays > 0, tags.taggedPlays < tags.totalPlays else { return "Each play counts toward the Apple Music genre of its song." }
+            return "Apple Music’s genre is known for \(percent(Double(tags.taggedPlays) / Double(tags.totalPlays)))% of this period’s plays."
+        }
+        if tags.lookedUpShare < 0.995 { return "Tags are known for \(percent(tags.lookedUpShare))% of this period’s plays so far." }
+        return tags.source == .both ? "Each play counts toward every tag and the Apple Music genre of its song." : "Each play counts toward every tag of its track."
+    }
+
     static func taste(tags: TrendsTags, metric: TrendsMetric) -> ShareNativeChart {
         var controls = [
-            ShareNativeControl(id: "rows", label: "Tags", kind: .count(range: 3...15, defaultValue: 8)),
+            ShareNativeControl(id: "rows", label: tags.source == .appleMusic ? "Genres" : (tags.source == .both ? "Tags and genres" : "Tags"), kind: .count(range: 3...15, defaultValue: 8)),
             ShareNativeControl(id: "bars", label: "Show the bars", kind: .toggle(defaultValue: true)),
         ]
         if tags.compareRange != nil { controls.insert(compareToggle(), at: 1) }
@@ -156,7 +167,7 @@ enum TrendsShareCharts2 {
         let lines = tags.rows.map { "\($0.tag.capitalized): \(TrendsWeight.format($0.plays, metric: metric))" }
         return ShareNativeChart(
             id: "trends.taste", caption: caption,
-            footnote: tags.lookedUpShare < 0.995 ? "Tags are known for \((tags.lookedUpShare * 100).formatted(.number.precision(.fractionLength(0))))% of this period’s plays so far." : "Each play counts toward every tag of its track.",
+            footnote: tasteFootnote(tags),
             preferredSize: .portrait, controls: controls, textLines: lines, zoomForShape: { $0 == .wide ? 1.6 : 1.9 }
         ) { layout, options, _ in
             AnyView(ShareTagBars(tags: tags, metric: metric, count: options.number("rows", 8), changes: options.flag("compare", false), bars: options.flag("bars", true), layout: layout))

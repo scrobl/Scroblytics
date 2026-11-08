@@ -211,7 +211,7 @@ extension HelpContent {
                 .heading("Eras (decade river)"),
                 .paragraph("Each play adds its weight to the band of its album’s (or track’s) release year: 1960s & earlier, then each decade through the 2020s. Plays whose release date is still being looked up are counted as pending and plays with no date as “no date”."),
                 .heading("Taste"),
-                .paragraph("The period’s top tags, each track’s weight added to every tag it has (community tags of the item, or its artist if none, plus your own). The coverage line shows what share of plays have tags looked up. The Overview **Top tags** card is different: it adds each artist’s plays to that artist’s own community tags only, ignores the Metric switch, and shows the top few."),
+                .paragraph("The period’s top names, each track’s weight added to every name it has. The **source** switch above the bars chooses the names: **Tags** (community tags of the item, or its artist if none, plus your own), **Apple Music genre** (the genre Music holds for the song, the copy on the album you play it under; needs the optional Apple Music library details read in Settings › Sync, and only songs found in your library count, which the line under the bars says), or **Both** (a genre that is also a tag counts once for the song). Clicking a bar opens Query on exactly what the bar counted. The coverage line shows what share of plays have tags looked up (or a genre). The Overview **Top tags** card is different: it adds each artist’s plays to that artist’s own community tags only, ignores the Metric switch, and shows the top few."),
             ]
         ),
         HelpArticle(

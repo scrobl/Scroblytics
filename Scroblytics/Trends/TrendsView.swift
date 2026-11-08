@@ -192,6 +192,11 @@ struct TrendsView: View {
         .onChange(of: trends.customFrom) { requestReload() }
         .onChange(of: trends.customTo) { requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .weekStartDidChange)) { _ in requestReload() }
+        .onReceive(NotificationCenter.default.publisher(for: .appleMusicDetailsDidUpdate)) { _ in
+            // The saved read of the Apple Music library changed (the Taste chart can count its genres): read it again.
+            querySnapshots = nil
+            requestReload()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             oldestScrobbleDate = nil
             scrobbles = nil
@@ -284,7 +289,7 @@ struct TrendsView: View {
                 guard latestRequestID == requestID else { return }
                 snapshots = QuerySnapshots(
                     durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover,
-                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, weather: loaded.weather, images: loaded.images
+                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, appleMusic: loaded.appleMusic, weather: loaded.weather, images: loaded.images
                 )
                 querySnapshots = snapshots
                 dataVersion += 1

@@ -44,6 +44,7 @@ enum ReleaseYearAuditChecks {
             decisionChecks(check)
             try await actionChecks(check)
             try await trackChecks(check)
+            try await albumScopeChecks(check)
             musicUpdateChecks(check)
             await writerChecks(check)
             HeadlessTask.finish(failures)
@@ -368,6 +369,88 @@ enum ReleaseYearAuditChecks {
     }
 
     // MARK: - Compilations: the tracks' own dates
+
+    @MainActor
+    // MARK: - A track's own date belongs to its album
+
+    /// The same song on two albums is two versions, each with its own year: a date set for one is not the other's. Made-up data: one song on
+    /// an older and a newer album.
+    private static func albumScopeChecks(_ emit: (String, Bool, String) -> Void) async throws {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { emit(label, ok, detail) }
+        let container = try ModelContainer(for: Schema([Artist.self, Album.self, Track.self, ReleaseYearDecision.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = ModelContext(container)
+        let artist = Artist(normalizedName: "artist a", name: "Artist A")
+        context.insert(artist)
+        for (title, detected) in [("Old Hits", "1942"), ("New Hits", "1955")] {
+            let row = Album(identityKey: TextNormalization.albumIdentityKey(artist: "artist a", album: title), title: title, normalizedTitle: TextNormalization.normalizeAlbumName(title), artist: artist)
+            row.releaseDateDetected = detected
+            row.releaseDateResolvedAt = Date()
+            context.insert(row)
+        }
+        let songKey = TextNormalization.lovedKey(artist: "Artist A", track: "Song X")
+        let song = Track(identityKey: songKey, title: "Song X", normalizedTitle: TextNormalization.normalizeTrackTitle("Song X"), artist: artist)
+        context.insert(song)
+        try context.save()
+        let music: [AppleMusicTrackYear] = [
+            track("Song X", "Artist A", "Old Hits", 1935), track("Filler", "Artist A", "Old Hits", 1942),
+            track("Song X", "Artist A", "New Hits", 1955), track("Other", "Artist A", "New Hits", 1955),
+        ]
+        func report() async -> ReleaseYearAudit.Report {
+            let loaded = await ReleaseYearAuditStoreReader(modelContainer: container).load()
+            return ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides, trackOverrideIndex: loaded.trackOverrideIndex, knownTracks: loaded.known, trackOverrideAlbums: loaded.trackOverrideAlbums)
+        }
+        func row(_ title: String, _ r: ReleaseYearAudit.Report) -> ReleaseYearAudit.AlbumRow? { r.rows.first { $0.scroblytics.title == title } }
+
+        // The audit sets Music's 1935 on the song, for the older album.
+        let before = await report()
+        check("on the older album the song differs from Music (1942 shown, 1935 in Music); on the newer one it agrees", row("Old Hits", before)?.trackDifferences.map(\.name) == ["Song X"] && row("New Hits", before)?.trackDifferences.isEmpty == true)
+        let applied = try ReleaseYearAuditActions.useAppleYearsForTracks(row("Old Hits", before).map { [$0] } ?? [], context: context)
+        check("setting the song's year from the older album stores it with that album", applied.tracksSet == 1 && song.releaseDateOverride == "1935" && song.releaseDateOverrideAlbum == "Old Hits", "\(String(describing: song.releaseDateOverride)) \(String(describing: song.releaseDateOverrideAlbum))")
+
+        // What each album then shows.
+        let snapshot = ReleaseDateEngine.loadSnapshot(context: context)
+        check("played under the older album the song is 1935; under the newer one it is 1955, the album's own date", snapshot.trackResolution(artist: "Artist A", track: "Song X", primaryAlbum: "Old Hits") == .date("1935") && snapshot.trackResolution(artist: "Artist A", track: "Song X", primaryAlbum: "New Hits") == .date("1955"))
+        check("the album name is compared the way the app compares them (an edition suffix is still the same album)", snapshot.trackResolution(artist: "Artist A", track: "Song X", primaryAlbum: "Old Hits (Deluxe Edition)") == .date("1935"))
+        check("a song with no album at all has nothing to tell it apart by, so its date applies", snapshot.trackResolution(artist: "Artist A", track: "Song X", primaryAlbum: nil) == .date("1935"))
+        let tableOld = await AlbumTrackReleaseDates.overrides(forKeys: [songKey], album: "Old Hits", container: container)
+        let tableNew = await AlbumTrackReleaseDates.overrides(forKeys: [songKey], album: "New Hits", container: container)
+        check("the album's own track table shows the song's date only on the album it was set for", tableOld == [songKey: "1935"] && tableNew.isEmpty, "\(tableOld) \(tableNew)")
+        check("the song's own page (track override, by album) agrees", song.releaseDateOverride(forAlbum: "New Hits") == nil && song.releaseDateOverride(forAlbum: "Old Hits") == "1935" && song.releaseDateOverride(forAlbum: nil) == "1935")
+        let after = await report()
+        check("the audit does not treat the older album's date as the song's own on the newer album: still agrees, no own date", row("New Hits", after)?.trackDifferences.isEmpty == true && row("New Hits", after)?.musicTracks.first { $0.name == "Song X" }?.ownYear == nil)
+        check("…while on the older album it is the song's own date", row("Old Hits", after)?.musicTracks.first { $0.name == "Song X" }?.ownYear == 1935)
+
+        // A date typed on the song's own page is for the song, on any album.
+        song.releaseDateOverrideAlbum = nil
+        let anyAlbum = ReleaseDateEngine.loadSnapshot(context: context)
+        check("a date with no album (typed on the song's page, or saved before albums were recorded) applies on every album", anyAlbum.trackResolution(artist: "Artist A", track: "Song X", primaryAlbum: "New Hits") == .date("1935"))
+        song.releaseDateOverrideAlbum = "Old Hits"
+
+        // Undo puts back the date and forgets the album.
+        if let decision = try context.fetch(FetchDescriptor<ReleaseYearDecision>()).first { try ReleaseYearAuditActions.undo(decision, context: context) }
+        check("undoing the decision removes the song's date and the album it belonged to", song.releaseDateOverride == nil && song.releaseDateOverrideAlbum == nil)
+
+        // Dates saved before albums were recorded are tied to the album of the decision that set them, once; yours are left alone.
+        let other = Track(identityKey: TextNormalization.lovedKey(artist: "Artist A", track: "Typed"), title: "Typed", normalizedTitle: "typed", artist: artist)
+        other.releaseDateOverride = "1960"
+        context.insert(other)
+        song.releaseDateOverride = "1935"
+        let changes = [ReleaseYearAudit.TrackChange(key: songKey, previous: nil, applied: "1935"), ReleaseYearAudit.TrackChange(key: other.identityKey, previous: nil, applied: "1961")]
+        context.insert(ReleaseYearDecision(
+            albumKey: "k", artist: "Artist A", album: "Old Hits", verdict: ReleaseYearAudit.Decision.Verdict.usedApple.rawValue, scroblyticsYear: 1942, musicYear: 1935,
+            previousOverride: nil, decidedAt: Date(), albumChanged: false, trackChangesJSON: try? JSONEncoder().encode(changes)
+        ))
+        try context.save()
+        check("an earlier date that a decision set is tied to that decision's album", try TrackDateScopeMigration.backfill(context: context) == 1 && song.releaseDateOverrideAlbum == "Old Hits")
+        check("a date you typed, or changed since (it is no longer what the decision applied), is left alone", other.releaseDateOverrideAlbum == nil && other.releaseDateOverride == "1960")
+        check("running it again changes nothing", try TrackDateScopeMigration.backfill(context: context) == 0)
+
+        // Backups carry the album; an older archive without it reads as "any album".
+        let withAlbum = try JSONEncoder().encode(NativeBackupFormat.TrackRecord(artist: "Artist A", title: "Song X", durationOverrideSeconds: nil, bpmOverride: nil, releaseDateOverride: "1935", customImageFilename: nil, releaseDateOverrideAlbum: "Old Hits"))
+        check("a backed-up track keeps the album its date belongs to", (try? JSONDecoder().decode(NativeBackupFormat.TrackRecord.self, from: withAlbum))?.releaseDateOverrideAlbum == "Old Hits")
+        let legacy = Data(#"{"artist":"Artist A","title":"Song X","releaseDateOverride":"1935"}"#.utf8)
+        check("an archive made before that still restores, with the date applying on any album", (try? JSONDecoder().decode(NativeBackupFormat.TrackRecord.self, from: legacy))?.releaseDateOverrideAlbum == nil && (try? JSONDecoder().decode(NativeBackupFormat.TrackRecord.self, from: legacy))?.releaseDateOverride == "1935")
+    }
 
     @MainActor
     private static func trackChecks(_ emit: (String, Bool, String) -> Void) async throws {

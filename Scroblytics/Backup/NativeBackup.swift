@@ -151,6 +151,8 @@ enum NativeBackupFormat {
         let bpmOverride: Double?
         let releaseDateOverride: String?
         let customImageFilename: String?
+        /// The album the release date was set for (absent = any album, as in older archives).
+        var releaseDateOverrideAlbum: String? = nil
     }
 
     struct ArtistImageRecord: Codable { let artist: String; let filename: String }
@@ -286,6 +288,7 @@ enum NativeBackupEngine {
             track.durationOverrideSeconds = record.durationOverrideSeconds
             track.bpmOverride = record.bpmOverride
             track.releaseDateOverride = record.releaseDateOverride
+            track.releaseDateOverrideAlbum = record.releaseDateOverride == nil ? nil : record.releaseDateOverrideAlbum
             track.customImageFilename = record.customImageFilename
         }
 
@@ -449,7 +452,7 @@ enum NativeBackupEngine {
         }
         let tracks = try context.fetch(FetchDescriptor<Track>()).compactMap { track -> NativeBackupFormat.TrackRecord? in
             guard track.durationOverrideSeconds != nil || track.bpmOverride != nil || track.releaseDateOverride != nil || track.customImageFilename != nil else { return nil }
-            return .init(artist: track.artist?.name ?? "", title: track.title, durationOverrideSeconds: track.durationOverrideSeconds, bpmOverride: track.bpmOverride, releaseDateOverride: track.releaseDateOverride, customImageFilename: track.customImageFilename)
+            return .init(artist: track.artist?.name ?? "", title: track.title, durationOverrideSeconds: track.durationOverrideSeconds, bpmOverride: track.bpmOverride, releaseDateOverride: track.releaseDateOverride, customImageFilename: track.customImageFilename, releaseDateOverrideAlbum: track.releaseDateOverrideAlbum)
         }
         let artists = try context.fetch(FetchDescriptor<Artist>())
         let artistImages = artists.compactMap { artist in artist.customImageFilename.map { NativeBackupFormat.ArtistImageRecord(artist: artist.name, filename: $0) } }
@@ -516,7 +519,7 @@ enum NativeBackupEngine {
             album.canonicalArtist = nil; album.canonicalAlbum = nil; album.manualTracklist = nil
         }
         for track in try context.fetch(FetchDescriptor<Track>()) {
-            track.durationOverrideSeconds = nil; track.bpmOverride = nil; track.releaseDateOverride = nil; track.customImageFilename = nil
+            track.durationOverrideSeconds = nil; track.bpmOverride = nil; track.releaseDateOverride = nil; track.releaseDateOverrideAlbum = nil; track.customImageFilename = nil
         }
         for artist in try context.fetch(FetchDescriptor<Artist>()) { artist.customImageFilename = nil }
         for item in try context.fetch(FetchDescriptor<AlbumImageOverride>()) { context.delete(item) }

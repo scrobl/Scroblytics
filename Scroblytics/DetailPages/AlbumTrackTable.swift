@@ -376,7 +376,7 @@ struct AlbumTrackTable: View {
         }
         let keys = Array(Set(releasedKeys.values))
         let container = modelContext.container
-        let found = await AlbumTrackReleaseDates.overrides(forKeys: keys, container: container)
+        let found = await AlbumTrackReleaseDates.overrides(forKeys: keys, album: album, container: container)
         guard !Task.isCancelled else { return }
         ownDates = found
     }

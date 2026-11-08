@@ -211,7 +211,7 @@ final class TrackDetailModel {
         let key = TextNormalization.lovedKey(artist: identity.artist, track: identity.name)
         var descriptor = FetchDescriptor<Track>(predicate: #Predicate<Track> { $0.identityKey == key })
         descriptor.fetchLimit = 1
-        return (try? context.fetch(descriptor).first)?.releaseDateOverride
+        return (try? context.fetch(descriptor).first)?.releaseDateOverride(forAlbum: primaryAlbum)
     }
 
     /// A real write to the person's Last.fm account, so a failure is shown rather than swallowed.

@@ -66,6 +66,8 @@ enum ReleaseDateEngine {
         var albumsByNormalizedTitle: [String: [AlbumInfo]] = [:]
         /// `lovedKey` → `Track.releaseDateOverride`.
         var trackOverrides: [String: String] = [:]
+        /// `lovedKey` → `Track.releaseDateOverrideAlbum`, for the overrides that belong to one album.
+        var trackOverrideAlbums: [String: String] = [:]
         /// `TrackReleaseDateCacheEntry` rows: `lovedKey` → date, or nil for a cached miss.
         var trackCache: [String: String?] = [:]
 
@@ -88,7 +90,7 @@ enum ReleaseDateEngine {
         /// (no album at all) the track's own cache row.
         nonisolated func trackResolution(artist: String, track: String, primaryAlbum: String?) -> Resolution {
             let key = TextNormalization.lovedKey(artist: artist, track: track)
-            if let override = trackOverrides[key] { return .date(override) }
+            if let override = trackOverrides[key], TrackDateScope.applies(storedAlbum: trackOverrideAlbums[key], to: primaryAlbum) { return .date(override) }
             if let primaryAlbum { return albumResolution(artist: artist, album: primaryAlbum) }
             if let cached = trackCache[key] { return cached.map { .date($0) } ?? .unknown }
             return .pending
@@ -108,7 +110,10 @@ enum ReleaseDateEngine {
             snapshot.albumsByNormalizedTitle[album.normalizedTitle, default: []].append(info)
         }
         for track in (try? context.fetch(FetchDescriptor<Track>())) ?? [] {
-            if let override = track.releaseDateOverride { snapshot.trackOverrides[track.identityKey] = override }
+            if let override = track.releaseDateOverride {
+                snapshot.trackOverrides[track.identityKey] = override
+                if let album = track.releaseDateOverrideAlbum, !album.isEmpty { snapshot.trackOverrideAlbums[track.identityKey] = album }
+            }
         }
         for entry in (try? context.fetch(FetchDescriptor<TrackReleaseDateCacheEntry>())) ?? [] {
             snapshot.trackCache[entry.cacheKey] = .some(entry.date)
@@ -270,14 +275,14 @@ enum ReleaseDateEngine {
         return best
     }
 
-    /// Track override > primary album's date (which itself checks the
+    /// Track override (only where it belongs to the album the track is played under) > primary album's date (which itself checks the
     /// album's own override first) > direct Deezer track lookup, only when
     /// no primary album is known at all. Never blocks for the album/no-album
     /// paths (matches `cachedAlbumDate`'s lazy contract); the rare direct
     /// track case also enqueues rather than fetching inline.
     static func cachedTrackDate(context: ModelContext, artist: String, track: String, primaryAlbum: String?) -> String? {
         let trackKey = TextNormalization.lovedKey(artist: artist, track: track)
-        if let trackRow = fetchTrackRow(context: context, identityKey: trackKey), let override = trackRow.releaseDateOverride {
+        if let trackRow = fetchTrackRow(context: context, identityKey: trackKey), let override = trackRow.releaseDateOverride(forAlbum: primaryAlbum) {
             return override
         }
         if let primaryAlbum {
@@ -302,7 +307,7 @@ enum ReleaseDateEngine {
         artist: String, track: String, primaryAlbum: String?
     ) async -> String? {
         let trackKey = TextNormalization.lovedKey(artist: artist, track: track)
-        if let trackRow = fetchTrackRow(context: context, identityKey: trackKey), let override = trackRow.releaseDateOverride {
+        if let trackRow = fetchTrackRow(context: context, identityKey: trackKey), let override = trackRow.releaseDateOverride(forAlbum: primaryAlbum) {
             return override
         }
         if let primaryAlbum {
@@ -600,5 +605,32 @@ private actor ReleaseDateSeedReader {
             guard let artist = album.artist?.name else { return nil }
             return UnresolvedAlbum(key: album.identityKey, artist: artist, title: album.title)
         }
+    }
+}
+
+
+/// Which album a track's own release date belongs to. Silent Night on a 1935 album and on a 1955 album is two versions; a date set for
+/// the one is not the other's. An override with no album (typed on the song's own page, or saved before albums were recorded) applies
+/// wherever the song is played; so does one for a song with no album at all, since there is nothing to tell it apart from.
+enum TrackDateScope {
+    nonisolated static func applies(storedAlbum: String?, to album: String?) -> Bool {
+        guard let storedAlbum, !storedAlbum.isEmpty, let album, !album.isEmpty else { return true }
+        return sameAlbum(storedAlbum, album)
+    }
+
+    /// The app's own album-name comparison (edition suffixes and punctuation ignored), with a plain one when a name reduces to nothing.
+    nonisolated static func sameAlbum(_ a: String, _ b: String) -> Bool {
+        let (x, y) = (TextNormalization.normalizeAlbumName(a), TextNormalization.normalizeAlbumName(b))
+        if !x.isEmpty, !y.isEmpty { return x == y }
+        func plain(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        return plain(a) == plain(b)
+    }
+}
+
+extension Track {
+    /// The track's own release date, if it belongs to this album (see `TrackDateScope`).
+    func releaseDateOverride(forAlbum album: String?) -> String? {
+        guard let date = releaseDateOverride, TrackDateScope.applies(storedAlbum: releaseDateOverrideAlbum, to: album) else { return nil }
+        return date
     }
 }

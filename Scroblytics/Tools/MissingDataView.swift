@@ -489,9 +489,9 @@ struct MissingDataView: View {
             var descriptor = FetchDescriptor<Track>(predicate: #Predicate<Track> { $0.identityKey == key })
             descriptor.fetchLimit = 1
             let trackRow = try? modelContext.fetch(descriptor).first
-            let override = trackRow?.releaseDateOverride
             let matchingScrobbles = (scrobbles ?? []).filter { $0.artistName == row.artist && $0.trackName == row.name }
             let primary = ReleaseDateEngine.primaryAlbum(scrobbles: matchingScrobbles)
+            let override = trackRow?.releaseDateOverride(forAlbum: primary)
             let detected = override == nil
                 ? ReleaseDateEngine.cachedTrackDate(context: modelContext, artist: row.artist, track: row.name, primaryAlbum: primary) : nil
             releaseDateEditContext = ReleaseDateEditContext(target: .track(artist: row.artist, track: row.name), detected: detected, override: override)

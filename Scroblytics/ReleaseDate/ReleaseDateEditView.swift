@@ -112,6 +112,8 @@ struct ReleaseDateEditView: View {
                 throw ReleaseDateEditError.entityNotFound
             }
             existing.releaseDateOverride = date
+            // A date typed on the song's own page is for the song, on whichever album it is played.
+            existing.releaseDateOverrideAlbum = nil
         }
         try modelContext.save()
     }

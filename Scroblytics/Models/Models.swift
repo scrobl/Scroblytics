@@ -216,6 +216,10 @@ final class Track {
     /// Track-scoped release date override — used only when the track has no
     /// reliably-known album to hang a release date off of instead.
     var releaseDateOverride: String?
+    /// The album a track's own release date was set for, as its title. A song on two albums is two versions, so a date set for one
+    /// version does not apply to the other (see `TrackDateScope`). nil = the person set it on the song itself, for any album; also
+    /// what a date saved before albums were recorded reads as.
+    var releaseDateOverrideAlbum: String?
 
     init(identityKey: String, title: String, normalizedTitle: String, artist: Artist?) {
         self.identityKey = identityKey

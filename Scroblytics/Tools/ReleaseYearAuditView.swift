@@ -585,7 +585,7 @@ struct ReleaseYearAuditView: View {
         guard let music else { return }
         let loaded = await ReleaseYearAuditStoreReader(modelContainer: modelContainer).load()
         let next = await Task.detached(priority: .userInitiated) {
-            ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides, trackOverrideIndex: loaded.trackOverrideIndex, knownTracks: loaded.known)
+            ReleaseYearAudit.compare(music: music, albums: loaded.albums, trackOverrides: loaded.trackOverrides, trackOverrideIndex: loaded.trackOverrideIndex, knownTracks: loaded.known, trackOverrideAlbums: loaded.trackOverrideAlbums)
         }.value
         report = next
     }

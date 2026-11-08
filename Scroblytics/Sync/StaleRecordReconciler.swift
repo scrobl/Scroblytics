@@ -317,7 +317,10 @@ final class StaleRecordReviewModel {
     private static func moveTrack(from old: Track, to new: Track) {
         if new.durationOverrideSeconds == nil { new.durationOverrideSeconds = old.durationOverrideSeconds }
         if new.bpmOverride == nil { new.bpmOverride = old.bpmOverride }
-        if new.releaseDateOverride == nil { new.releaseDateOverride = old.releaseDateOverride }
+        if new.releaseDateOverride == nil {
+            new.releaseDateOverride = old.releaseDateOverride
+            new.releaseDateOverrideAlbum = old.releaseDateOverrideAlbum
+        }
         if new.customImageFilename == nil { new.customImageFilename = old.customImageFilename }
     }
 }

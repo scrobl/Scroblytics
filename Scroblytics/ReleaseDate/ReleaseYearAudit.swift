@@ -477,11 +477,23 @@ enum ReleaseYearAudit {
     }
 
     /// `trackOverrides` are the dates set on individual tracks, by `TextNormalization.lovedKey`; `trackOverrideIndex` the same dates by
-    /// `trackIndexKey`, for a track whose spelling differs between Music and the scrobbles. `knownTracks` nil: every track counts.
+    /// `trackIndexKey`, for a track whose spelling differs between Music and the scrobbles. `trackOverrideAlbums` names the album a date was
+    /// set for (keys "k:" + the first key, "i:" + the second): such a date is the track's own only on that album. `knownTracks` nil: every
+    /// track counts.
     static func compare(
         music: [AppleMusicTrackYear], albums: [AuditAlbum], trackOverrides: [String: String] = [:], trackOverrideIndex: [String: String] = [:],
-        knownTracks: KnownTracks? = nil
+        knownTracks: KnownTracks? = nil, trackOverrideAlbums: [String: String] = [:]
     ) -> Report {
+        // A track's own date counts for this album only when it was set for this album (or for the song on any album).
+        func scopedOwnDate(savedKey: String, indexKey: String, album: String) -> String? {
+            if let date = trackOverrides[savedKey] {
+                return TrackDateScope.applies(storedAlbum: trackOverrideAlbums["k:" + savedKey], to: album) ? date : nil
+            }
+            if let date = trackOverrideIndex[indexKey] {
+                return TrackDateScope.applies(storedAlbum: trackOverrideAlbums["i:" + indexKey], to: album) ? date : nil
+            }
+            return nil
+        }
         var byKey: [Key: AuditAlbum] = [:]
         var byTitle: [String: [AuditAlbum]] = [:]
         for album in albums {
@@ -553,16 +565,15 @@ enum ReleaseYearAudit {
                 let savedKey = TextNormalization.lovedKey(artist: track.artist, track: track.name)
                 let indexKey = trackIndexKey(artist: track.artist, title: track.name)
                 if let knownTracks, !knownTracks.identityKeys.contains(savedKey), !knownTracks.indexKeys.contains(indexKey) { continue }
-                let ownDate = trackOverrides[savedKey] ?? trackOverrideIndex[indexKey]
+                let ownDate = scopedOwnDate(savedKey: savedKey, indexKey: indexKey, album: album.title)
                 let own = ownDate.flatMap(ReleaseDateEngine.year(of:))
                 guard let shown = own ?? albumYear, shown != musicYear else { continue }
                 differences.append(TrackDifference(name: track.name, artist: track.artist, musicYear: musicYear, scroblyticsYear: shown, ownDate: own != nil))
             }
             let first = tracks[0]
             let refs = tracks.map { track -> MusicTrackRef in
-                let ownDate = trackOverrides[TextNormalization.lovedKey(artist: track.artist, track: track.name)]
-                    ?? trackOverrideIndex[trackIndexKey(artist: track.artist, title: track.name)]
                 let savedKey = TextNormalization.lovedKey(artist: track.artist, track: track.name)
+                let ownDate = scopedOwnDate(savedKey: savedKey, indexKey: trackIndexKey(artist: track.artist, title: track.name), album: album.title)
                 let played = knownTracks.map { $0.identityKeys.contains(savedKey) || $0.indexKeys.contains(trackIndexKey(artist: track.artist, title: track.name)) } ?? true
                 return MusicTrackRef(persistentID: track.persistentID, name: track.name, artist: track.artist, musicYear: track.year, ownYear: ownDate.flatMap(ReleaseDateEngine.year(of:)), inScroblytics: played)
             }
@@ -586,6 +597,8 @@ actor ReleaseYearAuditStoreReader {
         let albums: [AuditAlbum]
         let trackOverrides: [String: String]
         let trackOverrideIndex: [String: String]
+        /// The album each date was set for ("k:" + identity key, "i:" + index key), where it was set for one.
+        var trackOverrideAlbums: [String: String] = [:]
         let known: ReleaseYearAudit.KnownTracks
     }
 
@@ -605,6 +618,7 @@ actor ReleaseYearAuditStoreReader {
         }
         var overrides: [String: String] = [:]
         var index: [String: String] = [:]
+        var overrideAlbums: [String: String] = [:]
         var known = ReleaseYearAudit.KnownTracks()
         for track in (try? modelContext.fetch(FetchDescriptor<Track>())) ?? [] {
             known.identityKeys.insert(track.identityKey)
@@ -613,7 +627,11 @@ actor ReleaseYearAuditStoreReader {
             guard let date = track.releaseDateOverride, !date.isEmpty else { continue }
             overrides[track.identityKey] = date
             if let key { index[key] = date }
+            if let album = track.releaseDateOverrideAlbum, !album.isEmpty {
+                overrideAlbums["k:" + track.identityKey] = album
+                if let key { overrideAlbums["i:" + key] = album }
+            }
         }
-        return Loaded(albums: albums, trackOverrides: overrides, trackOverrideIndex: index, known: known)
+        return Loaded(albums: albums, trackOverrides: overrides, trackOverrideIndex: index, trackOverrideAlbums: overrideAlbums, known: known)
     }
 }

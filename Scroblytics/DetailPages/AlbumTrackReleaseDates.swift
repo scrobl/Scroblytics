@@ -5,12 +5,13 @@ import SwiftData
 /// those few keys only, off the main thread.
 @ModelActor
 private actor AlbumTrackReleaseDateReader {
-    func overrides(forKeys keys: [String]) -> [String: String] {
+    func overrides(forKeys keys: [String], album: String?) -> [String: String] {
         guard !keys.isEmpty else { return [:] }
         let tracks = (try? modelContext.fetch(FetchDescriptor<Track>(predicate: #Predicate { keys.contains($0.identityKey) }))) ?? []
         var result: [String: String] = [:]
         for track in tracks {
-            if let date = track.releaseDateOverride, !date.isEmpty { result[track.identityKey] = date }
+            // A date set for the same song on another album is that version's, not this one's.
+            if let date = track.releaseDateOverride(forAlbum: album), !date.isEmpty { result[track.identityKey] = date }
         }
         return result
     }
@@ -73,7 +74,7 @@ enum AlbumTrackReleaseDates {
         }
     }
 
-    static func overrides(forKeys keys: [String], container: ModelContainer) async -> [String: String] {
-        await AlbumTrackReleaseDateReader(modelContainer: container).overrides(forKeys: keys)
+    static func overrides(forKeys keys: [String], album: String? = nil, container: ModelContainer) async -> [String: String] {
+        await AlbumTrackReleaseDateReader(modelContainer: container).overrides(forKeys: keys, album: album)
     }
 }

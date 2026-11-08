@@ -204,6 +204,9 @@ struct ScroblyticsApp: App {
         LibraryGapsDebugEval.runHeadlessIfRequested(container: modelContainer)
         TagPlanDebugEval.runHeadlessIfRequested(container: modelContainer)
         #endif
+        // Track release dates the Release Year Audit saved before they were tied to an album are tied to it, once.
+        let scopedContainer = Self.opened.container
+        Task { @MainActor in TrackDateScopeMigration.runOnce(container: scopedContainer) }
         // The small activity log behind Help › Report a Problem. It stays on this Mac.
         Task { @MainActor in ActivityEvents.start() }
         Task { @MainActor in ScrobbleHistoryCache.observeHistoryChanges() }

@@ -104,7 +104,7 @@ enum ReleaseYearAuditActions {
             var changes: [ReleaseYearAudit.TrackChange] = []
             if tracksOfVaried, row.musicVaries {
                 var trackResult = TrackResult()
-                changes = setTracks(ReleaseYearAudit.trackChanges(for: row, albumYear: musicYear), setThisRun: &setThisRun, result: &trackResult, context: context)
+                changes = setTracks(ReleaseYearAudit.trackChanges(for: row, albumYear: musicYear), album: row.scroblytics.title, setThisRun: &setThisRun, result: &trackResult, context: context)
                 result.tracksSet += changes.count
             }
             recordUsed(row, scroblyticsYear: year, musicYear: musicYear, album: .changed(previous: before), tracks: changes, context: context, now: now)
@@ -115,9 +115,10 @@ enum ReleaseYearAuditActions {
     }
 
     /// Sets the own date of each listed track to Music's year, skipping a track you gave a date of your own and a song already set in this
-    /// batch; returns what was set, with each track's earlier date.
+    /// batch; returns what was set, with each track's earlier date. The date is set for this album only: the same song on another album is
+    /// another version, with a year of its own.
     private static func setTracks(
-        _ differences: [ReleaseYearAudit.TrackDifference], setThisRun: inout Set<String>, result: inout TrackResult, context: ModelContext
+        _ differences: [ReleaseYearAudit.TrackDifference], album: String, setThisRun: inout Set<String>, result: inout TrackResult, context: ModelContext
     ) -> [ReleaseYearAudit.TrackChange] {
         var changes: [ReleaseYearAudit.TrackChange] = []
         for difference in differences {
@@ -130,6 +131,7 @@ enum ReleaseYearAuditActions {
             let applied = String(difference.musicYear)
             changes.append(.init(key: track.identityKey, previous: nil, applied: applied))
             track.releaseDateOverride = applied
+            track.releaseDateOverrideAlbum = album
             setThisRun.insert(track.identityKey)
         }
         return changes
@@ -155,7 +157,7 @@ enum ReleaseYearAuditActions {
         var result = TrackResult()
         var setThisRun = Set<String>()
         for row in rows {
-            let changes = setTracks(row.trackDifferences, setThisRun: &setThisRun, result: &result, context: context)
+            let changes = setTracks(row.trackDifferences, album: row.scroblytics.title, setThisRun: &setThisRun, result: &result, context: context)
             guard !changes.isEmpty else { continue }
             recordUsed(
                 row, scroblyticsYear: row.scroblytics.year ?? row.musicYear ?? 0, musicYear: row.musicYear ?? 0, album: .none,
@@ -195,7 +197,10 @@ enum ReleaseYearAuditActions {
                 let key = change.key
                 var descriptor = FetchDescriptor<Track>(predicate: #Predicate { $0.identityKey == key })
                 descriptor.fetchLimit = 1
-                if let track = try? context.fetch(descriptor).first, track.releaseDateOverride == change.applied { track.releaseDateOverride = change.previous }
+                if let track = try? context.fetch(descriptor).first, track.releaseDateOverride == change.applied {
+                    track.releaseDateOverride = change.previous
+                    track.releaseDateOverrideAlbum = nil
+                }
             }
         }
         context.delete(decision)
@@ -211,5 +216,43 @@ enum ReleaseYearAuditActions {
         let tracksText = tracks == 1 ? "1 track’s year" : "\(tracks) tracks’ years"
         if decision.albumChanged == false { return "Used Apple Music’s years for \(tracksText)" }
         return "Used Apple Music’s \(String(decision.musicYear)) (was \(String(decision.scroblyticsYear)))" + (tracks > 0 ? " and \(tracksText)" : "")
+    }
+}
+
+
+/// Release dates the Release Year Audit set on tracks before a track's date was tied to the album it was set for: each one is tied to the
+/// album of the decision that set it (the first, if several did), so it stops applying to the same song on another album. A date you typed
+/// yourself, or one you have changed since, is left alone: only a track whose date is still exactly what a decision applied is touched.
+enum TrackDateScopeMigration {
+    static let doneKey = "trackDateScope.albumBackfill.v1"
+
+    /// Runs once, on the real store only (a scratch store from a test hook never marks the real preferences as done).
+    @MainActor
+    static func runOnce(container: ModelContainer, defaults: UserDefaults = .standard) {
+        guard ProcessInfo.processInfo.environment["SCROBLYTICS_STORE_PATH"] == nil, !defaults.bool(forKey: doneKey) else { return }
+        let context = ModelContext(container)
+        guard (try? backfill(context: context)) != nil else { return }
+        defaults.set(true, forKey: doneKey)
+    }
+
+    /// Returns how many tracks were tied to an album.
+    @discardableResult
+    static func backfill(context: ModelContext) throws -> Int {
+        let decisions = try context.fetch(FetchDescriptor<ReleaseYearDecision>(sortBy: [SortDescriptor(\.decidedAt)]))
+        var tied = 0
+        for decision in decisions where decision.verdict == ReleaseYearAudit.Decision.Verdict.usedApple.rawValue {
+            let changes = decision.trackChangesJSON.flatMap { try? JSONDecoder().decode([ReleaseYearAudit.TrackChange].self, from: $0) } ?? []
+            for change in changes {
+                let key = change.key
+                var descriptor = FetchDescriptor<Track>(predicate: #Predicate { $0.identityKey == key })
+                descriptor.fetchLimit = 1
+                guard let track = try context.fetch(descriptor).first, track.releaseDateOverride == change.applied,
+                      track.releaseDateOverrideAlbum == nil else { continue }
+                track.releaseDateOverrideAlbum = decision.album
+                tied += 1
+            }
+        }
+        if tied > 0 { try context.save() }
+        return tied
     }
 }

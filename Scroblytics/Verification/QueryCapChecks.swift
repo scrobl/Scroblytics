@@ -483,6 +483,7 @@ enum QueryCapChecks {
             for row in rows {
                 if let perArtist, artists[row.artist, default: 0] >= perArtist { continue }
                 if let perAlbum, albums[row.album, default: 0] >= perAlbum { continue }
+                if perYear != nil, row.year == nil { continue }
                 if let perYear, let year = row.year, years[year, default: 0] >= perYear { continue }
                 artists[row.artist, default: 0] += 1; albums[row.album, default: 0] += 1
                 if let year = row.year { years[year, default: 0] += 1 }
@@ -495,8 +496,8 @@ enum QueryCapChecks {
         do {
             let one = try run(spec(.track, caps: QueryGroupLimit(perReleaseYear: 1)))
             check("tracks, 1 per release year, match the hand-worked answer", names(one) == expected(perYear: 1), "\(names(one)) vs \(expected(perYear: 1))")
-            check("…and that answer keeps one track per dated year plus every track with no known year",
-                  names(one) == ["b3 x", "a1 x", "a3 x", "b2 x", "b2 y"], "\(names(one))")
+            check("…and that answer keeps one track per dated year and leaves out every track with no known year",
+                  names(one) == ["a1 x", "a3 x"], "\(names(one))")
             let two = try run(spec(.track, caps: QueryGroupLimit(perReleaseYear: 2)))
             check("tracks, 2 per release year", names(two) == expected(perYear: 2), "\(names(two))")
             let all = try run(spec(.track, caps: QueryGroupLimit(perArtist: 3, perAlbum: 1, perReleaseYear: 2)))
@@ -509,8 +510,8 @@ enum QueryCapChecks {
                   "\(one.pending.map { "\($0.field)=\($0.count)" })")
 
             let albums = try run(spec(.album, caps: QueryGroupLimit(perReleaseYear: 1)))
-            check("albums, 1 per release year (no-date and not-yet-looked-up albums are never capped)",
-                  names(albums) == ["B Three", "A One", "A Three", "B Two"], "\(names(albums))")
+            check("albums, 1 per release year (no-date and not-yet-looked-up albums are left out)",
+                  names(albums) == ["A One", "A Three"], "\(names(albums))")
 
             // The display order: the sorts pick who survives, the results are then shown by release year (oldest first) unless told otherwise.
             let yearOf = Dictionary(uniqueKeysWithValues: rows.map { ($0.track, $0.year) })
@@ -528,7 +529,7 @@ enum QueryCapChecks {
             let auto = try run(spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false))
             check("with a per-release-year cap the results are shown by release year, oldest first, by default", names(auto) == byYear(expected(perYear: 1), ascending: true), "\(names(auto)) vs \(byYear(expected(perYear: 1), ascending: true))")
             check("…and the same tracks survive as when shown in rank order", Set(names(auto)) == Set(names(one)))
-            check("…with the tracks that have no known year last", names(auto) == ["a1 x", "a3 x", "b3 x", "b2 x", "b2 y"], "\(names(auto))")
+            check("…and no track without a known year is in it", names(auto) == ["a1 x", "a3 x"], "\(names(auto))")
             var newest = spec(.track, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false)
             newest.resultSorts = [QuerySort(key: .field(QueryFieldRef("releaseYear")), direction: .descending)]
             let newestFirst = try run(newest)
@@ -545,7 +546,7 @@ enum QueryCapChecks {
             check("a cap on something other than release year leaves the order alone", names(artistCap) == expected(perArtist: 1), "\(names(artistCap))")
             check("no cap leaves it alone too", names(try run(spec(.track, caps: nil, rankOrder: false))) == rows.map(\.track))
             let albumsAuto = try run(spec(.album, caps: QueryGroupLimit(perReleaseYear: 1), rankOrder: false))
-            check("albums, one per release year, shown by year", names(albumsAuto) == ["A One", "A Three", "B Three", "B Two"], "\(names(albumsAuto))")
+            check("albums, one per release year, shown by year", names(albumsAuto) == ["A One", "A Three"], "\(names(albumsAuto))")
 
             // Saved queries
             let oldJSON = Data(#"{"schemaVersion":4,"target":"album","groups":[],"sorts":[],"columns":[]}"#.utf8)

@@ -67,7 +67,10 @@ struct AutoPlaylistOutcome: Sendable, Equatable {
     var message = ""
 
     var detail: String {
-        AutoPlaylistWording.detail(status: status, trackCount: trackCount, added: added, removed: removed, missing: missing, droppedRepeats: droppedRepeats, message: message)
+        AutoPlaylistWording.detail(
+            status: status, trackCount: trackCount, added: added, removed: removed, missing: missing, droppedRepeats: droppedRepeats, message: message,
+            shownInOwnOrder: cache.shownInOwnOrder
+        )
     }
 }
 
@@ -78,6 +81,9 @@ enum AutoPlaylistEngine {
     /// How many tracks are added to Music in one go, so a long playlist can be stopped between pieces.
     static let appendChunk = 50
     static let missingSampleLimit = 20
+    /// How many more times the playlist is read back, and how long apart, when the first read differs from what was asked for.
+    static let readBackRetries = 2
+    nonisolated(unsafe) static var readBackDelay: Duration = .seconds(1.5)
 
     static func refresh(_ request: AutoPlaylistRequest, backend: PlaylistBackend) async -> AutoPlaylistOutcome {
         var outcome = AutoPlaylistOutcome(status: .failed, playlistID: request.playlistID, cache: request.cache)
@@ -87,6 +93,7 @@ enum AutoPlaylistEngine {
             // 1. Which library track is each wanted track?
             let resolved = try await resolve(request.tracks, cache: request.cache, backend: backend)
             outcome.cache = resolved.cache
+            outcome.cache.shownInOwnOrder = request.cache.shownInOwnOrder
             let missingIndexes = resolved.ids.indices.filter { resolved.ids[$0] == nil }
             outcome.missing = missingIndexes.count
             outcome.missingAll = missingIndexes.map { "\(request.tracks[$0].artist) – \(request.tracks[$0].track)" }
@@ -112,12 +119,20 @@ enum AutoPlaylistEngine {
             }
             outcome.playlistID = playlistID.isEmpty ? nil : playlistID
 
+            // A playlist Music shows in an order of its own holds the right songs when it holds exactly the wanted ones: its order is
+            // not ours to set, and rewriting the songs that are "out of place" would only be undone by Music again, every refresh.
+            if request.cache.shownInOwnOrder, current != target, Self.sameSongs(current, target) {
+                outcome.trackCount = target.count
+                outcome.status = .upToDate
+                return outcome
+            }
+
             // 3. Change as little as possible.
             let plan = PlaylistDiff.bestPlan(current: current, target: target)
             outcome.trackCount = target.count
             outcome.added = plan.append.count
             outcome.removed = plan.removalCount
-            if plan.isNoOp { outcome.status = .upToDate; return outcome }
+            if plan.isNoOp { outcome.cache.shownInOwnOrder = false; outcome.status = .upToDate; return outcome }
             outcome.status = madeNow ? .created : .updated
             if request.dryRun { return outcome }
 
@@ -135,8 +150,17 @@ enum AutoPlaylistEngine {
             }
 
             // 4. Read it back: what Music holds must be what was asked for.
-            if case .tracks(let after) = try await backend.readPlaylist(id: playlistID), after == target {
-                return outcome
+            // Music can take a moment to settle after a change, so a read that differs is repeated a couple of times before it counts.
+            var attempt = 0
+            while true {
+                if case .tracks(let after) = try await backend.readPlaylist(id: playlistID) {
+                    if after == target { outcome.cache.shownInOwnOrder = false; return outcome }
+                    // The right songs, still in an order Music chose (the playlist is shown sorted): the update did what was asked.
+                    if attempt >= Self.readBackRetries, Self.sameSongs(after, target) { outcome.cache.shownInOwnOrder = true; return outcome }
+                }
+                if attempt >= Self.readBackRetries { break }
+                attempt += 1
+                try await Task.sleep(for: Self.readBackDelay)
             }
             outcome.status = .failed
             outcome.message = "Music's playlist didn't match after the update. It will be fixed on the next refresh."
@@ -157,6 +181,11 @@ enum AutoPlaylistEngine {
             outcome.message = error.localizedDescription
         }
         return outcome
+    }
+
+    /// Whether the playlist holds exactly the wanted songs, each once, whatever the order.
+    static func sameSongs(_ current: [String], _ target: [String]) -> Bool {
+        current.count == target.count && Set(current) == Set(target)
     }
 
     /// The library track for each wanted track. A match found before is reused while the library still has it; the rest are looked up

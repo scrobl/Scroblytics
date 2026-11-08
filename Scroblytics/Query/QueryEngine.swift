@@ -150,8 +150,10 @@ enum QueryEngine {
     /// `perArtist` is a no-op for an artist-target run (every row is already unique on itself); `perAlbum`
     /// only ever applies to a track-target run, reusing the exact same "most-played album" value
     /// `entityInfo` already surfaces; the year is the Release year field's own value — never a second
-    /// definition. A track with no resolved album, or an entity whose release year is missing or still
-    /// being looked up, is never capped on that axis (nothing to share "the same" with).
+    /// definition. A track with no resolved album is never capped by album (nothing to share "the same"
+    /// with). With a per-release-year cap, an entity whose release year is missing or still being looked
+    /// up is left out: it belongs to no year, so a list of "N per year" holds only what has one (it comes
+    /// in once its date is found; the query's pending report counts the ones still being looked up).
     private static func applyGroupLimit(
         _ groupLimit: QueryGroupLimit?, releaseYear: ResolvedField?, to entities: [QueryEntity], run: QueryRun
     ) -> [QueryEntity] {
@@ -171,7 +173,10 @@ enum QueryEngine {
             let capsByArtist = perArtist != nil && entity.id.target != .artist
             let albumKey: String? = (perAlbum != nil && entity.id.target == .track) ? aggregates[entity.id]?.album : nil
             var yearKey: Int?
-            if perYear != nil, case .value(.number(let year))? = yearCells[entity.id] { yearKey = Int(year) }
+            if perYear != nil {
+                guard case .value(.number(let year))? = yearCells[entity.id] else { continue }
+                yearKey = Int(year)
+            }
 
             if capsByArtist, artistCounts[entity.id.artist, default: 0] >= perArtist! { continue }
             if let albumKey, albumCounts[albumKey, default: 0] >= perAlbum! { continue }

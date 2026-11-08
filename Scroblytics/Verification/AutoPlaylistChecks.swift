@@ -22,6 +22,8 @@ private final class FakeMusic: PlaylistBackend, @unchecked Sendable {
         var cancelOnAppend: Int?
         var appendCalls = 0
         var nextPlaylist = 1
+        /// Music shows playlists in a sort order of its own (by Year, say), whatever order the songs were added in; here, by ID.
+        var sortsPlaylists = false
     }
 
     private let lock = NSLock()
@@ -107,6 +109,7 @@ private final class FakeMusic: PlaylistBackend, @unchecked Sendable {
                 if state.refuses.contains(trackID) { continue }
                 playlist.tracks.append(trackID)
             }
+            if state.sortsPlaylists { playlist.tracks.sort() }
             state.playlists[id] = playlist
         }
     }
@@ -229,6 +232,50 @@ enum AutoPlaylistChecks {
             music.with { $0.running = true }
             let empty = await AutoPlaylistEngine.refresh(.init(name: "T", playlistID: nil, tracks: []), backend: music)
             check("an empty list makes no playlist", empty.status == .emptyResult && music.calls.isEmpty)
+        }
+
+        // A playlist Music shows in an order of its own: the right songs are enough, and nothing is rewritten again and again
+        AutoPlaylistEngine.readBackDelay = .zero
+        do {
+            let music = makeMusic()
+            music.with { $0.sortsPlaylists = true }
+            let top = [5, 3, 9, 1]
+            var request = AutoPlaylistRequest(name: "Sorted", playlistID: nil, tracks: wanted(top))
+            var outcome = await AutoPlaylistEngine.refresh(request, backend: music)
+            let playlistID = outcome.playlistID ?? ""
+            check("a playlist Music returns in its own order is not reported as failed when it holds the wanted songs", outcome.status == .created && music.tracks(of: playlistID) == ids(top).sorted(), "\(outcome.status) \(outcome.detail)")
+            check("…and it is remembered, and the wording says why the order may differ", outcome.cache.shownInOwnOrder && outcome.detail.contains("sort order of its own"), outcome.detail)
+            request.playlistID = playlistID
+            request.cache = outcome.cache
+            music.clearCalls()
+            outcome = await AutoPlaylistEngine.refresh(request, backend: music)
+            check("the same list again is up to date: no song is removed or added again", outcome.status == .upToDate && music.count("append") == 0 && music.count("remove") == 0, "\(outcome.status) \(music.calls)")
+            request.tracks = wanted([5, 3, 7, 1])
+            music.clearCalls()
+            outcome = await AutoPlaylistEngine.refresh(request, backend: music)
+            check("a changed song is still swapped, and the playlist then holds exactly the new songs", outcome.status == .updated && Set(music.tracks(of: playlistID)) == Set(ids([5, 3, 7, 1])) && music.tracks(of: playlistID).count == 4, "\(outcome.detail) \(music.tracks(of: playlistID))")
+            request.cache = outcome.cache
+            music.with { $0.refuses = [song(2).id] }
+            request.tracks = wanted([5, 3, 7, 2])
+            outcome = await AutoPlaylistEngine.refresh(request, backend: music)
+            check("a song Music refuses to take is still a real failure, even in a sorted playlist", outcome.status == .failed, "\(outcome.status) \(outcome.detail)")
+            let kept = AutoPlaylistMatchCache.decode(outcome.cache.encoded())
+            check("the remembered order survives saving, and older saved data (without it) reads as false", kept.shownInOwnOrder == outcome.cache.shownInOwnOrder
+                && !AutoPlaylistMatchCache.decode(Data(#"{"ids":{"a":"b"}}"#.utf8)).shownInOwnOrder && AutoPlaylistMatchCache.decode(Data(#"{"ids":{"a":"b"}}"#.utf8)).ids == ["a": "b"])
+            // A playlist that does keep its order clears the flag.
+            let plain = makeMusic()
+            var plainRequest = AutoPlaylistRequest(name: "Plain", playlistID: nil, tracks: wanted([5, 3, 9]))
+            plainRequest.cache.shownInOwnOrder = true
+            var plainOutcome = await AutoPlaylistEngine.refresh(plainRequest, backend: plain)
+            check("a playlist Music keeps in the order added has the flag cleared again", plainOutcome.status == .created && !plainOutcome.cache.shownInOwnOrder && plain.tracks(of: plainOutcome.playlistID ?? "") == ids([5, 3, 9]))
+            plainRequest.playlistID = plainOutcome.playlistID
+            plainRequest.tracks = wanted([3, 5, 9])
+            plainRequest.cache = plainOutcome.cache
+            plainOutcome = await AutoPlaylistEngine.refresh(plainRequest, backend: plain)
+            check("…so a changed rank is still carried out in order", plainOutcome.status == .updated && plain.tracks(of: plainOutcome.playlistID ?? "") == ids([3, 5, 9]))
+            plainRequest.cache.shownInOwnOrder = true
+            plainOutcome = await AutoPlaylistEngine.refresh(plainRequest, backend: plain)
+            check("a playlist that turns out to be in exactly the wanted order drops a flag remembered earlier, and says nothing about sorting", plainOutcome.status == .upToDate && !plainOutcome.cache.shownInOwnOrder && !plainOutcome.detail.contains("sort order"), plainOutcome.detail)
         }
 
         // First fill, then the same list again, then changes

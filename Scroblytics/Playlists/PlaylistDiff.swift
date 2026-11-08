@@ -103,6 +103,18 @@ enum AutoPlaylistStatus: String, Sendable, Equatable {
 /// already found. A cached ID is trusted only while the library still has it.
 struct AutoPlaylistMatchCache: Codable, Equatable, Sendable {
     var ids: [String: String] = [:]
+    /// Music handed the playlist back with the right songs in a different order than they were added in (the playlist is shown in a
+    /// sort order of Music's own). Remembered so that later refreshes judge such a playlist by its songs, not by an order Music
+    /// won't keep. Optional in the saved data, so older ones decode as false.
+    var shownInOwnOrder = false
+
+    private enum CodingKeys: String, CodingKey { case ids, shownInOwnOrder }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ids = try container.decodeIfPresent([String: String].self, forKey: .ids) ?? [:]
+        shownInOwnOrder = try container.decodeIfPresent(Bool.self, forKey: .shownInOwnOrder) ?? false
+    }
 
     /// One wanted track's identity: artist, title and album, trimmed and lowercased (the album is part of it because a song on two
     /// albums can be two library tracks).
@@ -121,7 +133,7 @@ struct AutoPlaylistMatchCache: Codable, Equatable, Sendable {
 
 /// The plain wording for a refresh, one place so the list of playlists, the sync report and the checks agree.
 enum AutoPlaylistWording {
-    static func detail(status: AutoPlaylistStatus, trackCount: Int, added: Int, removed: Int, missing: Int, droppedRepeats: Int = 0, message: String = "") -> String {
+    static func detail(status: AutoPlaylistStatus, trackCount: Int, added: Int, removed: Int, missing: Int, droppedRepeats: Int = 0, message: String = "", shownInOwnOrder: Bool = false) -> String {
         func tracks(_ n: Int) -> String { n == 1 ? "1 track" : "\(n.formatted()) tracks" }
         var text: String
         switch status {
@@ -142,6 +154,7 @@ enum AutoPlaylistWording {
         }
         if missing > 0 { text += " \(missing.formatted()) not in your library." }
         if droppedRepeats > 0 { text += " \(droppedRepeats.formatted()) repeated \(droppedRepeats == 1 ? "song" : "songs") left out." }
+        if shownInOwnOrder { text += " Music shows this playlist in a sort order of its own, so the songs are right but may not be in rank order there (in Music: View › Sort By › Playlist Order)." }
         return text
     }
 }

@@ -657,6 +657,29 @@ enum QueryCapChecks {
         check("the prompt describes sessions and lists their fields", modelPrompt.contains("LISTENING SESSIONS") && modelPrompt.contains("sessionTopArtistShare [numeric") && modelPrompt.contains("works with: session"))
         check("the on-device model is not offered plays", !QueryTarget.askTargets.contains(.scrobble) && QueryTarget.modelAskTargets.contains(.scrobble) && !AskVocabulary.queryInstructions(target: .track, ordered: false, scoped: false, absence: false, registry: .standard, now: Date()).contains("playedAt"))
         check("every worked example, the plays ones included, still reads cleanly", AskExamples.staleExamples(registry: .standard).isEmpty && AskExamples.modelExtras.contains { $0.target == .scrobble })
+        // "Recently added" with a ranking by plays is a window on the date added, not a second sort.
+        let dateAddedDescending = #"{"field":"musicDateAdded","direction":"descending","parameters":[],"scope":null,"comparedAgo":null}"#
+        let playsThenDateAdded = String(playsDescending.dropLast()) + "," + dateAddedDescending + "]"
+        let recentRequest = "top 25 most listened songs that were most recently added"
+        let recent = read(reply(sorts: playsThenDateAdded, limit: "25"), request: recentRequest)
+        func sortIDs(_ t: AskTranslation?) -> [String] { (t?.interpretation.spec.sorts ?? []).compactMap { if case .field(let ref) = $0.key { return ref.id } else { return nil } } }
+        func windowDays(_ t: AskTranslation?) -> [Double] {
+            (t?.interpretation.spec.groups.flatMap { $0 } ?? []).filter { $0.field.id == "musicDateAdded" && $0.op == .inLast }.compactMap { c in
+                if case .number(let n)? = c.operands.first { return n } else { return nil }
+            }
+        }
+        check("“top 25 most listened songs that were most recently added” ranks by plays within the last 90 days added, 25 results, no date sort",
+              sortIDs(recent) == ["plays"] && windowDays(recent) == [90] && recent?.interpretation.spec.limit == 25 && recent?.interpretation.dropped.isEmpty == true,
+              "\(sortIDs(recent)) \(windowDays(recent))")
+        check("…and says what “recently” was taken to mean, so it can be adjusted", recent?.resolvedTerms.contains { $0.phrase == "recently added" && $0.meaning.contains("90 days") } == true)
+        let recentBare = read(reply(sorts: playsDescending, limit: "25"), request: recentRequest)
+        check("the window is added even when the model left the date out altogether", windowDays(recentBare) == [90] && sortIDs(recentBare) == ["plays"])
+        let ownWindow = #"[{"field":"musicDateAdded","op":"inLast","value":30,"valueTo":null,"text":"days","date":null,"dateTo":null,"tags":[],"parameters":[],"scope":null,"comparedAgo":null}]"#
+        let statedWindow = read(reply(conditions: ownWindow, sorts: playsThenDateAdded, limit: "25"), request: "top 25 songs added in the last 30 days, most recently added first")
+        check("a window the request states itself is kept as it is, and the stray date sort still goes", windowDays(statedWindow) == [30] && sortIDs(statedWindow) == ["plays"])
+        let newest = read(reply(sorts: "[" + dateAddedDescending + "]", limit: "10"), request: "my 10 most recently added songs")
+        check("a request ranked by when it was added alone still sorts by the date added, with no window", sortIDs(newest) == ["musicDateAdded"] && windowDays(newest).isEmpty && newest?.interpretation.spec.limit == 10)
+        check("the prompt says to use a window, never a second sort", modelPrompt.contains("NEVER add the date as a second sort"))
         let coldRainySunday = read(reply(sorts: playsDescending, limit: "10", caps: playKeys(weekdays: #"["Sunday"]"#, from: "5", to: "11", weather: #"["Rain"]"#, temperature: #"["Cold"]"#)), request: "top 10 songs when it is cold and raining on a sunday morning")
         let expectedPlay = QueryPlayFilter(weekdays: [0], fromHour: 5, toHour: 11, months: nil, weatherConditions: ["Rain"], temperatureBands: ["Cold"])
         check("“top 10 songs when it is cold and raining on a Sunday morning” becomes a play filter: Sunday, 5–11, rain, cold",

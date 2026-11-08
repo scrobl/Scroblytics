@@ -265,6 +265,7 @@ enum AskPatterns {
 
         applyBreakdown(to: &spec, request: request)
         applyYearOrder(to: &spec, request: request)
+        applyRecentlyAdded(to: &spec, request: request)
         spec.columns = AskInterpreter.columns(for: spec, target: target, registry: registry)
         result.spec = spec
         return result
@@ -304,6 +305,36 @@ enum AskPatterns {
             spec.limit = singular ? 1 : (read(request, knownTags: nil).count ?? 10)
         }
         if spec.sorts.isEmpty { spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)] }
+    }
+
+    /// Days counted as "recently" when a request says "recently added" and names no length.
+    static let recentlyAddedDays = 90
+
+    /// "Recently added" wording in a request ("most recently added", "newly added", "recent additions").
+    static func mentionsRecentlyAdded(_ request: String) -> Bool {
+        matches(request.lowercased(), #"\b(?:recently|newly|just)\s+added\b|\brecent\s+additions?\b|\brecently\s+(?:added|acquired)\b"#)
+    }
+
+    /// "My top 25 most listened songs that were most recently added" ranks by plays among the songs added lately. A model that writes
+    /// the date as a second sort gets a list that ignores it (a sort after plays only breaks ties), so the date becomes a window on
+    /// the date added, and the window is the app's default unless the request already carries a date-added condition. A request that
+    /// ranks by date added alone ("my 10 newest additions") is left as it is. Returns whether it changed the query.
+    @discardableResult
+    static func applyRecentlyAdded(to spec: inout QuerySpec, request: String) -> Bool {
+        guard mentionsRecentlyAdded(request), let first = spec.sorts.first, case .field(let ranking) = first.key, ranking.id == "plays" || ranking.id == "allTimePlays" else { return false }
+        let isDateAdded: (QuerySort) -> Bool = { sort in
+            if case .field(let ref) = sort.key { return ref.id == "musicDateAdded" }
+            return false
+        }
+        let hasWindow = spec.groups.contains { $0.contains { $0.field.id == "musicDateAdded" } }
+        guard !hasWindow else {
+            spec.sorts.removeAll(where: isDateAdded)
+            return false
+        }
+        spec.sorts.removeAll(where: isDateAdded)
+        let window = QueryCondition("musicDateAdded", .inLast, [.number(Double(recentlyAddedDays)), .text("days")])
+        spec.groups = spec.groups.isEmpty ? [[window]] : spec.groups.map { $0 + [window] }
+        return true
     }
 
     /// With a per-release-year cap, a stated direction for the years becomes the display order (the sorts still pick the winners).

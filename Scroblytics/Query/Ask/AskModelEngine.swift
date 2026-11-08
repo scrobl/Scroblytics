@@ -78,6 +78,9 @@ struct AskModelEngine: AskEngine {
         if let request {
             AskPatterns.applyBreakdown(to: &interpretation.spec, request: request)
             AskPatterns.applyYearOrder(to: &interpretation.spec, request: request)
+            if AskPatterns.applyRecentlyAdded(to: &interpretation.spec, request: request) {
+                resolvedTerms.append(AskResolvedTerm(phrase: "recently added", meaning: "added to Apple Music in the last \(AskPatterns.recentlyAddedDays) days"))
+            }
             // A note that only restates the breakdown ("per year isn't supported") is removed: the app does it.
             if interpretation.spec.breakdown != nil {
                 interpretation.unsupported = interpretation.unsupported.filter { !AskPatterns.restatesBreakdown($0) }

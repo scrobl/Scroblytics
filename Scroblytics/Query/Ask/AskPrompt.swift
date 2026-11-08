@@ -61,6 +61,10 @@ enum AskPrompt {
         text the unit (days, weeks, months or years: "a year" is 1 years, "a month" 1 months, "a week" 1 weeks). Use releaseDate for released, firstPlayed \
         for first heard, lastPlayed for last heard. Do not turn it into dateBetween with today's date: the window must keep rolling. A named \
         calendar stretch ("in 2024", "in March") is still dateBetween.
+        - "recently / newly / most recently added" together with a ranking by plays ("top 25 most listened songs that were most recently added") is a \
+        window on when it was added: a musicDateAdded inLast condition (90 days when the request gives no length, recorded in "resolvedTerms"), \
+        sorted by plays descending, limit N. NEVER add the date as a second sort — after plays it only breaks ties, so the list would ignore it. Only a request \
+        that ranks by when it was added and nothing else ("my 10 newest additions") sorts by musicDateAdded descending.
         - "released on a Friday", "first played on a weekend" → weekdayIs on the date field with the day names in tags (weekend = Saturday and Sunday); \
         "not on a Monday" → weekdayIsNot. This is the day the DATE falls on, not the day a track is mostly played (that is the "dayOfWeek" field).
         - "played a lot but only over a few days", "binged", "a short burst": a plays condition AND a small number of ACTIVE days \

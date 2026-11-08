@@ -45,6 +45,10 @@ enum AskExamples {
         Example(request: "my top 100 songs released in the last year", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("releaseDate", "inLast", value: 1, text: "years")]],
             sorts: [.init(field: "plays", direction: "descending")], limit: 100, unsupported: [])),
+        Example(request: "top 25 most listened songs that were most recently added", target: .track, ordered: true, query: AskWire.Query(
+            groups: [[cond("musicDateAdded", "inLast", value: 90, text: "days")]],
+            sorts: [.init(field: "plays", direction: "descending")], limit: 25, unsupported: []),
+            resolvedTerms: [AskResolvedTerm(phrase: "recently added", meaning: "added to Apple Music in the last 90 days")]),
         Example(request: "albums released on a Friday", target: .album, ordered: false, query: AskWire.Query(
             groups: [[AskWire.Condition(field: "releaseDate", op: "weekdayIs", tags: ["Friday"])]], unsupported: [])),
         Example(request: "tracks I played at least 5 times in the last 30 days", target: .track, ordered: false, query: AskWire.Query(

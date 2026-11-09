@@ -37,6 +37,7 @@ enum AppleMusicDetailsChecks {
             lengthChecks(check)
             versionChecks(check)
             tasteChecks(check)
+            await factChecks(check)
             storageChecks(check)
             crossCheck(check)
             HeadlessTask.finish(failures)
@@ -188,6 +189,33 @@ enum AppleMusicDetailsChecks {
 
     private static func playOn(_ artist: String, _ track: String, album: String, _ n: Int = 1) -> [ScrobbleSnapshot] {
         (0..<n).map { ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track, imageURL: nil, playedAt: t0.addingTimeInterval(Double($0))) }
+    }
+
+    /// The "Added to Music" tile: a song that isn't in the library offers to read Music again (only while the feature is on), says so while
+    /// reading, and a song that is in the library offers nothing.
+    @MainActor
+    private static func factChecks(_ report: (String, Bool, String) -> Void) async {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let suiteName = "scroblytics.musicdetails.facts.check"
+        let suite = UserDefaults(suiteName: suiteName)!
+        suite.removePersistentDomain(forName: suiteName)
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let missing = AppleMusicDetailsInfo(added: nil, genre: nil, inLibrary: false, matchedTitle: nil)
+        let present = AppleMusicDetailsInfo(added: t0, genre: "Rock", inLibrary: true, matchedTitle: nil)
+        func added(_ facts: [DetailFact]) -> DetailFact? { facts.first { $0.id == "musicAdded" } }
+
+        let off = AppleMusicDetailsStore(defaults: suite)
+        let offTile = added(AppleMusicDetailsLookup.facts(missing, entity: "album", store: off))
+        check("Feature off: a missing album says so and offers no re-read", offTile?.detail == "Not in your library" && offTile?.onEdit == nil)
+
+        suite.set(true, forKey: AppleMusicDetailsStore.enabledKey)
+        let on = AppleMusicDetailsStore(defaults: suite)
+        let onTile = added(AppleMusicDetailsLookup.facts(missing, entity: "album", store: on))
+        check("Feature on: a missing album offers to read Music again", onTile?.detail == "Not in your library" && onTile?.onEdit != nil && onTile?.editImage == "arrow.clockwise")
+        check("The re-read button explains itself", onTile?.editHelp?.contains("Read Music again") == true)
+        let presentTile = added(AppleMusicDetailsLookup.facts(present, entity: "album", store: on))
+        check("An album that is in the library offers no re-read", presentTile?.onEdit == nil && presentTile?.detail == nil)
+        check("No saved read at all shows no tiles", AppleMusicDetailsLookup.facts(nil, entity: "album", store: on).isEmpty)
     }
 
     /// The Taste chart's source: tags, the genre Apple Music holds, or both. Made-up plays through the real engine, against a hand count.

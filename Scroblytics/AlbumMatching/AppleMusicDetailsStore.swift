@@ -233,15 +233,32 @@ enum AppleMusicDetailsLookup {
 
     /// The tiles for a page's fact grid: when it was added to the library and its genre. Nothing before the first read.
     @MainActor
-    static func facts(_ info: AppleMusicDetailsInfo?, entity: String) -> [DetailFact] {
+    static func facts(_ info: AppleMusicDetailsInfo?, entity: String, store: AppleMusicDetailsStore = .shared) -> [DetailFact] {
         guard let info else { return [] }
         let added: DetailFact.Value = info.added.map { .text($0.formatted(date: .abbreviated, time: .omitted)) } ?? .unknown
         var addedDetail: String?
-        if !info.inLibrary { addedDetail = "Not in your library" } else if let title = info.matchedTitle { addedDetail = "As “\(title)”" }
+        var reread: (() -> Void)?
+        var rereadHelp: String?
+        if !info.inLibrary {
+            addedDetail = "Not in your library"
+            // The read is a snapshot: a song or album renamed in Music since then is still under its old name in it. Reading again is one
+            // click here, so a stale answer is quick to correct (and a genuine miss just stays a miss).
+            if store.enabled {
+                if store.isReading {
+                    addedDetail = "Reading Music…"
+                } else {
+                    reread = { store.refresh(force: true) }
+                    let age = store.readAt.map { "last read \($0.formatted(.relative(presentation: .named)))" } ?? "not read yet"
+                    rereadHelp = "Read Music again (\(age)). Use this if you changed the name in Music after the last read."
+                    if let problem = store.problem { addedDetail = problem }
+                }
+            }
+        } else if let title = info.matchedTitle { addedDetail = "As “\(title)”" }
         return [
             DetailFact(
                 id: "musicAdded", label: "Added to Music", value: added, detail: addedDetail, mayHaveDetail: true, systemImage: "plus.square",
-                help: "When this \(entity) was added to your Apple Music library (the earliest, for an album or artist)."
+                help: "When this \(entity) was added to your Apple Music library (the earliest, for an album or artist).",
+                onEdit: reread, editImage: "arrow.clockwise", editHelp: rereadHelp
             ),
             DetailFact(
                 id: "musicGenre", label: "Genre", value: info.genre.map { .text($0) } ?? .unknown, systemImage: "guitars",

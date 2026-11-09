@@ -205,7 +205,7 @@ extension HelpContent {
             summary: "How the remaining Trends charts are built.",
             blocks: [
                 .heading("Rankings (bump chart)"),
-                .paragraph("The period’s top 5 or 10 are ranked afresh inside each time bucket (weeks for ranges up to about 80 days, months up to about 4 years, otherwise years). An item outside that bucket’s top N, or unplayed, leaves a gap."),
+                .paragraph("The period’s top 5 or 10 are ranked afresh inside each time bucket (weeks for ranges up to about 80 days, months up to about 4 years, otherwise years). An item outside that bucket’s top N, or unplayed, leaves a gap. Each line starts with the item’s picture in a circle ringed in the line’s colour (an artist’s picture, an album’s cover, a track’s own picture or else its artist’s), at the first period it appears in; the other points are plain dots, and so is every point of an item with no picture saved yet."),
                 .heading("Listening flow"),
                 .paragraph("A **session** is a run of plays where no gap exceeds the **Session gap** (3, 5, 15, 30, 60, 120 or 360 minutes; default 30). A **hand-off** is two consecutive plays of different artists (or different genres) inside one session; the same artist twice in a row isn’t counted. In genre mode a genre is the artist’s first community tag, and an untagged play breaks the chain. **Minimum hand-offs** hides rare pairs. In comparison mode, edges are shared, new or dropped."),
                 .heading("Eras (decade river)"),

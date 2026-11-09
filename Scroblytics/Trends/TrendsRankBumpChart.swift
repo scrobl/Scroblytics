@@ -7,6 +7,9 @@ struct TrendsRankBumpChart: View {
     struct Inputs: Equatable {
         let scrobbles: [ScrobbleSnapshot]
         let durations: DurationEngine.Snapshot
+        /// The saved pictures (by address key), for the circles on the lines. Not part of the comparison: a picture arriving later redraws the
+        /// chart without recomputing the standings.
+        var imageLookup: [String: String] = [:]
         let range: DateRange
         let version: Int
         static func == (a: Inputs, b: Inputs) -> Bool { a.range == b.range && a.version == b.version }
@@ -33,8 +36,9 @@ struct TrendsRankBumpChart: View {
         VStack(alignment: .leading, spacing: 14) {
             controls
             if let data, data.buckets.count >= 2 {
-                chart(data).frame(height: CGFloat(max(220, data.topN * 34))).shareChartArea()
-                legend(data)
+                let urls = Self.artworkURLs(data, lookup: inputs.imageLookup)
+                chart(data, urls: urls).frame(height: CGFloat(max(220, data.topN * 34))).shareChartArea()
+                legend(data, urls: urls)
                 Text("Click a \(data.bucketing.label) to see its top \(data.topN) in Query. A gap means it fell out of that \(data.bucketing.label)’s top \(data.topN).")
                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             } else if isLoading {
@@ -90,7 +94,67 @@ struct TrendsRankBumpChart: View {
 
     private func color(_ index: Int) -> Color { Self.palette[index % Self.palette.count] }
 
-    private func chart(_ data: TrendsRankBump) -> some View {
+    /// The picture each line carries: an artist's own; an album's cover; for a track its own saved picture, else its artist's. A line with no
+    /// picture saved stays a plain coloured dot.
+    static func artworkURLs(_ data: TrendsRankBump, lookup: [String: String]) -> [QueryEntityID: String] {
+        var out: [QueryEntityID: String] = [:]
+        for series in data.series {
+            let id = series.id
+            let artist = ImageTarget(kind: .artist, artist: id.artist, album: nil, track: nil)
+            let url: String?
+            switch data.target {
+            case .artist:
+                url = TrendsWeatherMapEngine.artworkURL(for: id.artist, lookup: lookup)
+            case .album:
+                url = ImageResolutionEngine.effectiveImageURL(for: ImageTarget(kind: .album, artist: id.artist, album: id.name, track: nil), lookup: lookup, fallbackURL: nil)
+            case .track, .scrobble, .session:
+                url = ImageResolutionEngine.effectiveImageURL(for: ImageTarget(kind: .track, artist: id.artist, album: nil, track: id.name), lookup: lookup, fallbackURL: nil)
+                    ?? ImageResolutionEngine.effectiveImageURL(for: artist, lookup: lookup, fallbackURL: nil)
+            }
+            if let url { out[id] = url }
+        }
+        return out
+    }
+
+    /// The bucket where a line first appears: the one point of it that carries the picture (the rest stay dots).
+    private func firstBucket(_ series: TrendsRankBump.Series) -> Int? {
+        series.ranks.firstIndex { $0 != nil }
+    }
+
+    /// A line's marker: its picture in a circle, ringed in the line's colour (a plain dot when it has no picture).
+    private func badge(_ index: Int, _ series: TrendsRankBump.Series, urls: [QueryEntityID: String], diameter: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(color(index))
+            if let url = urls[series.id] {
+                ArtworkImage(urlString: url, contentMode: .fill) { Color.clear }
+                    .frame(width: diameter - 3.5, height: diameter - 3.5)
+                    .clipShape(Circle())
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    /// Each line's picture sits over its first point, so it is laid out from the chart's own positions.
+    private func pictures(_ data: TrendsRankBump, urls: [QueryEntityID: String], proxy: ChartProxy, geo: GeometryProxy) -> some View {
+        let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+        let pitch = plotFrame.height / CGFloat(max(1, data.topN))
+        let base = min(30, max(16, pitch * 0.8))
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(data.series.enumerated()), id: \.element.id) { index, series in
+                if urls[series.id] != nil, let first = firstBucket(series), let rank = series.ranks[first],
+                   let bucket = data.buckets.first(where: { $0.index == first }),
+                   let x = proxy.position(forX: bucket.start), let y = proxy.position(forY: height(rank, data)) {
+                    let lifted = hovered?.id == bucket.id
+                    badge(index, series, urls: urls, diameter: lifted ? base * 1.15 : base)
+                        .overlay { if lifted { Circle().stroke(Color.white.opacity(0.9), lineWidth: 1.5) } }
+                        .position(x: plotFrame.origin.x + x, y: plotFrame.origin.y + y)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func chart(_ data: TrendsRankBump, urls: [QueryEntityID: String]) -> some View {
         Chart {
             ForEach(Array(data.series.enumerated()), id: \.element.id) { index, series in
                 ForEach(data.buckets) { bucket in
@@ -101,19 +165,24 @@ struct TrendsRankBumpChart: View {
                             .foregroundStyle(color(index))
                             .lineStyle(StrokeStyle(lineWidth: 2.5))
                             .interpolationMethod(.linear)
-                        PointMark(x: .value("Date", bucket.start), y: .value("Rank", height(rank, data)))
-                            .foregroundStyle(color(index))
-                            .symbolSize(hovered?.id == bucket.id ? 90 : 45)
+                        // A line's picture is drawn over its first point (see `pictures`); every other point keeps the dot.
+                        if urls[series.id] == nil || firstBucket(series) != bucket.index {
+                            PointMark(x: .value("Date", bucket.start), y: .value("Rank", height(rank, data)))
+                                .foregroundStyle(color(index))
+                                .symbolSize(hovered?.id == bucket.id ? 90 : 45)
+                        }
                     }
                 }
             }
             if let hovered {
                 RuleMark(x: .value("Date", hovered.start))
                     .foregroundStyle(Color.secondary.opacity(0.5))
-                    .annotation(position: .top, spacing: 4, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) { tooltip(hovered, data) }
+                    .annotation(position: .top, spacing: 4, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) { tooltip(hovered, data, urls: urls) }
             }
         }
         .chartYScale(domain: 0.5...(Double(data.topN) + 0.5))
+        // Room at both ends so a picture on the first or last point isn't cut off or pushed over the rank labels.
+        .chartXScale(range: .plotDimension(padding: 18))
         .chartYAxis {
             AxisMarks(position: .leading, values: Array(1...data.topN)) { value in
                 AxisGridLine().foregroundStyle(.quaternary)
@@ -136,6 +205,7 @@ struct TrendsRankBumpChart: View {
                             "Top \(data.topN) · " + data.bucketing.name(bucket.start)
                         )
                     }
+                pictures(data, urls: urls, proxy: proxy, geo: geo)
             }
         }
     }
@@ -145,7 +215,7 @@ struct TrendsRankBumpChart: View {
         return data.buckets.min { abs($0.start.timeIntervalSince(date)) < abs($1.start.timeIntervalSince(date)) }
     }
 
-    private func tooltip(_ bucket: TrendsRankBump.Bucket, _ data: TrendsRankBump) -> some View {
+    private func tooltip(_ bucket: TrendsRankBump.Bucket, _ data: TrendsRankBump, urls: [QueryEntityID: String]) -> some View {
         // `hovered` can be a bucket from the PREVIOUS data (it survives a recompute under a stationary pointer),
         // so its index is looked up safely rather than trusted to be in range for this data's series.
         let standings = data.series.enumerated().compactMap { index, series in (series.ranks[safe: bucket.index] ?? nil).map { (rank: $0, index: index, series: series) } }
@@ -154,7 +224,7 @@ struct TrendsRankBumpChart: View {
             Text(data.bucketing.name(bucket.start)).font(AppTypography.metadata.weight(.semibold))
             ForEach(standings, id: \.series.id) { item in
                 HStack(spacing: 6) {
-                    Circle().fill(color(item.index)).frame(width: 7, height: 7)
+                    badge(item.index, item.series, urls: urls, diameter: urls[item.series.id] == nil ? 7 : 18)
                     Text("#\(item.rank)").font(AppTypography.compactMetadata.monospacedDigit()).foregroundStyle(.secondary)
                     Text(item.series.title).font(AppTypography.compactMetadata).lineLimit(1)
                 }
@@ -166,11 +236,11 @@ struct TrendsRankBumpChart: View {
         .overlay { RoundedRectangle(cornerRadius: 8).stroke(.separator.opacity(0.5)) }
     }
 
-    private func legend(_ data: TrendsRankBump) -> some View {
+    private func legend(_ data: TrendsRankBump, urls: [QueryEntityID: String]) -> some View {
         FlowLegend {
             ForEach(Array(data.series.enumerated()), id: \.element.id) { index, series in
                 HStack(spacing: 5) {
-                    Circle().fill(color(index)).frame(width: 8, height: 8)
+                    badge(index, series, urls: urls, diameter: urls[series.id] == nil ? 8 : 20)
                     Text("#\(series.overallRank)").font(AppTypography.denseBadge.monospacedDigit()).foregroundStyle(.tertiary)
                     Text(series.title).font(AppTypography.compactMetadata).lineLimit(1)
                     if let subtitle = series.subtitle { Text(subtitle).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1) }

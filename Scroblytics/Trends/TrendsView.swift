@@ -314,7 +314,7 @@ struct TrendsView: View {
             flowInputs = TrendsFlowChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             loyaltyInputs = TrendsLoyaltyChart.Inputs(scrobbles: canonical, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
             decadeInputs = TrendsDecadeRiverChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
-            rankBumpInputs = TrendsRankBumpChart.Inputs(scrobbles: canonical, durations: snapshots.durations, range: range, version: dataVersion)
+            rankBumpInputs = TrendsRankBumpChart.Inputs(scrobbles: canonical, durations: snapshots.durations, imageLookup: snapshots.images.lookup, range: range, version: dataVersion)
             longTailInputs = TrendsLongTailChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, version: dataVersion)
             guard latestRequestID == requestID else { return }
             hasAnyPlaysInRange = anyPlays

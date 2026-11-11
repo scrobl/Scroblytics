@@ -40,7 +40,7 @@ extension QueryFieldRegistry {
                         case .pending: info.tracklistPending = true
                         case .none: break
                         case .titles(let list):
-                            let played = Set(plays.map { TextNormalization.normalizeTrackTitle($0.trackName) }.filter { !$0.isEmpty })
+                            let played = Set(plays.map { TextNormalization.normalizeTrackTitleFolded($0.trackName) }.filter { !$0.isEmpty })
                             info.offList = played.subtracting(list).count
                         }
                         if merged, !reviewed, let off = info.offList { info.review = off >= minimum }

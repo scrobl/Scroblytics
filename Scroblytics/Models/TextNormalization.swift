@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Name normalization shared across the app. These are the identity keys used
 /// for album-match resolutions and (via `lovedKey`) for loved tracks, flagged
@@ -26,6 +27,25 @@ enum TextNormalization {
         pattern: "\\b(?:\(editionWordList.joined(separator: "|")))\\b",
         options: [.caseInsensitive]
     )
+
+    private static let recordingWords = ["instrumental", "acoustic"]
+    private static let contentRatingWords = ["explicit", "clean"]
+
+    /// The edition vocabulary, by which kinds of word are included (bit 1: instrumental/acoustic, bit 2: explicit/clean;
+    /// the other edition words are always in). Index 3 is the full vocabulary, the same as `editionWordRegex`.
+    private static let editionWordRegexes: [NSRegularExpression] = (0..<4).map { mask in
+        let dropped = Set((mask & 1 == 0 ? recordingWords : []) + (mask & 2 == 0 ? contentRatingWords : []))
+        return try! NSRegularExpression(
+            pattern: "\\b(?:\(editionWordList.filter { !dropped.contains($0) }.joined(separator: "|")))\\b",
+            options: [.caseInsensitive]
+        )
+    }
+
+    /// Just the instrumental/acoustic words (bit 1) and/or the explicit/clean words (bit 2); nil for neither.
+    private static let noteWordRegexes: [NSRegularExpression?] = (0..<4).map { mask in
+        let words = (mask & 1 != 0 ? recordingWords : []) + (mask & 2 != 0 ? contentRatingWords : [])
+        return words.isEmpty ? nil : try! NSRegularExpression(pattern: "\\b(?:\(words.joined(separator: "|")))\\b", options: [.caseInsensitive])
+    }
 
     private static let regionTagList = [
         "uk", "us", "usa", "eu", "europe", "jp", "japan", "de", "germany", "fr", "france",
@@ -55,29 +75,44 @@ enum TextNormalization {
         pattern: "[(\\[]\\s*feat\\.?[^)\\]]*[)\\]]", options: [.caseInsensitive]
     )
 
+    /// "[Explicit]", "(Clean)", "(Explicit Version)": a label services add to the same recording's title, not another recording.
+    private static let contentRatingTagRegex = try! NSRegularExpression(
+        pattern: "[(\\[]\\s*(?:explicit|clean)(?:\\s+version)?\\s*[)\\]]", options: [.caseInsensitive]
+    )
+
     private static func replacing(_ regex: NSRegularExpression, in s: String, with template: String) -> String {
         let range = NSRange(s.startIndex..., in: s)
         return regex.stringByReplacingMatches(in: s, options: [], range: range, withTemplate: template)
     }
 
-    /// True when `text` is entirely edition vocabulary, region tags, and/or bare years.
-    private static func isEditionOnlyText(_ text: String) -> Bool {
-        var s = replacing(editionWordRegex, in: text, with: " ")
-        s = replacing(regionTagRegex, in: s, with: " ")
-        s = replacing(yearRegex, in: s, with: " ")
+    /// True when `text` is entirely edition vocabulary, region tags, and/or bare years. For track titles, `folding`
+    /// says which kinds of note count: edition notes ("Remastered", "Deluxe", "Mono"…), recording versions
+    /// ("Instrumental", "Acoustic"), content ratings ("Explicit", "Clean"), all (the default, used for album names) or none.
+    private static func isEditionOnlyText(_ text: String, folding: TitleFolding = .all) -> Bool {
+        var s = text
+        let mask = (folding.recordingVersions ? 1 : 0) | (folding.contentRatings ? 2 : 0)
+        if folding.editionNotes {
+            s = replacing(editionWordRegexes[mask], in: s, with: " ")
+            s = replacing(regionTagRegex, in: s, with: " ")
+            s = replacing(yearRegex, in: s, with: " ")
+        } else if let regex = noteWordRegexes[mask] {
+            s = replacing(regex, in: s, with: " ")
+        } else {
+            return false
+        }
         s = s.replacingOccurrences(of: "[\\s,&]+", with: " ", options: .regularExpression)
         return s.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// Strips "(...)"/"[...]" chunks whose entire contents are edition vocabulary.
-    private static func stripEditionParens(_ s: String) -> String {
+    private static func stripEditionParens(_ s: String, folding: TitleFolding = .all) -> String {
         let ns = s as NSString
         var result = ""
         var lastEnd = 0
         for match in editionParenRegex.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
             result += ns.substring(with: NSRange(location: lastEnd, length: match.range.location - lastEnd))
             let inner = ns.substring(with: match.range(at: 1))
-            result += isEditionOnlyText(inner) ? " " : ns.substring(with: match.range)
+            result += isEditionOnlyText(inner, folding: folding) ? " " : ns.substring(with: match.range)
             lastEnd = match.range.location + match.range.length
         }
         result += ns.substring(from: lastEnd)
@@ -220,17 +255,29 @@ enum TextNormalization {
         return collapse(n)
     }
 
-    /// Normalized track title for matching a scrobble against a canonical
-    /// tracklist entry.
+    /// The title half of every artist + title song match key (Library Gaps, the Loved audit, playlist export, tags,
+    /// track lengths, New Music…). Case, spacing, punctuation, "&" versus "and" and "feat." credits are always ignored.
+    /// Whether notes such as "(Remastered)", "(Acoustic)" or "[Explicit]" make a different song is the person's choice (Settings › General › Song matching, `SongMatchingSettings`).
     static func normalizeTrackTitle(_ title: String) -> String {
+        normalizeTrackTitle(title, folding: SongMatchingSettings.folding)
+    }
+
+    /// The same title with every edition and recording note folded away, whatever the setting. For comparing one
+    /// album's official tracklist with the titles you scrobbled for it (the two come from different services, which
+    /// spell the same track differently), and for stored values.
+    static func normalizeTrackTitleFolded(_ title: String) -> String {
+        normalizeTrackTitle(title, folding: .all)
+    }
+
+    static func normalizeTrackTitle(_ title: String, folding: TitleFolding) -> String {
         var t = title.trimmingCharacters(in: .whitespaces)
-        t = stripEditionParens(t)
+        if folding.editionNotes || folding.recordingVersions || folding.contentRatings { t = stripEditionParens(t, folding: folding) }
         t = replacing(featTagRegex, in: t, with: " ")
-        t = t.replacingOccurrences(
-            of: "\\s+-\\s+.*(remaster|version|edit|mix|mono|stereo).*$",
-            with: " ",
-            options: [.regularExpression, .caseInsensitive]
-        )
+        if folding.contentRatings { t = replacing(contentRatingTagRegex, in: t, with: " ") }
+        if folding.editionNotes {
+            let protectedKinds = (folding.recordingVersions ? 0 : 1) | (folding.contentRatings ? 0 : 2)
+            t = stripTailNote(t, protecting: noteWordRegexes[protectedKinds])
+        }
         let collapsed = collapse(t)
         // A title with no Latin letters or digits (made of symbols, like "/=/" and "/=/=/", or of another alphabet) collapses to nothing, which
         // would make every such title on an album the same key, and one that matches nothing where empty keys are left out. It keeps its
@@ -239,6 +286,22 @@ enum TextNormalization {
             return title.lowercased().filter { !$0.isWhitespace && !$0.isNewline }
         }
         return collapsed
+    }
+
+    private static let tailNoteRegex = try! NSRegularExpression(
+        pattern: "\\s+-\\s+.*(remaster|version|edit|mix|mono|stereo).*$", options: [.caseInsensitive]
+    )
+
+    /// "Song - Remastered 2011", "Song - Mono Version": drops the note after the dash. A note that contains one of the
+    /// `protecting` words ("Song - Acoustic Version" while acoustic versions are kept apart) stays.
+    private static func stripTailNote(_ s: String, protecting: NSRegularExpression?) -> String {
+        let ns = s as NSString
+        guard let m = tailNoteRegex.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) else { return s }
+        if let protecting {
+            let note = ns.substring(with: m.range)
+            if protecting.firstMatch(in: note, range: NSRange(location: 0, length: (note as NSString).length)) != nil { return s }
+        }
+        return ns.substring(to: m.range.location) + " "
     }
 
     /// Album-agnostic key for matching a loved/flagged/overridden track — the
@@ -497,4 +560,70 @@ enum TextNormalization {
         }
         return placeholder
     }
+}
+
+/// Which kinds of title notes still count as the same song when matching songs across screens and services.
+struct TitleFolding: Sendable, Equatable {
+    /// "Song (Remastered)", "Song - Mono", "Song (Deluxe Edition)", "Song (Bonus Track)", "Song - 2011 Remaster"…
+    var editionNotes: Bool
+    /// "Song (Instrumental)", "Song (Acoustic Version)": a different recording of the song.
+    var recordingVersions: Bool
+    /// "Song [Explicit]", "Song (Clean)": the same recording with a content-rating label.
+    var contentRatings: Bool = true
+
+    static let all = TitleFolding(editionNotes: true, recordingVersions: true, contentRatings: true)
+}
+
+/// The person's choice (Settings › General › Song matching). Edition notes and content ratings are folded by default,
+/// as they always were; instrumental and acoustic versions are kept apart by default, because they are different
+/// recordings.
+enum SongMatchingSettings {
+    static let editionNotesKey = "matching.foldEditionNotes"
+    static let recordingVersionsKey = "matching.foldRecordingVersions"
+    static let contentRatingsKey = "matching.foldContentRatings"
+    static let defaultFolding = TitleFolding(editionNotes: true, recordingVersions: false, contentRatings: true)
+
+    private static let cache = OSAllocatedUnfairLock<TitleFolding?>(initialState: nil)
+    nonisolated(unsafe) private static var observer: NSObjectProtocol?
+
+    /// The current choice, cached (title matching runs hundreds of thousands of times) and re-read whenever any
+    /// preference changes.
+    static var folding: TitleFolding {
+        if let hit = cache.withLock({ $0 }) { return hit }
+        let value = read()
+        cache.withLock { $0 = value }
+        cache.withLock { _ in
+            if observer == nil {
+                observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { _ in
+                    cache.withLock { $0 = nil }
+                }
+            }
+        }
+        return value
+    }
+
+    private static func read() -> TitleFolding {
+        let defaults = UserDefaults.standard
+        var folding = TitleFolding(
+            editionNotes: defaults.object(forKey: editionNotesKey) as? Bool ?? defaultFolding.editionNotes,
+            recordingVersions: defaults.object(forKey: recordingVersionsKey) as? Bool ?? defaultFolding.recordingVersions,
+            contentRatings: defaults.object(forKey: contentRatingsKey) as? Bool ?? defaultFolding.contentRatings
+        )
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        // A scratch run (checks and dumps against a copy of the store) never depends on the saved preference.
+        if environment["SCROBLYTICS_STORE_PATH"] != nil { folding = defaultFolding }
+        if let v = environment["SCROBLYTICS_MATCH_EDITION_NOTES"] { folding.editionNotes = v != "0" }
+        if let v = environment["SCROBLYTICS_MATCH_RECORDING_VERSIONS"] { folding.recordingVersions = v != "0" }
+        if let v = environment["SCROBLYTICS_MATCH_CONTENT_RATINGS"] { folding.contentRatings = v != "0" }
+        #endif
+        return folding
+    }
+
+    #if DEBUG
+    /// Checks only: pins the choice (nil returns to the saved one).
+    static func setForTesting(_ folding: TitleFolding?) {
+        cache.withLock { $0 = folding }
+    }
+    #endif
 }

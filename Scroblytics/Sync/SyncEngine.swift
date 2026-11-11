@@ -874,7 +874,7 @@ actor SyncEngine {
             trackCache[identityKey] = found
             return
         }
-        let normalizedTitle = TextNormalization.normalizeTrackTitle(raw)
+        let normalizedTitle = TextNormalization.normalizeTrackTitleFolded(raw)
         let track = Track(identityKey: identityKey, title: raw, normalizedTitle: normalizedTitle, artist: artist)
         modelContext.insert(track)
         trackCache[identityKey] = track

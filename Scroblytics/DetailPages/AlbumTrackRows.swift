@@ -86,10 +86,10 @@ enum AlbumTrackRows {
             return entries.map { AlbumTrackRow(id: "e\($0.id)", kind: .extra, position: nil, title: $0.name, entry: $0, heardThisCycle: nil) }
         }
         var waiting: [String: [TopChartEntry]] = [:]
-        for entry in entries { waiting[TextNormalization.normalizeTrackTitle(entry.name), default: []].append(entry) }
+        for entry in entries { waiting[TextNormalization.normalizeTrackTitleFolded(entry.name), default: []].append(entry) }
         var rows: [AlbumTrackRow] = []
         for (index, track) in tracklist.enumerated() {
-            let key = TextNormalization.normalizeTrackTitle(track.title)
+            let key = TextNormalization.normalizeTrackTitleFolded(track.title)
             var matched: TopChartEntry?
             if var queue = waiting[key], !queue.isEmpty {
                 matched = queue.removeFirst()
@@ -116,7 +116,7 @@ enum AlbumTrackRows {
         for play in plays where !play.trackName.isEmpty {
             guard TextNormalization.artistIdentityKey(play.artistName) == artistKey,
                   TextNormalization.normalizeAlbumName(play.albumName) == albumKey else { continue }
-            counts[TextNormalization.normalizeTrackTitle(play.trackName), default: [:]][PlayedName(artist: play.artistName, name: play.trackName), default: 0] += 1
+            counts[TextNormalization.normalizeTrackTitleFolded(play.trackName), default: [:]][PlayedName(artist: play.artistName, name: play.trackName), default: 0] += 1
         }
         return counts.mapValues { spellings in
             spellings.max { a, b in
@@ -129,7 +129,7 @@ enum AlbumTrackRows {
     /// tracklist's title under the album's artist (a track nobody has played).
     static func identity(for row: AlbumTrackRow, albumArtist: String, playedNames: [String: PlayedName]) -> PlayedName {
         if let entry = row.entry { return PlayedName(artist: entry.artist ?? albumArtist, name: entry.name) }
-        if let seen = playedNames[TextNormalization.normalizeTrackTitle(row.title)] { return seen }
+        if let seen = playedNames[TextNormalization.normalizeTrackTitleFolded(row.title)] { return seen }
         return PlayedName(artist: albumArtist, name: row.title)
     }
 

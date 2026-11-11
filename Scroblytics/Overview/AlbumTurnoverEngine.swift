@@ -233,7 +233,7 @@ enum AlbumTurnoverEngine {
         var seen = Set<String>()
         var titles: [String] = []
         for s in group.scrobbles {
-            let n = TextNormalization.normalizeTrackTitle(s.trackName)
+            let n = TextNormalization.normalizeTrackTitleFolded(s.trackName)
             if !n.isEmpty, !seen.contains(n) {
                 seen.insert(n)
                 titles.append(s.trackName)
@@ -244,11 +244,11 @@ enum AlbumTurnoverEngine {
 
     /// Fraction of the canonical tracklist the user has scrobbled at least once (ever).
     nonisolated static func coverageOf(scrobbleTitles: [String], canonicalTitles: [String]) -> Double {
-        let canon = Set(canonicalTitles.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty })
+        let canon = Set(canonicalTitles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty })
         guard !canon.isEmpty else { return 0 }
         var heard = Set<String>()
         for t in scrobbleTitles {
-            let n = TextNormalization.normalizeTrackTitle(t)
+            let n = TextNormalization.normalizeTrackTitleFolded(t)
             if canon.contains(n) { heard.insert(n) }
         }
         return Double(heard.count) / Double(canon.count)
@@ -489,7 +489,7 @@ enum AlbumTurnoverEngine {
                 noCanonicalMatch = !isCanonicalResolution
                 basis = .observed
             case .found(let tracklist):
-                let canonNorm = Set(tracklist.tracks.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty })
+                let canonNorm = Set(tracklist.tracks.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty })
                 let cov = coverageOf(scrobbleTitles: group.scrobbles.map(\.trackName), canonicalTitles: tracklist.tracks)
                 coverage = cov
                 canonicalTrackCount = canonNorm.count
@@ -578,7 +578,7 @@ enum AlbumTurnoverEngine {
         var normToOriginal: [String: String] = [:]
         var requiredCounts: [String: Int] = [:]
         for title in canonicalTitles {
-            let norm = TextNormalization.normalizeTrackTitle(title)
+            let norm = TextNormalization.normalizeTrackTitleFolded(title)
             guard !norm.isEmpty else { continue }
             if normToOriginal[norm] == nil { normToOriginal[norm] = title }
             requiredCounts[norm, default: 0] += 1
@@ -592,7 +592,7 @@ enum AlbumTurnoverEngine {
         var cycleStart: Date?
 
         for s in scrobbles {
-            let norm = TextNormalization.normalizeTrackTitle(s.trackName)
+            let norm = TextNormalization.normalizeTrackTitleFolded(s.trackName)
             guard let required = requiredCounts[norm] else { continue }
             if cycleStart == nil { cycleStart = s.playedAt }
             let prevSeen = seenCounts[norm] ?? 0
@@ -618,7 +618,7 @@ enum AlbumTurnoverEngine {
         var trackStates: [TrackCycleState] = []
         var consumed: [String: Int] = [:]
         for title in canonicalTitles {
-            let norm = TextNormalization.normalizeTrackTitle(title)
+            let norm = TextNormalization.normalizeTrackTitleFolded(title)
             guard !norm.isEmpty else { continue }
             let seen = seenCounts[norm] ?? 0
             let usedSoFar = consumed[norm] ?? 0
@@ -776,7 +776,7 @@ enum AlbumTurnoverEngine {
             }
             let match = AlbumTurnoverEngine.matchResult(group: group, resolution: resolution, lookup: found)
             guard match.basis == .canonical else { return .none }
-            return .titles(Set(match.denominatorTitles.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty }))
+            return .titles(Set(match.denominatorTitles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty }))
         }
 
         /// The album's match status, or nil while the tracklist it needs isn't cached yet. Unlike

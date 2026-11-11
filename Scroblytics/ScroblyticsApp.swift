@@ -503,6 +503,9 @@ private struct AppearanceSettingsView: View {
     @Binding var appearance: AppearancePreference
     @AppStorage(AppCalendars.weekStartKey) private var weekStartDay = WeekStart.monday.rawValue
     @AppStorage(SeasonSettings.hemisphereKey) private var hemisphere = Hemisphere.north.rawValue
+    @AppStorage(SongMatchingSettings.editionNotesKey) private var foldEditionNotes = SongMatchingSettings.defaultFolding.editionNotes
+    @AppStorage(SongMatchingSettings.recordingVersionsKey) private var foldRecordingVersions = SongMatchingSettings.defaultFolding.recordingVersions
+    @AppStorage(SongMatchingSettings.contentRatingsKey) private var foldContentRatings = SongMatchingSettings.defaultFolding.contentRatings
 
     var body: some View {
         Form {
@@ -527,6 +530,25 @@ private struct AppearanceSettingsView: View {
                     .font(AppTypography.supporting)
                     .foregroundStyle(.secondary)
                 HelpLinkButton(articleID: "offline-mode", title: "What Offline mode does")
+            }
+
+            Section("Song matching") {
+                Toggle("Count remasters and other edition notes as the same song", isOn: $foldEditionNotes)
+                Text("“Song (Remastered)”, “Song - Mono” and “Song (Deluxe Edition)” are matched with “Song”. Off, each title is its own song, so a remaster you own and the original you scrobbled show up as two.")
+                    .font(AppTypography.supporting)
+                    .foregroundStyle(.secondary)
+                Toggle("Count instrumental and acoustic versions as the same song", isOn: $foldRecordingVersions)
+                Text("“Song (Instrumental)” and “Song (Acoustic)” are matched with “Song”. Off (the default), they are different songs, because they are different recordings.")
+                    .font(AppTypography.supporting)
+                    .foregroundStyle(.secondary)
+                Toggle("Count explicit and clean versions as the same song", isOn: $foldContentRatings)
+                Text("“Song [Explicit]” and “Song (Clean)” are matched with “Song”. Off, the explicit and the clean title are different songs.")
+                    .font(AppTypography.supporting)
+                    .foregroundStyle(.secondary)
+                Text("Applies to Library Gaps, Loved Status Audit, playlist export, Tag Management, track lengths and New Music. Case, punctuation, “&” and “and” and “feat.” credits never make a different song. Comparing an album’s tracklist with your scrobbles always ignores these notes, since the two come from different services. Library Gaps updates at its next check.")
+                    .font(AppTypography.supporting)
+                    .foregroundStyle(.secondary)
+                HelpLinkButton(articleID: "metrics-song-matching", title: "How songs are matched")
             }
 
             SharingSettingsSection()

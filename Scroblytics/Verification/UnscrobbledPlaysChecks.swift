@@ -224,12 +224,12 @@ enum UnscrobbledPlaysChecks {
         let p = at(0)
         let tracks = [
             song("A", "Title", played: p),                       // scrobbled only as "Title (feat. Guest)"
-            song("B", "Other Song", played: p),                  // an old identical scrobble, and a newer "(Acoustic)" one
+            song("B", "Other Song", played: p),                  // an old identical scrobble, and a newer "(Remastered 2011)" one
             song("C", "Same Title", played: p),                  // scrobbled in different case and spacing
         ]
         let scrobbles = [
             scrobble("A", "Title (feat. Guest)", p),
-            scrobble("B", "Other Song", at(-100_000)), scrobble("B", "Other Song (Acoustic)", p),
+            scrobble("B", "Other Song", at(-100_000)), scrobble("B", "Other Song (Remastered 2011)", p),
             scrobble("C", "same   title", p),
         ]
         let on = run(tracks, scrobbles, variants: true)
@@ -239,11 +239,11 @@ enum UnscrobbledPlaysChecks {
         check("with variants not matched, the song is listed as never scrobbled, and says how it was scrobbled",
               row(off, "Title")?.kind == .neverScrobbled && row(off, "Title")?.variantSpelling == "A — Title (feat. Guest)", "\(String(describing: row(off, "Title")?.variantSpelling))")
         check("with variants not matched, an older identical scrobble leaves it listed, naming the variant that would have counted",
-              row(off, "Other Song")?.kind == .playedAfterLastScrobble && row(off, "Other Song")?.variantSpelling == "B — Other Song (Acoustic)")
+              row(off, "Other Song")?.kind == .playedAfterLastScrobble && row(off, "Other Song")?.variantSpelling == "B — Other Song (Remastered 2011)")
         check("with variants matched, no row carries a variant note", (on.notScrobbled + on.timeDiffers).allSatisfy { $0.variantSpelling == nil })
         check("the scrobble count follows the matching in use", {
-            let both = Engine.compute(scrobbles: history([scrobble("D", "Song", at(-10)), scrobble("D", "Song (Acoustic)", at(-9_000_000))]), music: music([song("D", "Song", played: at(0))]), matchVariants: true, syncedThrough: synced, now: t0)
-            let only = Engine.compute(scrobbles: history([scrobble("D", "Song", at(-3000)), scrobble("D", "Song (Acoustic)", at(-9_000_000))]), music: music([song("D", "Song", played: at(0))]), matchVariants: false, syncedThrough: synced, now: t0)
+            let both = Engine.compute(scrobbles: history([scrobble("D", "Song", at(-10)), scrobble("D", "Song (Remastered 2011)", at(-9_000_000))]), music: music([song("D", "Song", played: at(0))]), matchVariants: true, syncedThrough: synced, now: t0)
+            let only = Engine.compute(scrobbles: history([scrobble("D", "Song", at(-3000)), scrobble("D", "Song (Remastered 2011)", at(-9_000_000))]), music: music([song("D", "Song", played: at(0))]), matchVariants: false, syncedThrough: synced, now: t0)
             return both.upToDate == 1 && row(only, "Song")?.scrobbles == 1
         }())
         check("a note is only given when a variant exists", row(off, "Same Title") == nil && (off.notScrobbled + off.timeDiffers).filter { $0.variantSpelling != nil }.count == 2)
@@ -364,7 +364,7 @@ enum UnscrobbledPlaysChecks {
         check("the window is 14 days less an hour", Scrobbling.maxAge == 14 * 86_400 - 3600)
 
         // A play covered by a scrobble under another spelling is not offered (variants not matched)
-        let covered = run([song("A", "Title", played: at(-hour)), song("B", "Other", played: at(-hour))], [scrobble("A", "Title (feat. Guest)", at(-hour)), scrobble("B", "Other (Acoustic)", at(-30 * hour))], variants: false)
+        let covered = run([song("A", "Title", played: at(-hour)), song("B", "Other", played: at(-hour))], [scrobble("A", "Title (feat. Guest)", at(-hour)), scrobble("B", "Other (Remastered 2011)", at(-30 * hour))], variants: false)
         let coveredEligible = Scrobbling.eligible(covered.notScrobbled, now: t0)
         check("with variants not matched, a play already scrobbled under another spelling is marked covered and not offered", covered.notScrobbled.first { $0.track == "Title" }?.coveredByVariant == true && !coveredEligible.contains { $0.track == "Title" })
         check("a variant scrobble from before the play does not cover it", covered.notScrobbled.first { $0.track == "Other" }?.coveredByVariant == false && coveredEligible.contains { $0.track == "Other" })

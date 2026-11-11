@@ -344,13 +344,13 @@ enum AppleMusicMatcher {
             groups[key, default: []].append(c)
         }
 
-        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty })
+        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty })
         let normTarget = TextNormalization.normalizeAlbumName(targetAlbum)
 
         var editions: [Edition] = []
         for key in groupsOrdered {
             let group = groups[key]!
-            let groupTitles = Set(group.map { TextNormalization.normalizeTrackTitle($0.title) })
+            let groupTitles = Set(group.map { TextNormalization.normalizeTrackTitleFolded($0.title) })
             let observedMatches = groupTitles.filter { observedNorm.contains($0) }.count
             editions.append(Edition(album: group[0].album, tracks: toAlbumTracks(group), observedMatches: observedMatches))
         }

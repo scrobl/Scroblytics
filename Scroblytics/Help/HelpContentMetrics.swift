@@ -250,7 +250,30 @@ extension HelpContent {
                     HelpDefinition(term: "Never in library", detail: "Never found in the library."),
                     HelpDefinition(term: "Uncertain", detail: "Not found under this title, but a near match exists under a different spelling or credit. If it is really a different recording, **Confirm** it in Library Gaps and it becomes Never in library (or Removed)."),
                 ]),
-                .paragraph("Tracks are matched by artist plus a normalized title: edition brackets, feat. credits and “remaster / version / edit / mix / mono / stereo” endings are removed, case and punctuation are ignored, and “&” is read as “and”. A remaster and its original therefore count as one track. The “not in your Apple Music library” badge shows for Removed, Never and Unavailable tracks. A track you confirm in Library Gaps (from Uncertain) counts as Never in library or Removed, so it gets the badge too."),
+                .paragraph("Tracks are matched by artist plus a normalized title: case and punctuation are ignored, “&” is read as “and”, and feat. credits are removed. Whether edition notes (“remaster / version / edit / mix / mono / stereo”), instrumental or acoustic versions and explicit or clean labels also count as the same song is your choice in Settings › General › Song matching; see [How songs are matched](help://metrics-song-matching). With the default, a remaster and its original count as one track, and an instrumental is its own track. The “not in your Apple Music library” badge shows for Removed, Never and Unavailable tracks. A track you confirm in Library Gaps (from Uncertain) counts as Never in library or Removed, so it gets the badge too."),
+            ]
+        ),
+        HelpArticle(
+            id: "metrics-song-matching",
+            title: "How songs are matched",
+            summary: "When two titles count as the same song, and the Settings that decide it.",
+            blocks: [
+                .paragraph("Wherever Scroblytics compares a song from one place with a song from another (your scrobbles, your Apple Music library, your loves, a playlist), it matches the artist and a **normalized title**. Case, spacing and punctuation never matter, “&” is read as “and”, and a “feat.” credit is ignored, because those are the same recording written differently."),
+                .heading("Three choices in Settings"),
+                .paragraph("**Settings › General › Song matching** decides whether notes in a title make a different song:"),
+                .definitions([
+                    HelpDefinition(term: "Remasters and other edition notes", detail: "“Song (Remastered 2011)”, “Song - Mono”, “Song (Deluxe Edition)”, “Song (Bonus Track)”. **On** (the default): matched with “Song”. **Off**: each title is its own song, so a remaster in your library and the original you scrobbled are two songs."),
+                    HelpDefinition(term: "Instrumental and acoustic versions", detail: "“Song (Instrumental)”, “Song (Acoustic Version)”. **Off** (the default): different songs, because they are different recordings. **On**: matched with “Song”."),
+                    HelpDefinition(term: "Explicit and clean versions", detail: "“Song [Explicit]”, “Song (Clean)”. **On** (the default): matched with “Song”, because services add these labels to the same recording. **Off**: the explicit and the clean title are different songs."),
+                ]),
+                .paragraph("Turning edition notes off is for you if you would rather correct a title in Music or on Last.fm than have the app guess; the places where two spellings might be the same song then show as **Uncertain**, and you decide (**Same track** or **Different tracks** in the [Loved Status Audit](help://tool-loved-audit), **Confirm** in Library Gaps). Leaving it on is fine if you do not want that work."),
+                .heading("What it changes"),
+                .bullets([
+                    "Library Gaps, the Loved Status Audit, Apple Music playlist export, Tag Management, track lengths, New Music, Release Year Audit and the “View in Apple Music” lookup all use this match. Library Gaps rebuilds its list at the next **Check library**.",
+                    "Tag Management tags a Last.fm *title*. With instrumental versions kept apart, “Song (Instrumental)” in your playlist is never matched to the scrobbled “Song”, so the tag cannot land on the vocal version.",
+                    "Comparing one album’s official tracklist with the titles you scrobbled for that album (album turnover, the album page’s track table, Fix album match) **always** ignores these notes, whatever the setting. The tracklist comes from another service that may spell a title with a note you never scrobbled, and an album you played through should still count as played through.",
+                    "Last.fm itself identifies a song by artist and title, not by album. A love, a tag or a play count belongs to the title on every album that carries it, so a song on two albums is one song to Last.fm. Plays shown on an album page are counted for that album.",
+                ]),
             ]
         ),
         HelpArticle(

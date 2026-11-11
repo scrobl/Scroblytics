@@ -202,7 +202,7 @@ actor GetSongBPMClient {
     }
 
     nonisolated static func comparable(_ title: String) -> String {
-        String(TextNormalization.normalizeTrackTitle(title).lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+        String(TextNormalization.normalizeTrackTitleFolded(title).lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     }
 
     nonisolated static func stripAnnotations(_ title: String) -> String {

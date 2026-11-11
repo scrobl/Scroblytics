@@ -366,8 +366,8 @@ struct AlbumMatchFixView: View {
                 ForEach(candidates) { candidate in
                     lastfmCandidateRow(candidate)
                     if expandedLastfmID == candidate.id, candidate.trackCount != nil {
-                        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitle))
-                        trackList(candidate.tracks.map { ($0, observedNorm.contains(TextNormalization.normalizeTrackTitle($0))) }, numbered: true)
+                        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitleFolded))
+                        trackList(candidate.tracks.map { ($0, observedNorm.contains(TextNormalization.normalizeTrackTitleFolded($0))) }, numbered: true)
                     }
                 }
             }
@@ -458,7 +458,7 @@ struct AlbumMatchFixView: View {
         }
 
         let observed = AlbumTurnoverEngine.distinctObserved(deciding)
-        let observedNorm = Set(observed.titles.map(TextNormalization.normalizeTrackTitle).filter { !$0.isEmpty })
+        let observedNorm = Set(observed.titles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty })
 
         var candidates: [LastfmCandidate] = []
         for identity in identities.prefix(Self.candidateMax) {
@@ -468,12 +468,12 @@ struct AlbumMatchFixView: View {
                 var seenTitleNorm = Set<String>()
                 var tracks: [String] = []
                 for t in tracklist.tracks {
-                    let norm = TextNormalization.normalizeTrackTitle(t)
+                    let norm = TextNormalization.normalizeTrackTitleFolded(t)
                     guard !norm.isEmpty, !seenTitleNorm.contains(norm) else { continue }
                     seenTitleNorm.insert(norm)
                     tracks.append(t)
                 }
-                let matched = tracks.filter { observedNorm.contains(TextNormalization.normalizeTrackTitle($0)) }.count
+                let matched = tracks.filter { observedNorm.contains(TextNormalization.normalizeTrackTitleFolded($0)) }.count
                 let coverage = tracks.isEmpty ? 0 : Double(matched) / Double(tracks.count)
                 candidates.append(LastfmCandidate(
                     queryArtist: identity.artist, queryAlbum: identity.album, isAutoMatch: identity.isAutoMatch,
@@ -537,8 +537,8 @@ struct AlbumMatchFixView: View {
                         selection = .appleMusicEdition(index: index)
                     }
                     if expandedAppleMusicIndex == index {
-                        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitle))
-                        trackList(edition.tracks.map { ($0.title, observedNorm.contains(TextNormalization.normalizeTrackTitle($0.title))) }, numbered: true)
+                        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitleFolded))
+                        trackList(edition.tracks.map { ($0.title, observedNorm.contains(TextNormalization.normalizeTrackTitleFolded($0.title))) }, numbered: true)
                     }
                 }
             }

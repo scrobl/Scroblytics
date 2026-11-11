@@ -40,8 +40,8 @@ enum SubListSorting {
             return entries.sorted { $0.lastPlayedAt > $1.lastPlayedAt }
         case .trackOrder:
             return entries.sorted { a, b in
-                let ai = trackOrderIndex[TextNormalization.normalizeTrackTitle(a.name)] ?? Int.max
-                let bi = trackOrderIndex[TextNormalization.normalizeTrackTitle(b.name)] ?? Int.max
+                let ai = trackOrderIndex[TextNormalization.normalizeTrackTitleFolded(a.name)] ?? Int.max
+                let bi = trackOrderIndex[TextNormalization.normalizeTrackTitleFolded(b.name)] ?? Int.max
                 if ai != bi { return ai < bi }
                 return a.name.localizedStandardCompare(b.name) == .orderedAscending
             }
@@ -395,7 +395,7 @@ struct EntitySubListView: View {
             if sort == .mostPlayed {
                 positionLabel(entry.rank)
             } else if sort == .trackOrder {
-                let normalizedTitle = TextNormalization.normalizeTrackTitle(entry.name)
+                let normalizedTitle = TextNormalization.normalizeTrackTitleFolded(entry.name)
                 positionLabel(trackOrderIndex[normalizedTitle].map { $0 + 1 })
             } else if sort == .releaseYear {
                 releaseYearPositionLabel(entry)
@@ -511,7 +511,7 @@ struct EntitySubListView: View {
               case .found(let tracklist) = result else { return }
         var index: [String: Int] = [:]
         for (i, title) in tracklist.tracks.enumerated() {
-            index[TextNormalization.normalizeTrackTitle(title)] = i
+            index[TextNormalization.normalizeTrackTitleFolded(title)] = i
         }
         trackOrderIndex = index
     }

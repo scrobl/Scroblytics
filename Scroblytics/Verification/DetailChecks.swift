@@ -26,6 +26,17 @@ enum DetailChecks {
             // A release date keeps the precision it has; the tiles shorten the month like the other date tiles ("Nov 10, 2026").
             check("a release date's month is abbreviated for the tiles, at every precision", ReleaseDateEngine.formatDate("2026-11-10", abbreviated: true) == "Nov 10, 2026" && ReleaseDateEngine.formatDate("2026-09", abbreviated: true) == "Sep 2026" && ReleaseDateEngine.formatDate("2026", abbreviated: true) == "2026" && ReleaseDateEngine.formatDate("2026-05-03", abbreviated: true) == "May 3, 2026")
             check("elsewhere a release date still spells the month out", ReleaseDateEngine.formatDate("2026-11-10") == "November 10, 2026" && ReleaseDateEngine.formatDate("2026-11") == "November 2026" && ReleaseDateEngine.formatDate("2026-13-01", abbreviated: true) == "2026-13-01")
+            // Missing Data's thumbnails use the picture the app has saved (as a detail page does), not only the one saved with the scrobbles.
+            let blank = "https://example.test/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562f.png"
+            let albumID = QueryEntityID(target: .album, artist: "Artist A", name: "Album One")
+            let trackID = QueryEntityID(target: .track, artist: "Artist A", name: "Song")
+            let artistID = QueryEntityID(target: .artist, artist: "Artist A", name: "Artist A")
+            let savedAlbum = [ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .album, artist: "Artist A", album: "Album One", track: nil)): "file:///saved/cover.jpg"]
+            check("a row shows the saved cover even when its scrobbles carry only Last.fm's blank picture", MissingDataEngine.pictureURL(target: .album, id: albumID, album: nil, scrobbledURL: blank, lookup: savedAlbum) == "file:///saved/cover.jpg")
+            check("a row with nothing saved falls back to its scrobbles' own real picture, but never to the blank one", MissingDataEngine.pictureURL(target: .album, id: albumID, album: nil, scrobbledURL: "https://example.test/real.jpg", lookup: [:]) == "https://example.test/real.jpg" && MissingDataEngine.pictureURL(target: .album, id: albumID, album: nil, scrobbledURL: blank, lookup: [:]) == nil && MissingDataEngine.pictureURL(target: .album, id: albumID, album: nil, scrobbledURL: nil, lookup: [:]) == nil)
+            check("a track row takes its album's saved cover", MissingDataEngine.pictureURL(target: .track, id: trackID, album: "Album One", scrobbledURL: nil, lookup: savedAlbum) == "file:///saved/cover.jpg")
+            let artistLookup = [ImageResolutionEngine.lookupKey(for: ImageTarget(kind: .artist, artist: "Artist A", album: nil, track: nil)): "file:///saved/artist.jpg"]
+            check("an artist row takes the saved artist picture and never a scrobble's album cover", MissingDataEngine.pictureURL(target: .artist, id: artistID, album: nil, scrobbledURL: nil, lookup: artistLookup) == "file:///saved/artist.jpg" && MissingDataEngine.pictureURL(target: .artist, id: artistID, album: nil, scrobbledURL: "https://example.test/real.jpg", lookup: [:]) == nil)
             let waiting = DetailHeaderCard<EmptyView>.headline(stats: nil, metric: .scrobbles, timeListenedSeconds: nil)
             check("while stats load the four headline tiles are already there, as dashes", waiting.count == 4 && waiting.allSatisfy { $0.displayText == "—" && !$0.hasValue })
             let stats = DetailSnapshots.sampleStats()

@@ -196,10 +196,25 @@ enum MissingDataEngine {
             }
             rows.append(MissingDataRow(
                 id: row.entity.id, target: target, artist: row.entity.id.artist, name: row.entity.id.name,
-                bucket: bucket, imageURL: info?.imageURL, album: info?.album, plays: plays, lastPlayed: lastPlayed, detail: detail
+                bucket: bucket,
+                imageURL: pictureURL(target: target, id: row.entity.id, album: info?.album, scrobbledURL: info?.imageURL, lookup: snapshots.images.lookup),
+                album: info?.album, plays: plays, lastPlayed: lastPlayed, detail: detail
             ))
         }
         return MissingDataResult(field: field, target: target, rows: rows, universeCount: result.universeCount)
+    }
+
+    /// The picture a row shows: the one the app has saved for it (a picture set by hand first, then a detected one, a track falling back
+    /// to its album's), as a detail page shows it. The picture saved with the scrobbles themselves is only the last resort, because it is
+    /// often Last.fm's blank placeholder or missing even when a real cover has been found since.
+    static func pictureURL(target: QueryTarget, id: QueryEntityID, album: String?, scrobbledURL: String?, lookup: [String: String]) -> String? {
+        let imageTarget: ImageTarget
+        switch target {
+        case .artist: imageTarget = ImageTarget(kind: .artist, artist: id.artist, album: nil, track: nil)
+        case .album: imageTarget = ImageTarget(kind: .album, artist: id.artist, album: id.name, track: nil)
+        case .track, .scrobble, .session: imageTarget = ImageTarget(kind: .track, artist: id.artist, album: album, track: id.name)
+        }
+        return ImageResolutionEngine.effectiveImageURL(for: imageTarget, lookup: lookup, fallbackURL: scrobbledURL)
     }
 
     /// The first `rowLimit` rows (0 = all) in the chosen order: what the tool shows, and what a playlist made from it holds.
@@ -332,7 +347,18 @@ enum MissingDataDebugEval {
             let result = MissingDataEngine.compute(field: field, target: target, scrobbles: scrobbles, snapshots: snapshots)
             var lines = ["missingCount\tpendingCount\tuniverseCount"]
             if let result { lines.append("\(result.missingCount)\t\(result.pendingCount)\t\(result.universeCount)") }
-            lines.append(contentsOf: (result?.rows ?? []).map { "\($0.artist)\t\($0.name)\t\($0.bucket)\t\($0.plays)\t\($0.lastPlayed?.description ?? "")" })
+            // The last two columns cross-check the row's picture against what a detail page resolves for the same item (read from the
+            // store directly, with no scrobble picture to fall back to): wherever the page has one, the row must show the same.
+            lines[0] += "\trowPicture\tpagePicture"
+            lines.append(contentsOf: (result?.rows ?? []).map { row in
+                let imageTarget: ImageTarget = switch target {
+                case .artist: ImageTarget(kind: .artist, artist: row.artist, album: nil, track: nil)
+                case .album: ImageTarget(kind: .album, artist: row.artist, album: row.name, track: nil)
+                default: ImageTarget(kind: .track, artist: row.artist, album: row.album, track: row.name)
+                }
+                let page = (try? ImageResolutionEngine.effectiveImageURL(for: imageTarget, context: context, fallbackURL: nil)) ?? nil
+                return "\(row.artist)\t\(row.name)\t\(row.bucket)\t\(row.plays)\t\(row.lastPlayed?.description ?? "")\t\(row.imageURL ?? "-")\t\(page ?? "-")"
+            })
             try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
             exit(0)
         }

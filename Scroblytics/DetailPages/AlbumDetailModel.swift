@@ -225,7 +225,7 @@ final class AlbumDetailModel {
     /// full cycles, how far through the current one.
     func facts(onEditReleaseDate: @escaping () -> Void, onFixAlbumMatch: @escaping () -> Void) -> [DetailFact] {
         let release: DetailFact.Value = isLoadingReleaseDate && releaseDate == nil ? .loading
-            : (releaseDate.map { .text(ReleaseDateEngine.formatDate($0)) } ?? .unknown)
+            : (releaseDate.map { .text(ReleaseDateEngine.formatDate($0, abbreviated: true)) } ?? .unknown)
         let released = DetailFact(
             id: "released", label: "Released", value: release, corrected: releaseDate != nil && releaseDateOverride() != nil,
             systemImage: "calendar", onEdit: onEditReleaseDate

@@ -866,7 +866,7 @@ struct ReleaseYearAuditRowView: View {
     private func scroblyticsBlock(width: CGFloat, labelled: Bool) -> some View {
         yearBlock(
             title: labelled ? "Scroblytics" : nil, year: row.scroblytics.year,
-            detail: [row.scroblytics.date.map(ReleaseDateEngine.formatDate), row.scroblytics.origin.label].compactMap { $0 }.joined(separator: " · "),
+            detail: [row.scroblytics.date.map { ReleaseDateEngine.formatDate($0) }, row.scroblytics.origin.label].compactMap { $0 }.joined(separator: " · "),
             tint: row.scroblytics.origin == .manual ? Color.purple : nil, width: width
         )
     }

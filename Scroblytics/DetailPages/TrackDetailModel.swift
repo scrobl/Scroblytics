@@ -233,7 +233,7 @@ final class TrackDetailModel {
     /// The page's own facts: when it came out, how long it is, how fast it goes.
     func facts(onEditReleaseDate: @escaping () -> Void, onEditDuration: @escaping () -> Void, onEditTempo: @escaping () -> Void) -> [DetailFact] {
         let release: DetailFact.Value = isLoadingReleaseDate && releaseDate == nil ? .loading
-            : (releaseDate.map { .text(ReleaseDateEngine.formatDate($0)) } ?? .unknown)
+            : (releaseDate.map { .text(ReleaseDateEngine.formatDate($0, abbreviated: true)) } ?? .unknown)
         let length: DetailFact.Value = isLoadingDuration && resolvedDuration == nil ? .loading
             : (resolvedDuration.map { .text(DurationEngine.formatDuration($0)) } ?? .unknown)
         let tempo: DetailFact.Value = isLoadingBPM && resolvedBPM == nil ? .loading

@@ -23,6 +23,9 @@ enum DetailChecks {
             let valueFact = DetailFact(id: "c", label: "Tempo", value: .text("118 BPM"))
             check("a tile says what state it is in", loadingFact.displayText == "Checking…" && unknownFact.displayText == "Unknown" && valueFact.displayText == "118 BPM")
             check("only a tile with a value counts as having one", !loadingFact.hasValue && !unknownFact.hasValue && valueFact.hasValue)
+            // A release date keeps the precision it has; the tiles shorten the month like the other date tiles ("Nov 10, 2026").
+            check("a release date's month is abbreviated for the tiles, at every precision", ReleaseDateEngine.formatDate("2026-11-10", abbreviated: true) == "Nov 10, 2026" && ReleaseDateEngine.formatDate("2026-09", abbreviated: true) == "Sep 2026" && ReleaseDateEngine.formatDate("2026", abbreviated: true) == "2026" && ReleaseDateEngine.formatDate("2026-05-03", abbreviated: true) == "May 3, 2026")
+            check("elsewhere a release date still spells the month out", ReleaseDateEngine.formatDate("2026-11-10") == "November 10, 2026" && ReleaseDateEngine.formatDate("2026-11") == "November 2026" && ReleaseDateEngine.formatDate("2026-13-01", abbreviated: true) == "2026-13-01")
             let waiting = DetailHeaderCard<EmptyView>.headline(stats: nil, metric: .scrobbles, timeListenedSeconds: nil)
             check("while stats load the four headline tiles are already there, as dashes", waiting.count == 4 && waiting.allSatisfy { $0.displayText == "—" && !$0.hasValue })
             let stats = DetailSnapshots.sampleStats()

@@ -523,18 +523,19 @@ enum ReleaseDateEngine {
 
     /// Renders "YYYY", "YYYY-MM", or "YYYY-MM-DD" as a human date string,
     /// matching whatever precision was actually resolved rather than
-    /// fabricating a day/month that was never known.
-    static func formatDate(_ raw: String) -> String {
+    /// fabricating a day/month that was never known. `abbreviated` shortens the month ("Nov 10, 2026"), as the other date tiles on a
+    /// detail page read; the default spells it out.
+    static func formatDate(_ raw: String, abbreviated: Bool = false) -> String {
         let parts = raw.split(separator: "-").map(String.init)
         switch parts.count {
         case 1:
             return parts[0]
         case 2:
             guard let month = Int(parts[1]), (1...12).contains(month) else { return raw }
-            return "\(monthName(month)) \(parts[0])"
+            return "\(monthName(month, abbreviated: abbreviated)) \(parts[0])"
         case 3:
             guard let month = Int(parts[1]), (1...12).contains(month), let day = Int(parts[2]) else { return raw }
-            return "\(monthName(month)) \(day), \(parts[0])"
+            return "\(monthName(month, abbreviated: abbreviated)) \(day), \(parts[0])"
         default:
             return raw
         }
@@ -563,10 +564,10 @@ enum ReleaseDateEngine {
         return calendar.date(from: components)
     }
 
-    private static func monthName(_ month: Int) -> String {
+    private static func monthName(_ month: Int, abbreviated: Bool = false) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.monthSymbols[month - 1]
+        return (abbreviated ? formatter.shortMonthSymbols : formatter.monthSymbols)[month - 1]
     }
 
     /// Validates a user-entered "YYYY" | "YYYY-MM" | "YYYY-MM-DD" string —

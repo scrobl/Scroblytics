@@ -71,10 +71,11 @@ struct ScrobbleTrackIndex: Sendable {
         // Never suggest the vocal title for an instrumental (or the reverse) while those are kept apart: that pair is a
         // known difference, not an uncertain spelling, and a tag on one would land on the other's title.
         let folding = SongMatchingSettings.folding
-        let apartOnly: ((LovedStatusAuditEngine.Entry) -> Bool)? = folding.recordingVersions ? nil : { candidate in
+        var apartOnly: ((LovedStatusAuditEngine.Entry) -> Bool)?
+        if !folding.recordingVersions {
             let withRecordingFolded = TitleFolding(editionNotes: folding.editionNotes, recordingVersions: true, contentRatings: folding.contentRatings)
-            return TextNormalization.normalizeTrackTitle(candidate.track, folding: withRecordingFolded)
-                == TextNormalization.normalizeTrackTitle(track, folding: withRecordingFolded)
+            let wanted = TextNormalization.normalizeTrackTitle(track, folding: withRecordingFolded)
+            apartOnly = { TextNormalization.normalizeTrackTitle($0.track, folding: withRecordingFolded) == wanted }
         }
         if let candidate = near.nearest(artist: artist, track: track, isExcluded: apartOnly),
            let t = tracks[TextNormalization.lovedKey(artist: candidate.artist, track: candidate.track)] { return .uncertain(t) }

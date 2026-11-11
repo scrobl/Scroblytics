@@ -164,8 +164,8 @@ enum LovedStatusAuditEngine {
             // randomized per instance, which made repeated runs disagree on which near match to name).
             for index in candidates.sorted() {
                 let entry = entries[index]
-                if let isExcluded, isExcluded(entry) { continue }
                 guard StaleRecordReconciler.artistKeysCompatible(artistKey, artistKeys[index]) else { continue }
+                if let isExcluded, isExcluded(entry) { continue }
                 let other = normalizedTitles[index]
                 // Cheap gate before the expensive comparisons: every way two titles can count as the same needs
                 // either a shared word (one contains the other) or similar length (edit-distance similarity, a

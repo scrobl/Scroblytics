@@ -68,7 +68,15 @@ struct ScrobbleTrackIndex: Sendable {
     nonisolated func match(artist: String, track: String) -> Match {
         if let exact = tracks[TextNormalization.lovedKey(artist: artist, track: track)] { return .exact(exact) }
         if let key = byMatchKey[AppleMusicMatcher.durationMatchKey(artist: artist, track: track)]?.first, let t = tracks[key] { return .variant(t) }
-        if let candidate = near.nearest(artist: artist, track: track),
+        // Never suggest the vocal title for an instrumental (or the reverse) while those are kept apart: that pair is a
+        // known difference, not an uncertain spelling, and a tag on one would land on the other's title.
+        let folding = SongMatchingSettings.folding
+        let apartOnly: ((LovedStatusAuditEngine.Entry) -> Bool)? = folding.recordingVersions ? nil : { candidate in
+            let withRecordingFolded = TitleFolding(editionNotes: folding.editionNotes, recordingVersions: true, contentRatings: folding.contentRatings)
+            return TextNormalization.normalizeTrackTitle(candidate.track, folding: withRecordingFolded)
+                == TextNormalization.normalizeTrackTitle(track, folding: withRecordingFolded)
+        }
+        if let candidate = near.nearest(artist: artist, track: track, isExcluded: apartOnly),
            let t = tracks[TextNormalization.lovedKey(artist: candidate.artist, track: candidate.track)] { return .uncertain(t) }
         return .notScrobbled
     }
@@ -518,9 +526,89 @@ final class TagWriteRunner {
 /// playlist and library, builds the plan against the store's scrobbles and cached personal tags, and writes the counts
 /// and every row. Never writes tags.
 enum TagPlanDebugEval {
+    /// `SCROBLYTICS_TAGMATCH_CHECK=1`: the song-matching setting decides whether a source track whose title carries a
+    /// note ("(Instrumental)", "(Remastered)") is matched to the scrobbled title without it. Made-up data, through
+    /// the same index and plan the Tag Management tool uses.
+    @MainActor
+    static func runMatchCheck() -> Never {
+        var failures = 0
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty || ok ? "" : "  [\(detail)]"))
+            if !ok { failures += 1 }
+        }
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        func plays(_ artist: String, _ track: String, _ n: Int = 3) -> [ScrobbleSnapshot] {
+            (0..<n).map { ScrobbleSnapshot(artistName: artist, albumName: "Album", trackName: track, imageURL: nil, playedAt: t0.addingTimeInterval(Double($0))) }
+        }
+        func kind(_ m: ScrobbleTrackIndex.Match) -> String {
+            switch m {
+            case .exact(let t): "exact:\(t.track)"
+            case .variant(let t): "variant:\(t.track)"
+            case .uncertain(let t): "uncertain:\(t.track)"
+            case .notScrobbled: "none"
+            }
+        }
+        let history = plays("Artist A", "Song One") + plays("Artist A", "Song Two") + plays("Artist A", "Song Three")
+            + plays("Artist A", "Harbor") + plays("Artist A", "Harbor (Instrumental)")
+            + plays("Artist A", "Meadow (Acoustic)")
+        func key(_ title: String, _ folding: TitleFolding) -> String { TextNormalization.normalizeTrackTitle(title, folding: folding) }
+        func result(_ folding: TitleFolding, _ title: String) -> String {
+            SongMatchingSettings.setForTesting(folding)
+            return kind(ScrobbleTrackIndex(scrobbles: history).match(artist: "Artist A", track: title))
+        }
+        let separate = TitleFolding(editionNotes: false, recordingVersions: false)
+        let editionsOnly = SongMatchingSettings.defaultFolding
+        let everything = TitleFolding.all
+
+        check("default: edition notes folded, recording versions kept apart", editionsOnly == TitleFolding(editionNotes: true, recordingVersions: false))
+        for folding in [separate, editionsOnly, everything] {
+            check("exact title always matches exactly (\(folding))", result(folding, "Song One") == "exact:Song One")
+            check("a scrobbled instrumental title matches itself (\(folding))", result(folding, "Harbor (Instrumental)") == "exact:Harbor (Instrumental)")
+            check("the vocal title next to a scrobbled instrumental stays on the vocal (\(folding))", result(folding, "Harbor") == "exact:Harbor")
+        }
+        check("recording versions apart: an instrumental is not the vocal (edition notes folded)", result(editionsOnly, "Song One (Instrumental)") == "none", result(editionsOnly, "Song One (Instrumental)"))
+        check("recording versions apart: '- Instrumental Version' is not the vocal either", result(editionsOnly, "Song Two - Instrumental Version") == "none", result(editionsOnly, "Song Two - Instrumental Version"))
+        check("recording versions apart: a vocal source title does not fold onto a scrobbled acoustic title", result(editionsOnly, "Meadow") == "none", result(editionsOnly, "Meadow"))
+        check("recording versions folded: an instrumental becomes the vocal", result(everything, "Song One (Instrumental)") == "variant:Song One", result(everything, "Song One (Instrumental)"))
+        check("recording versions folded: a vocal title becomes the scrobbled acoustic one", result(everything, "Meadow") == "variant:Meadow (Acoustic)", result(everything, "Meadow"))
+        check("edition notes folded: a remaster mark folds onto the plain title", result(editionsOnly, "Song One (Remastered 2011)") == "variant:Song One", result(editionsOnly, "Song One (Remastered 2011)"))
+        check("edition notes folded: '- Mono' folds", result(editionsOnly, "Song Two - Mono") == "variant:Song Two", result(editionsOnly, "Song Two - Mono"))
+        check("edition notes kept: a remaster mark is a different song, offered only as an uncertain spelling", result(separate, "Song One (Remastered 2011)") == "uncertain:Song One", result(separate, "Song One (Remastered 2011)"))
+        let ratingsApart = TitleFolding(editionNotes: false, recordingVersions: false, contentRatings: false)
+        check("content ratings folded: [Explicit] is the same song", result(separate, "Song One [Explicit]") == "variant:Song One", result(separate, "Song One [Explicit]"))
+        check("content ratings kept: [Explicit] is a different song, offered only as an uncertain spelling", result(ratingsApart, "Song One [Explicit]") == "uncertain:Song One", result(ratingsApart, "Song One [Explicit]"))
+        check("keys: ratings kept apart keeps '[Explicit]' and '- Explicit Version' even with edition notes folded",
+              key("Song [Explicit]", ratingsApart) == "song explicit" && key("Song - Explicit Version", TitleFolding(editionNotes: true, recordingVersions: false, contentRatings: false)) == "song explicit version",
+              "\(key("Song [Explicit]", ratingsApart)) | \(key("Song - Explicit Version", TitleFolding(editionNotes: true, recordingVersions: false, contentRatings: false)))")
+        check("keys: ratings folded drops '(Clean)' and '- Explicit Version'", key("Song (Clean)", TitleFolding(editionNotes: false, recordingVersions: false, contentRatings: true)) == "song" && key("Song - Explicit Version", editionsOnly) == "song", "\(key("Song - Explicit Version", editionsOnly))")
+        check("a doubled feat. credit never makes a different song", result(separate, "Song One (feat. B)") == "variant:Song One", result(separate, "Song One (feat. B)"))
+
+        // The key itself, straight from the function.
+        check("keys: all folded equals the folded helper", key("Song (Acoustic) - Remastered", everything) == TextNormalization.normalizeTrackTitleFolded("Song (Acoustic) - Remastered"))
+        check("keys: '- Acoustic Version' kept when recording versions are apart", key("Song - Acoustic Version", editionsOnly) == "song acoustic version", key("Song - Acoustic Version", editionsOnly))
+        check("keys: '(Acoustic Remastered)' mixed note is kept apart", key("Song (Acoustic Remastered)", editionsOnly) == "song acoustic remastered", key("Song (Acoustic Remastered)", editionsOnly))
+        check("keys: both folded reduces to the plain title", key("Song (Acoustic Remastered)", everything) == "song")
+        check("keys: nothing folded keeps every note", key("Song (Remastered)", separate) == "song remastered")
+
+        // Through the plan: with recording versions apart, the instrumental is skipped, never queued on the vocal title.
+        SongMatchingSettings.setForTesting(editionsOnly)
+        let index = ScrobbleTrackIndex(scrobbles: history)
+        let source = [
+            TagSourceTrack(artist: "Artist A", track: "Song One (Instrumental)", album: "Demos", duration: 120),
+            TagSourceTrack(artist: "Artist A", track: "Song Two (Remastered)", album: "Album", duration: 200),
+        ]
+        let plan = TagPlanEngine.plan(source: source, tags: ["instrumental"], mode: .add, index: index, personal: [:], personalTagsKnown: true, library: nil)
+        check("plan: only the remaster-marked track is added", plan.adds.map(\.target.track) == ["Song Two"], "\(plan.adds.map(\.target.track))")
+        check("plan: the instrumental is reported as not scrobbled", plan.notScrobbled.map(\.track) == ["Song One (Instrumental)"], "\(plan.notScrobbled.map(\.track))")
+        check("plan: nothing uncertain", plan.uncertain.isEmpty)
+        print(failures == 0 ? "TAGMATCH CHECK: all passed" : "TAGMATCH CHECK: \(failures) FAILED")
+        exit(failures == 0 ? 0 : 1)
+    }
+
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         let env = ProcessInfo.processInfo.environment
+        if env["SCROBLYTICS_TAGMATCH_CHECK"] != nil { runMatchCheck() }
         guard let path = env["SCROBLYTICS_TAGPLAN_DUMP"] else { return }
         Task { @MainActor in
             var out: [String] = []

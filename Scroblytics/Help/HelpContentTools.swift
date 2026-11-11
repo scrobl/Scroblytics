@@ -316,7 +316,7 @@ extension HelpContent {
                     "Click **Review changes**. You see tags to add, tags to remove, items already done, and “N share a title with another album”.",
                     "Click **Apply to Last.fm**. Writes are paced at about three per second.",
                 ]),
-                .paragraph("**Why some tracks are unchecked:** Last.fm tags a track’s *title*, not an album’s copy, so a tag also lands on other versions with the same title. Those are unchecked by default; **Select likely reissues** and the optional length comparison help you decide. Saving a playlist as a **rule** lets you review and re-apply later; deleting a rule leaves tags already on Last.fm. Rules are included in backups."),
+                .paragraph("**Why some tracks are unchecked:** Last.fm tags a track’s *title*, not an album’s copy, so a tag also lands on other versions with the same title. Those are unchecked by default; **Select likely reissues** and the optional length comparison help you decide. Tracks are matched by the rules in [How songs are matched](help://metrics-song-matching). With the default settings, a track whose title marks another recording, such as “(Instrumental)” or “(Acoustic)”, is never matched to the same title without that word: if you have only scrobbled the vocal version, the instrumental in your playlist is listed as not scrobbled and skipped, so its tag can’t land on the vocal version. Other edition notes, such as “(Remastered)”, still match the plain title unless you turn that off. Saving a playlist as a **rule** lets you review and re-apply later; deleting a rule leaves tags already on Last.fm. Rules are included in backups."),
             ]
         ),
         HelpArticle(

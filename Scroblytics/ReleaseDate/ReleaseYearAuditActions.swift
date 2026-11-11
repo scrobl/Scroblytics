@@ -229,7 +229,11 @@ enum TrackDateScopeMigration {
     /// Runs once, on the real store only (a scratch store from a test hook never marks the real preferences as done).
     @MainActor
     static func runOnce(container: ModelContainer, defaults: UserDefaults = .standard) {
-        guard ProcessInfo.processInfo.environment["SCROBLYTICS_STORE_PATH"] == nil, !defaults.bool(forKey: doneKey) else { return }
+        #if DEBUG
+        // A scratch store from a test hook never marks the real preferences as done.
+        guard ProcessInfo.processInfo.environment["SCROBLYTICS_STORE_PATH"] == nil else { return }
+        #endif
+        guard !defaults.bool(forKey: doneKey) else { return }
         let context = ModelContext(container)
         guard (try? backfill(context: context)) != nil else { return }
         defaults.set(true, forKey: doneKey)

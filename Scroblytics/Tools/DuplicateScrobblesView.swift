@@ -1,0 +1,274 @@
+import SwiftUI
+import SwiftData
+
+/// "Duplicate Scrobbles": runs of plays of one song that started closer together than the song could last (see
+/// `DuplicateScrobblesEngine`). Read-only: Last.fm's API can't delete a play, so each row opens the song's history on Last.fm, where the
+/// extra plays can be deleted, and the usual right-click › Resync This Track then brings the app up to date.
+struct DuplicateScrobblesView: View {
+    let modelContainer: ModelContainer
+    let navigation: DetailNavigationCoordinator
+    /// Opens Query on `spec`; `detail` is the breadcrumb tooltip, the third value defaults the Save As sheet's name.
+    let openQuery: (QuerySpec, String, String?) -> Void
+
+    enum Show: String, Codable, CaseIterable, Identifiable {
+        case all, certain, possible
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .all: "All"
+            case .certain: "Certain"
+            case .possible: "Possible"
+            }
+        }
+    }
+
+    enum Sort: String, Codable, CaseIterable, Identifiable {
+        case mostRecent, mostExtras, smallestGap, artist
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .mostRecent: "Most Recent"
+            case .mostExtras: "Most Extra Plays"
+            case .smallestGap: "Smallest Gap"
+            case .artist: "Artist"
+            }
+        }
+    }
+
+    struct Options: Codable, Equatable {
+        /// Only runs whose last play is within this many days; 0 is all time.
+        var windowDays = 0
+        var show = Show.all
+        var fallbackGapSeconds = 60
+        var sort = Sort.mostRecent
+    }
+
+    private static let toolId = "duplicatescrobbles"
+    private static let windowChoices = [0, 30, 90, 365]
+    private static let fallbackChoices = [15, 30, 60, 90, 120]
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var options = Options()
+    @State private var result: DuplicateScrobblesEngine.Result?
+    @State private var imageLookup: [String: String] = [:]
+    @State private var username: String?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    private var rows: [DuplicateScrobblesEngine.Cluster] {
+        guard let result else { return [] }
+        let cutoff = options.windowDays > 0 ? Date().addingTimeInterval(-Double(options.windowDays) * 86_400) : nil
+        var clusters = result.clusters.filter { cluster in
+            if let cutoff, cluster.last < cutoff { return false }
+            switch options.show {
+            case .all: return true
+            case .certain: return cluster.confidence == .certain
+            case .possible: return cluster.confidence == .possible
+            }
+        }
+        switch options.sort {
+        case .mostRecent: break
+        case .mostExtras: clusters.sort { ($0.extraPlays, $0.last) > ($1.extraPlays, $1.last) }
+        case .smallestGap: clusters.sort { ($0.smallestGap, $1.last) < ($1.smallestGap, $0.last) }
+        case .artist: clusters.sort { ($0.artist.lowercased(), $0.track.lowercased()) < ($1.artist.lowercased(), $1.track.lowercased()) }
+        }
+        return clusters
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PageSettingsHeader("Duplicate Scrobbles") {
+                    ToolControlsFlow { controls }
+                }
+                summaryRow
+                if !rows.isEmpty {
+                    Text("Last.fm doesn’t let apps delete plays. Open a song on Last.fm to delete the extra plays there, then right-click it here and choose Resync This Track. The first play of each run is the one to keep.")
+                        .font(AppTypography.compactMetadata)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    list
+                } else if isLoading {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 240)
+                } else if let errorMessage {
+                    ContentUnavailableView("Couldn’t load", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                } else {
+                    ContentUnavailableView(
+                        "No duplicate plays found", systemImage: "checkmark.circle",
+                        description: Text("No song was played again sooner than it could have finished. Try a wider period, or a longer gap for songs whose length isn’t known.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 240)
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle("Duplicate Scrobbles")
+        .task {
+            options = ToolFilterSettingsStore.load(Options.self, toolId: Self.toolId, context: modelContext, default: Options())
+            username = LastfmCredentialsStore.load()?.username
+            await recompute()
+        }
+        .onChange(of: options) { old, new in
+            ToolFilterSettingsStore.save(new, toolId: Self.toolId, context: modelContext)
+            // Only the fixed gap changes what is found; the rest just re-filters what is held.
+            if old.fallbackGapSeconds != new.fallbackGapSeconds { Task { await recompute() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in Task { await recompute() } }
+        .onReceive(NotificationCenter.default.publisher(for: .targetedSyncDidFinish)) { _ in Task { await recompute() } }
+    }
+
+    @ViewBuilder
+    private var controls: some View {
+        Picker("Period", selection: $options.windowDays) {
+            ForEach(Self.windowChoices, id: \.self) { Text($0 == 0 ? "All time" : "Last \($0) days").tag($0) }
+        }
+        .fixedSize()
+        Picker("Show", selection: $options.show) {
+            ForEach(Show.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented).labelsHidden()
+        .help("Certain: closer together than Last.fm lets two plays of a song be (half its length, or 4 minutes). Possible: closer than 90% of its length, or, when no length is known, under the fixed gap.")
+        Picker("Gap when length unknown", selection: $options.fallbackGapSeconds) {
+            ForEach(Self.fallbackChoices, id: \.self) { Text("Unknown length: under \($0) s").tag($0) }
+        }
+        .fixedSize()
+        Picker("Sort", selection: $options.sort) {
+            ForEach(Sort.allCases) { Text($0.label).tag($0) }
+        }
+        .fixedSize()
+    }
+
+    private var summaryRow: some View {
+        let shown = rows
+        let extras = shown.reduce(0) { $0 + $1.extraPlays }
+        return HStack {
+            if result != nil {
+                Text("\(extras.formatted()) extra \(extras == 1 ? "play" : "plays") in \(shown.count.formatted()) \(shown.count == 1 ? "run" : "runs") · \(shown.filter { $0.confidence == .certain }.count.formatted()) certain")
+                    .font(AppTypography.metadata.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    private var list: some View {
+        LazyVStack(alignment: .leading, spacing: 1) {
+            ForEach(rows) { cluster in
+                let album = cluster.album.isEmpty ? nil : cluster.album
+                let target = ImageTarget(kind: .track, artist: cluster.artist, album: album, track: cluster.track)
+                let image = ImageResolutionEngine.effectiveImageURL(for: target, lookup: imageLookup, fallbackURL: cluster.imageURL)
+                DuplicateScrobbleRow(
+                    cluster: cluster, imageURL: image, fallbackGapSeconds: options.fallbackGapSeconds, canOpenLastfm: username != nil,
+                    onOpen: { navigation.goToTrack(TrackIdentity(artist: cluster.artist, name: cluster.track, album: album, imageURL: image)) },
+                    onLastfm: { openLastfm(cluster) },
+                    onQuery: {
+                        openQuery(
+                            DuplicateScrobblesEngine.spec(for: cluster),
+                            "Duplicate Scrobbles · \(cluster.track) by \(cluster.artist)",
+                            "Duplicate plays of \(cluster.track)"
+                        )
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.4), lineWidth: 1) }
+    }
+
+    private func openLastfm(_ cluster: DuplicateScrobblesEngine.Cluster) {
+        guard let username, let url = LastfmUserLinks.songHistoryURL(username: username, artist: cluster.artist, track: cluster.track) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func recompute() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let plays = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: modelContainer)
+            let lengths = DurationEngine.loadSnapshot(context: modelContext).secondsLookup
+            let search = DuplicateScrobblesEngine.Options(fallbackGapSeconds: options.fallbackGapSeconds)
+            result = await Task.detached(priority: .utility) {
+                DuplicateScrobblesEngine.find(scrobbles: plays, lengths: lengths, options: search)
+            }.value
+            imageLookup = (try? ImageResolutionEngine.imageLookup(context: modelContext)) ?? [:]
+        } catch {
+            errorMessage = "\(error)"
+        }
+        isLoading = false
+    }
+}
+
+struct DuplicateScrobbleRow: View {
+    let cluster: DuplicateScrobblesEngine.Cluster
+    let imageURL: String?
+    let fallbackGapSeconds: Int
+    let canOpenLastfm: Bool
+    let onOpen: () -> Void
+    let onLastfm: () -> Void
+    let onQuery: () -> Void
+
+    private var timeStyle: Date.FormatStyle {
+        let calendar = AppCalendars.listening
+        return Date.FormatStyle(date: .abbreviated, time: .standard, calendar: calendar, timeZone: calendar.timeZone)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onOpen) {
+                HStack(alignment: .top, spacing: 12) {
+                    EntityThumbnail(url: imageURL, entity: .track)
+                        .frame(width: AppArtworkSizing.thumbnail, height: AppArtworkSizing.thumbnail)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text(cluster.track).font(AppTypography.contentTitle).lineLimit(1)
+                            TrackLovedIndicator(artist: cluster.artist, track: cluster.track, initialValue: false, font: AppTypography.metadata)
+                        }
+                        Text(cluster.album.isEmpty ? cluster.artist : "\(cluster.artist) · \(cluster.album)")
+                            .font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
+                        Text(DuplicateScrobblesEngine.summary(cluster))
+                            .font(AppTypography.metadata.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(Array(cluster.times.prefix(6).enumerated()), id: \.offset) { index, time in
+                                Text("\(index == 0 ? "Keep" : "Extra")  \(time.formatted(timeStyle))")
+                                    .font(AppTypography.compactMetadata.monospacedDigit())
+                                    .foregroundStyle(index == 0 ? .secondary : .primary)
+                            }
+                            if cluster.times.count > 6 {
+                                Text("and \(cluster.times.count - 6) more").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(cluster.confidence == .certain ? "Certain" : "Possible")
+                    .font(AppTypography.compactMetadata.weight(.semibold))
+                    .foregroundStyle(cluster.confidence == .certain ? Color.green : Color.orange)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background((cluster.confidence == .certain ? Color.green : Color.orange).opacity(0.15), in: Capsule())
+                Text(DuplicateScrobblesEngine.lengthText(cluster, fallbackGapSeconds: fallbackGapSeconds))
+                    .font(AppTypography.compactMetadata.monospacedDigit()).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Button("Query", action: onQuery)
+                        .help("Open this song’s plays on these days in Query.")
+                    if canOpenLastfm {
+                        Button("Last.fm", action: onLastfm)
+                            .help("Open this song’s history on Last.fm, where plays can be deleted.")
+                    }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(.vertical, 10).padding(.horizontal, 4)
+        .entityContextMenu(
+            target: ImageTarget(kind: .track, artist: cluster.artist, album: cluster.album.isEmpty ? nil : cluster.album, track: cluster.track),
+            currentImageURL: imageURL, onOpen: onOpen
+        )
+        Divider()
+    }
+}

@@ -220,6 +220,8 @@ struct ToolsView: View {
             )
         case .flaggedTracks:
             FlaggedTracksView(modelContainer: modelContainer, navigation: navigation)
+        case .duplicateScrobbles:
+            DuplicateScrobblesView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
         case .rabbitHole:
             RabbitHoleView(modelContainer: modelContainer, navigation: navigation)
         case .albumTurnovers:
@@ -246,7 +248,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, duplicateScrobbles, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
     let id: Kind
     let name: String
     let summary: String
@@ -320,6 +322,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .flaggedTracks, name: "Flagged Tracks",
             summary: "Keep a hand-picked collection of tracks to filter, sort, and export.",
             systemImage: "flag.fill", category: "Organize"
+        ),
+        ToolDescriptor(
+            id: .duplicateScrobbles, name: "Duplicate Scrobbles",
+            summary: "Plays of a song that started closer together than the song could last, so you can delete the extras on Last.fm.",
+            systemImage: "square.on.square", category: "Organize"
         ),
         ToolDescriptor(
             id: .similarSounds, name: "Similar Sounds",

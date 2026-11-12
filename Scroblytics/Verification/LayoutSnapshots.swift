@@ -33,6 +33,10 @@ enum LayoutSnapshots {
             snapshotToolControls(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_DUPLICATES"] {
+            snapshotDuplicateScrobbles(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_SCROBBLERWATCH"] {
             snapshotScrobblerWatch(into: folder)
             return
@@ -487,6 +491,61 @@ enum LayoutSnapshots {
                 await render(Form { ScrobblerWatchSettingsSection(store: on) }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings-on")
             }
             suite.removePersistentDomain(forName: "scrobbler-watch-snapshot")
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_DUPLICATES=<folder>`: rows of Duplicate Scrobbles for made-up runs (a certain pair, a long run, a possible
+    /// run with no known length, very long names), light and dark at a few widths.
+    @MainActor
+    private static func snapshotDuplicateScrobbles(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let appearance = scheme == "dark" ? NSAppearance.Name.darkAqua : .aqua
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                }
+            }
+            let start = Date(timeIntervalSince1970: 1_760_000_000)
+            func cluster(_ track: String, _ artist: String, offsets: [Double], length: Int?, confidence: DuplicateScrobblesEngine.Confidence) -> DuplicateScrobblesEngine.Cluster {
+                DuplicateScrobblesEngine.Cluster(key: track, artist: artist, track: track, album: "Album X", titles: [track], imageURL: nil,
+                                                 times: offsets.map { start.addingTimeInterval($0) }, lengthSeconds: length, confidence: confidence)
+            }
+            let clusters = [
+                cluster("Song One", "Artist A", offsets: [0, 4], length: 225, confidence: .certain),
+                cluster("A Very Long Song Title That Goes On And On For Quite Some Time (Remastered 2011)", "Artist With A Very Long Name & Another Artist Entirely", offsets: [0, 3, 6, 9, 12, 15, 18, 21, 24], length: 303, confidence: .certain),
+                cluster("Song Three", "Artist B", offsets: [0, 38], length: nil, confidence: .possible),
+                cluster("Song Four", "Artist C", offsets: [0, 150], length: 200, confidence: .possible),
+            ]
+            for scheme in ["dark", "light"] {
+                for width in [900, 620, 420] as [CGFloat] {
+                    let list = VStack(alignment: .leading, spacing: 1) {
+                        ForEach(clusters) { DuplicateScrobbleRow(cluster: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, onOpen: {}, onLastfm: {}, onQuery: {}) }
+                    }
+                    .padding(.horizontal, 10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(16)
+                    .environment(LovedTracksStore())
+                    .environment(FlaggedTracksStore())
+                    .environment(PopularityStore())
+                    .environment(LibraryGapBadgeStore())
+                    .environment(TagStore())
+                    .environment(TagWriteRunner())
+                    .environment(PendingSyncEventsStore())
+                    .modelContainer(container)
+                    await render(list, width: width, scheme: scheme, name: "rows")
+                }
+            }
             exit(0)
         }
     }

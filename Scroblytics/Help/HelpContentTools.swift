@@ -22,6 +22,7 @@ extension HelpContent {
                     ["[Multi-Album Tracks](help://tool-multi-album)", "Songs appearing on several albums", "Nothing"],
                     ["[Missing Data](help://tool-missing-data)", "Items lacking dates, images, lengths or a match", "Optional: Music app"],
                     ["[Flagged Tracks](help://tool-flagged)", "Your hand-picked list", "Nothing"],
+                    ["[Duplicate Scrobbles](help://tool-duplicate-scrobbles)", "Plays of a song closer together than Last.fm allows, to delete on Last.fm", "Nothing (a Last.fm account to open the song there)"],
                     ["[Loved Status Audit](help://tool-loved-audit)", "Last.fm loves vs Apple Music favorites", "Music app permission"],
                     ["[Release Year Audit](help://tool-release-year-audit)", "Albums whose release year differs from Apple Music’s", "Music app permission"],
                     ["[Library Gaps](help://tool-library-gaps)", "Scrobbled tracks missing from your Music library", "Music app permission"],
@@ -196,6 +197,22 @@ extension HelpContent {
             summary: "A hand-picked list of tracks.",
             blocks: [
                 .paragraph("Right-click a track anywhere and choose **Flag Track**. This tool lists them with a filter, Sort (Recently Flagged, Most Played, Recently Played, Artist, Track), a “Loved only” toggle, **Remove Flag** per row, **Clear All** (asks first, cannot be undone) and export to an Apple Music playlist (turn on **Keep this playlist updated after each sync** in its dialog and it follows the list as you flag and unflag: [Auto-Updating Playlists](help://tool-auto-playlists)). Flags live only on your Mac and are included in [backups](help://data-backup). The Query field **Flagged** matches by artist and title regardless of album."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-duplicate-scrobbles",
+            title: "Duplicate Scrobbles",
+            summary: "Plays of one song that started too close together to be real.",
+            blocks: [
+                .paragraph("A player or scrobbler that submits twice leaves two plays of a song a few seconds apart. This tool lists those **runs**: the first play of each is the one to keep, the later ones are the **extra plays**. It only reads: it changes nothing on Last.fm, in Music or in your history."),
+                .paragraph("Last.fm counts a play only after you have heard half the song (or four minutes), so two real plays of a song cannot start closer together than that. With the song’s length known (one you entered, the one found online, or Apple Music’s), a run is **Certain** when plays are closer than the shorter of half the length and 4 minutes, and **Possible** when they are closer than 90% of the length (you may have skipped back to the start). A gap of 90% or more is a repeat played straight through, which is not listed, because a stored length is often a few seconds longer than the real play. When no length is known, plays closer than the **Unknown length** gap (60 seconds unless you change it) are listed as Possible; a known length is never replaced by that gap. A run is Certain when any pair in it is."),
+                .paragraph("Songs are matched as everywhere else in the app, so the [Song matching settings](help://metrics-song-matching) apply: with remasters matched, “Song” and “Song (Remastered)” played seconds apart are one run, naming both titles. The same song on two albums is one song here."),
+                .bullets([
+                    "**Period** limits the list to runs whose last play is within the last 30, 90 or 365 days. **Show** switches between All, Certain and Possible. **Sort** by Most Recent, Most Extra Plays, Smallest Gap or Artist. The options are remembered.",
+                    "Each row lists every play in the run with its time to the second, the length it was judged against and how close the closest gap is to it. Click the row for the song’s page.",
+                    "**Query** opens the song’s single plays for the days of the run in [Query](help://query-basics), oldest first, with the album and the time since the previous play, so neighbouring plays can be seen too.",
+                    "**Last.fm** opens the song’s history in your Last.fm library in your browser, where each play can be deleted. Last.fm gives apps no way to delete a play, so this tool can’t do it for you. Afterwards right-click the row and choose **Resync This Track**, and the deleted plays leave Scroblytics (a full resync does the same).",
+                ]),
             ]
         ),
         HelpArticle(

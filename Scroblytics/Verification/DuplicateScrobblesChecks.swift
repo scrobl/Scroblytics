@@ -56,6 +56,7 @@ enum DuplicateScrobblesChecks {
             crossCheck(check)
             handoffChecks(check)
             wordingChecks(check)
+            ignoreChecks(check, container: container)
             HeadlessTask.finish(failures)
         }
     }
@@ -284,6 +285,70 @@ enum DuplicateScrobblesChecks {
         } else {
             check("two spellings fold into one run", false)
         }
+    }
+
+    // MARK: - Reviewed runs
+
+    @MainActor
+    private static func ignoreChecks(_ report: (String, Bool, String) -> Void, container: ModelContainer) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func run(_ artist: String, _ track: String, _ offsets: [Double]) -> Engine.Cluster {
+            Engine.find(scrobbles: offsets.map { play(artist, track, at: $0) }.sorted { $0.playedAt < $1.playedAt }, lengths: [:], options: Engine.Options(fallbackGapSeconds: 60)).clusters[0]
+        }
+        let pair = run("Artist A", "Song 1", [0, 5])
+        check("a run keeps the same review key however it is found", pair.ignoreKey == run("Artist A", "Song 1", [0, 5]).ignoreKey)
+        check("…and the artist and title are compared without regard to letter case", pair.ignoreKey == run("ARTIST a", "song 1", [0, 5]).ignoreKey)
+        check("…but another song, artist or start time is another run", pair.ignoreKey != run("Artist A", "Song 2", [0, 5]).ignoreKey && pair.ignoreKey != run("Artist B", "Song 1", [0, 5]).ignoreKey && pair.ignoreKey != run("Artist A", "Song 1", [100, 105]).ignoreKey)
+        check("…and the same run with another play joined is a different run, so something new in it is seen", pair.ignoreKey != run("Artist A", "Song 1", [0, 5, 9]).ignoreKey)
+        SongMatchingSettings.setForTesting(TitleFolding(editionNotes: false, recordingVersions: true, contentRatings: false))
+        check("the key does not depend on the Song matching settings", pair.ignoreKey == run("Artist A", "Song 1", [0, 5]).ignoreKey)
+        SongMatchingSettings.setForTesting(TitleFolding(editionNotes: true, recordingVersions: false, contentRatings: true))
+
+        let other = run("Artist A", "Song 3", [1_000, 1_004])
+        let third = run("Artist C", "Song 4", [2_000, 2_010])
+        var ignored = Engine.IgnoredRuns()
+        ignored.ignore([pair, other])
+        ignored.ignore([pair])
+        check("ignoring a run twice keeps one entry, and the list stays sorted", ignored.keys.count == 2 && ignored.keys == ignored.keys.sorted() && ignored.contains(pair) && ignored.contains(other) && !ignored.contains(third))
+        let all = [pair, other, third]
+        let review = Engine.visible(all, ignoredRuns: ignored, ignored: false)
+        let reviewed = Engine.visible(all, ignoredRuns: ignored, ignored: true)
+        check("To Review lists exactly the runs not ignored, and Ignored exactly the ones that are", review.map(\.id) == [third.id] && Set(reviewed.map(\.id)) == [pair.id, other.id])
+        check("…and together they are every run once", review.count + reviewed.count == all.count)
+        ignored.stopIgnoring([pair])
+        check("putting a run back leaves the others ignored", !ignored.contains(pair) && ignored.contains(other) && ignored.keys.count == 1)
+        ignored.stopIgnoring([third])
+        check("putting back a run that was not ignored changes nothing", ignored.keys.count == 1)
+        let staleKey = "gone\u{0}song\u{0}1\u{0}2"
+        ignored.keys.append(staleKey)
+        ignored.ignore([third])
+        check("keys of runs that are not showing are kept when others change", ignored.keys.contains(staleKey) && ignored.contains(third) && ignored.contains(other))
+
+        // Saved with the tool's other options, under its own id, in the real store.
+        let context = ModelContext(container)
+        let toolId = Engine.ignoredToolId
+        ToolFilterSettingsStore.save(ignored, toolId: toolId, context: context)
+        ToolFilterSettingsStore.save(ignored, toolId: toolId, context: context)
+        try? context.save()
+        let rows = (try? context.fetch(FetchDescriptor<ToolFilterSetting>(predicate: #Predicate { $0.toolId == toolId }))) ?? []
+        check("saving twice leaves one stored row", rows.count == 1)
+        check("the list is read back exactly", ToolFilterSettingsStore.load(Engine.IgnoredRuns.self, toolId: toolId, context: ModelContext(container), default: .init()) == ignored)
+        check("with nothing saved there is nothing ignored", ToolFilterSettingsStore.load(Engine.IgnoredRuns.self, toolId: "duplicatescrobbles.none", context: context, default: .init()).keys.isEmpty)
+        check("it is stored apart from the tool's view options", toolId != "duplicatescrobbles")
+
+        // A backup carries it, and a restore brings it back.
+        if let document = try? NativeBackupEngine.makeDocument(context: context), let (archive, _) = try? NativeBackupEngine.inspect(document: document) {
+            check("a backup carries the reviewed runs", archive.toolFilters.contains { $0.toolId == toolId })
+            ToolFilterSettingsStore.save(Engine.IgnoredRuns(), toolId: toolId, context: context)
+            try? context.save()
+            check("the list can be emptied before restoring", ToolFilterSettingsStore.load(Engine.IgnoredRuns.self, toolId: toolId, context: context, default: .init()).keys.isEmpty)
+            try? NativeBackupEngine.restore(archive, context: context)
+            check("a restored backup brings the reviewed runs back exactly", ToolFilterSettingsStore.load(Engine.IgnoredRuns.self, toolId: toolId, context: ModelContext(container), default: .init()) == ignored)
+        } else {
+            check("a backup can be made", false)
+        }
+        for row in (try? context.fetch(FetchDescriptor<ToolFilterSetting>(predicate: #Predicate { $0.toolId == toolId }))) ?? [] { context.delete(row) }
+        try? context.save()
     }
 
     // MARK: - Wording and links

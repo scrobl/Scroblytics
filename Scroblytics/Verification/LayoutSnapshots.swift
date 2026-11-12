@@ -530,7 +530,7 @@ enum LayoutSnapshots {
             for scheme in ["dark", "light"] {
                 for width in [900, 620, 420] as [CGFloat] {
                     let list = VStack(alignment: .leading, spacing: 1) {
-                        ForEach(clusters) { DuplicateScrobbleRow(cluster: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, onOpen: {}, onLastfm: {}, onQuery: {}) }
+                        ForEach(clusters) { DuplicateScrobbleRow(cluster: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, isIgnored: false, onToggleIgnored: {}, onOpen: {}, onLastfm: {}, onQuery: {}) }
                     }
                     .padding(.horizontal, 10)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

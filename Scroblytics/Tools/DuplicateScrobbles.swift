@@ -54,6 +54,12 @@ enum DuplicateScrobblesEngine {
         let confidence: Confidence
 
         var extraPlays: Int { times.count - 1 }
+        /// What "I've reviewed this run" is remembered by: the artist, the first play's title and time, and how many plays the run has.
+        /// It doesn't depend on the Song matching settings or the fixed gap, and a run that grows (another play joins it) is a different
+        /// run again, so something new in it is not hidden by an old review.
+        var ignoreKey: String {
+            "\(TextNormalization.artistIdentityKey(artist))\u{0}\(track.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())\u{0}\(Int(times[0].timeIntervalSince1970))\u{0}\(times.count)"
+        }
         /// The shortest gap between neighbouring plays in the run, in seconds.
         var smallestGap: Double { zip(times, times.dropFirst()).map { $1.timeIntervalSince($0) }.min() ?? 0 }
         var first: Date { times[0] }
@@ -134,6 +140,36 @@ enum DuplicateScrobblesEngine {
         }
         clusters.sort { ($0.last, $0.key) > ($1.last, $1.key) }
         return Result(clusters: clusters)
+    }
+
+    // MARK: - Reviewed runs
+
+    /// The runs the person has looked at and decided need no action. Kept as one JSON value with the tool's other options (so it is in
+    /// backups with them); keys of runs that no longer show (deleted on Last.fm, or hidden by a different setting) are left alone, so
+    /// a review is not lost when a setting is changed and changed back.
+    struct IgnoredRuns: Codable, Equatable, Sendable {
+        var keys: [String] = []
+
+        func contains(_ cluster: Cluster) -> Bool { keys.contains(cluster.ignoreKey) }
+
+        mutating func ignore(_ clusters: [Cluster]) {
+            var all = Set(keys)
+            for cluster in clusters { all.insert(cluster.ignoreKey) }
+            keys = all.sorted()
+        }
+
+        mutating func stopIgnoring(_ clusters: [Cluster]) {
+            let gone = Set(clusters.map(\.ignoreKey))
+            keys = keys.filter { !gone.contains($0) }
+        }
+    }
+
+    static let ignoredToolId = "duplicatescrobbles.ignored"
+
+    /// The runs to show: those not yet reviewed, or (`ignored`) only the reviewed ones.
+    static func visible(_ clusters: [Cluster], ignoredRuns: IgnoredRuns, ignored: Bool) -> [Cluster] {
+        let reviewed = Set(ignoredRuns.keys)
+        return clusters.filter { reviewed.contains($0.ignoreKey) == ignored }
     }
 
     // MARK: - Query hand-off

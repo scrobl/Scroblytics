@@ -35,7 +35,15 @@ struct DuplicateScrobblesView: View {
         }
     }
 
+    /// Which runs the list shows: the ones still to look at, or the ones marked as reviewed.
+    enum Listing: String, Codable, CaseIterable, Identifiable {
+        case review, ignored
+        var id: Self { self }
+        var label: String { self == .review ? "To Review" : "Ignored" }
+    }
+
     struct Options: Codable, Equatable {
+        var listing = Listing.review
         /// Only runs whose last play is within this many days; 0 is all time.
         var windowDays = 0
         var show = Show.all
@@ -52,13 +60,15 @@ struct DuplicateScrobblesView: View {
     @State private var result: DuplicateScrobblesEngine.Result?
     @State private var imageLookup: [String: String] = [:]
     @State private var username: String?
+    @State private var ignoredRuns = DuplicateScrobblesEngine.IgnoredRuns()
+    @State private var confirmingBulk = false
     @State private var isLoading = true
     @State private var errorMessage: String?
 
     private var rows: [DuplicateScrobblesEngine.Cluster] {
         guard let result else { return [] }
         let cutoff = options.windowDays > 0 ? Date().addingTimeInterval(-Double(options.windowDays) * 86_400) : nil
-        var clusters = result.clusters.filter { cluster in
+        var clusters = DuplicateScrobblesEngine.visible(result.clusters, ignoredRuns: ignoredRuns, ignored: options.listing == .ignored).filter { cluster in
             if let cutoff, cluster.last < cutoff { return false }
             switch options.show {
             case .all: return true
@@ -93,10 +103,18 @@ struct DuplicateScrobblesView: View {
                 } else if let errorMessage {
                     ContentUnavailableView("Couldn’t load", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
                         .frame(maxWidth: .infinity, minHeight: 240)
+                } else if options.listing == .ignored {
+                    ContentUnavailableView(
+                        "Nothing ignored", systemImage: "eye.slash",
+                        description: Text("Runs you mark as reviewed with the eye button are listed here, and can be put back.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
                     ContentUnavailableView(
-                        "No duplicate plays found", systemImage: "checkmark.circle",
-                        description: Text("No song was played again sooner than it could have finished. Try a wider period, or a longer gap for songs whose length isn’t known.")
+                        "No duplicate plays to review", systemImage: "checkmark.circle",
+                        description: Text(reviewedCount > 0
+                            ? "Everything found has been marked as reviewed (\(reviewedCount.formatted()) in Ignored)."
+                            : "No song was played again sooner than it could have finished. Try a wider period, or a longer gap for songs whose length isn’t known.")
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 }
@@ -106,6 +124,7 @@ struct DuplicateScrobblesView: View {
         .navigationTitle("Duplicate Scrobbles")
         .task {
             options = ToolFilterSettingsStore.load(Options.self, toolId: Self.toolId, context: modelContext, default: Options())
+            ignoredRuns = ToolFilterSettingsStore.load(DuplicateScrobblesEngine.IgnoredRuns.self, toolId: DuplicateScrobblesEngine.ignoredToolId, context: modelContext, default: .init())
             username = LastfmCredentialsStore.load()?.username
             await recompute()
         }
@@ -120,6 +139,11 @@ struct DuplicateScrobblesView: View {
 
     @ViewBuilder
     private var controls: some View {
+        Picker("List", selection: $options.listing) {
+            ForEach(Listing.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented).labelsHidden()
+        .help("To Review: runs you haven’t marked. Ignored: runs you marked as reviewed, needing no action.")
         Picker("Period", selection: $options.windowDays) {
             ForEach(Self.windowChoices, id: \.self) { Text($0 == 0 ? "All time" : "Last \($0) days").tag($0) }
         }
@@ -139,17 +163,45 @@ struct DuplicateScrobblesView: View {
         .fixedSize()
     }
 
+    /// How many of the runs found are marked as reviewed (whatever the Period and Show choices are).
+    private var reviewedCount: Int {
+        guard let result else { return 0 }
+        return DuplicateScrobblesEngine.visible(result.clusters, ignoredRuns: ignoredRuns, ignored: true).count
+    }
+
     private var summaryRow: some View {
         let shown = rows
         let extras = shown.reduce(0) { $0 + $1.extraPlays }
+        let reviewing = options.listing == .review
         return HStack {
             if result != nil {
-                Text("\(extras.formatted()) extra \(extras == 1 ? "play" : "plays") in \(shown.count.formatted()) \(shown.count == 1 ? "run" : "runs") · \(shown.filter { $0.confidence == .certain }.count.formatted()) certain")
+                Text("\(extras.formatted()) extra \(extras == 1 ? "play" : "plays") in \(shown.count.formatted()) \(shown.count == 1 ? "run" : "runs") · \(shown.filter { $0.confidence == .certain }.count.formatted()) certain\(reviewing && reviewedCount > 0 ? " · \(reviewedCount.formatted()) ignored" : "")")
                     .font(AppTypography.metadata.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if !shown.isEmpty {
+                Button(reviewing ? "Ignore All Shown…" : "Stop Ignoring All Shown…") { confirmingBulk = true }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .help(reviewing ? "Mark every run in this list as reviewed, needing no action." : "Put every run in this list back in To Review.")
+                    .confirmationDialog(
+                        reviewing ? "Ignore \(shown.count.formatted()) \(shown.count == 1 ? "run" : "runs")?" : "Put \(shown.count.formatted()) \(shown.count == 1 ? "run" : "runs") back?",
+                        isPresented: $confirmingBulk, titleVisibility: .visible
+                    ) {
+                        Button(reviewing ? "Ignore" : "Put Back") { setIgnored(shown, reviewing) }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(reviewing
+                             ? "They move to Ignored, where each can be put back. Nothing changes on Last.fm or in your history. A run that gains another play comes back for review."
+                             : "They move back to To Review.")
+                    }
+            }
         }
+    }
+
+    private func setIgnored(_ clusters: [DuplicateScrobblesEngine.Cluster], _ ignored: Bool) {
+        if ignored { ignoredRuns.ignore(clusters) } else { ignoredRuns.stopIgnoring(clusters) }
+        ToolFilterSettingsStore.save(ignoredRuns, toolId: DuplicateScrobblesEngine.ignoredToolId, context: modelContext)
     }
 
     private var list: some View {
@@ -160,6 +212,8 @@ struct DuplicateScrobblesView: View {
                 let image = ImageResolutionEngine.effectiveImageURL(for: target, lookup: imageLookup, fallbackURL: cluster.imageURL)
                 DuplicateScrobbleRow(
                     cluster: cluster, imageURL: image, fallbackGapSeconds: options.fallbackGapSeconds, canOpenLastfm: username != nil,
+                    isIgnored: options.listing == .ignored,
+                    onToggleIgnored: { setIgnored([cluster], options.listing == .review) },
                     onOpen: { navigation.goToTrack(TrackIdentity(artist: cluster.artist, name: cluster.track, album: album, imageURL: image)) },
                     onLastfm: { openLastfm(cluster) },
                     onQuery: {
@@ -205,6 +259,8 @@ struct DuplicateScrobbleRow: View {
     let imageURL: String?
     let fallbackGapSeconds: Int
     let canOpenLastfm: Bool
+    let isIgnored: Bool
+    let onToggleIgnored: () -> Void
     let onOpen: () -> Void
     let onLastfm: () -> Void
     let onQuery: () -> Void
@@ -260,6 +316,11 @@ struct DuplicateScrobbleRow: View {
                         Button("Last.fm", action: onLastfm)
                             .help("Open this song’s history on Last.fm, where plays can be deleted.")
                     }
+                    Button(action: onToggleIgnored) {
+                        Image(systemName: isIgnored ? "eye" : "eye.slash")
+                    }
+                    .help(isIgnored ? "Put this run back in To Review." : "I’ve reviewed this run and no action is needed: move it to Ignored. If it gains another play it comes back.")
+                    .accessibilityLabel(isIgnored ? "Stop ignoring this run" : "Ignore this run")
                 }
                 .buttonStyle(.bordered).controlSize(.small)
             }

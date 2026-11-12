@@ -52,6 +52,8 @@ enum DuplicateScrobblesEngine {
         let lengthSeconds: Int?
         /// Certain when any neighbouring pair in the run is; the rows list every time, so the others can be judged by eye.
         let confidence: Confidence
+        /// Every scrobble of the song over the whole history (all albums, under the Song matching settings), to set beside Apple Music's plays.
+        var totalScrobbles: Int = 0
 
         var extraPlays: Int { times.count - 1 }
         /// What "I've reviewed this run" is remembered by: the artist, the first play's title and time, and how many plays the run has.
@@ -120,7 +122,7 @@ enum DuplicateScrobblesEngine {
                     album: plays.first { !$0.albumName.isEmpty }?.albumName ?? "",
                     titles: titles,
                     imageURL: plays.first { $0.imageURL != nil && !TextNormalization.isLastfmPlaceholderImage($0.imageURL) }?.imageURL,
-                    times: plays.map(\.playedAt), lengthSeconds: known, confidence: runConfidence
+                    times: plays.map(\.playedAt), lengthSeconds: known, confidence: runConfidence, totalScrobbles: unsorted.count
                 ))
             }
             for position in 1..<indexes.count {
@@ -170,6 +172,75 @@ enum DuplicateScrobblesEngine {
     static func visible(_ clusters: [Cluster], ignoredRuns: IgnoredRuns, ignored: Bool) -> [Cluster] {
         let reviewed = Set(ignoredRuns.keys)
         return clusters.filter { reviewed.contains($0.ignoreKey) == ignored }
+    }
+
+    // MARK: - Apple Music's play counts
+
+    /// What the Music library says about one song: its play count, summed over every copy of the song in the library (an album and a
+    /// compilation, a purchased and a streaming copy), and how many copies there are.
+    struct MusicTotals: Sendable, Equatable {
+        var plays: Int
+        var copies: Int
+    }
+
+    /// Music's play counts by song, under the same matching as the runs (`AppleMusicMatcher.durationMatchKey`).
+    nonisolated static func musicTotals(library: [AppleMusicSnapshot.Track]) -> [String: MusicTotals] {
+        var totals: [String: MusicTotals] = [:]
+        for track in library where !track.name.isEmpty {
+            let key = AppleMusicMatcher.durationMatchKey(artist: track.artist, track: track.name)
+            var entry = totals[key] ?? MusicTotals(plays: 0, copies: 0)
+            entry.plays += track.playCount
+            entry.copies += 1
+            totals[key] = entry
+        }
+        return totals
+    }
+
+    /// How a song's scrobbles compare with Music's plays. If they agree, the song was probably played that many times, so a close pair
+    /// of scrobbles is more likely two real plays; more scrobbles than plays is what a scrobble sent twice looks like.
+    enum Comparison: Equatable, Sendable {
+        case notInMusic
+        case agree
+        case moreScrobbles(Int)
+        case morePlays(Int)
+    }
+
+    nonisolated static func compare(scrobbles: Int, music: MusicTotals?) -> Comparison {
+        guard let music else { return .notInMusic }
+        if scrobbles == music.plays { return .agree }
+        return scrobbles > music.plays ? .moreScrobbles(scrobbles - music.plays) : .morePlays(music.plays - scrobbles)
+    }
+
+    /// The "Apple Music" filter: all runs, those whose counts agree, those with more scrobbles than plays, and the rest.
+    enum MusicFilter: String, Codable, CaseIterable, Identifiable, Sendable {
+        case all, agree, moreScrobbles, other
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .all: "All"
+            case .agree: "Counts agree"
+            case .moreScrobbles: "More scrobbles than plays"
+            case .other: "Not in Music, or fewer scrobbles"
+            }
+        }
+
+        func includes(_ comparison: Comparison) -> Bool {
+            switch (self, comparison) {
+            case (.all, _), (.agree, .agree), (.moreScrobbles, .moreScrobbles), (.other, .notInMusic), (.other, .morePlays): true
+            default: false
+            }
+        }
+    }
+
+    /// "Scrobbles 12 · Apple Music 12", and what the two numbers say.
+    static func comparisonText(scrobbles: Int, music: MusicTotals?) -> (counts: String, note: String) {
+        let comparison = compare(scrobbles: scrobbles, music: music)
+        switch comparison {
+        case .notInMusic: return ("Scrobbles \(scrobbles.formatted()) · not in your Music library", "can’t be compared")
+        case .agree: return ("Scrobbles \(scrobbles.formatted()) · Apple Music \(scrobbles.formatted())", "counts agree")
+        case .moreScrobbles(let by): return ("Scrobbles \(scrobbles.formatted()) · Apple Music \((music?.plays ?? 0).formatted())", "\(by.formatted()) more \(by == 1 ? "scrobble" : "scrobbles") than plays")
+        case .morePlays(let by): return ("Scrobbles \(scrobbles.formatted()) · Apple Music \((music?.plays ?? 0).formatted())", "Music has \(by.formatted()) more \(by == 1 ? "play" : "plays")")
+        }
     }
 
     // MARK: - Query hand-off

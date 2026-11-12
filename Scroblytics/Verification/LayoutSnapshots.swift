@@ -517,20 +517,26 @@ enum LayoutSnapshots {
                 }
             }
             let start = Date(timeIntervalSince1970: 1_760_000_000)
-            func cluster(_ track: String, _ artist: String, offsets: [Double], length: Int?, confidence: DuplicateScrobblesEngine.Confidence) -> DuplicateScrobblesEngine.Cluster {
+            func cluster(_ track: String, _ artist: String, offsets: [Double], length: Int?, confidence: DuplicateScrobblesEngine.Confidence, total: Int = 5) -> DuplicateScrobblesEngine.Cluster {
                 DuplicateScrobblesEngine.Cluster(key: track, artist: artist, track: track, album: "Album X", titles: [track], imageURL: nil,
-                                                 times: offsets.map { start.addingTimeInterval($0) }, lengthSeconds: length, confidence: confidence)
+                                                 times: offsets.map { start.addingTimeInterval($0) }, lengthSeconds: length, confidence: confidence, totalScrobbles: total)
             }
             let clusters = [
-                cluster("Song One", "Artist A", offsets: [0, 4], length: 225, confidence: .certain),
+                cluster("Song One", "Artist A", offsets: [0, 4], length: 225, confidence: .certain, total: 12),
                 cluster("A Very Long Song Title That Goes On And On For Quite Some Time (Remastered 2011)", "Artist With A Very Long Name & Another Artist Entirely", offsets: [0, 3, 6, 9, 12, 15, 18, 21, 24], length: 303, confidence: .certain),
                 cluster("Song Three", "Artist B", offsets: [0, 38], length: nil, confidence: .possible),
                 cluster("Song Four", "Artist C", offsets: [0, 150], length: 200, confidence: .possible),
             ]
+            // Music's totals for the four songs: counts that agree, fewer plays than scrobbles, more plays, and not in the library.
+            let musicBySong: [String: DuplicateScrobblesEngine.MusicTotals] = [
+                "Song One": .init(plays: 12, copies: 1),
+                "A Very Long Song Title That Goes On And On For Quite Some Time (Remastered 2011)": .init(plays: 3, copies: 2),
+                "Song Three": .init(plays: 9, copies: 1),
+            ]
             for scheme in ["dark", "light"] {
                 for width in [900, 620, 420] as [CGFloat] {
                     let list = VStack(alignment: .leading, spacing: 1) {
-                        ForEach(clusters) { DuplicateScrobbleRow(cluster: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, isIgnored: false, onToggleIgnored: {}, onOpen: {}, onLastfm: {}, onQuery: {}) }
+                        ForEach(clusters) { DuplicateScrobbleRow(cluster: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, musicRead: true, music: musicBySong[$0.key], isIgnored: false, onToggleIgnored: {}, onOpen: {}, onLastfm: {}, onQuery: {}) }
                     }
                     .padding(.horizontal, 10)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

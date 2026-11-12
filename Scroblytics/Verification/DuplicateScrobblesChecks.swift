@@ -36,6 +36,17 @@ enum DuplicateScrobblesChecks {
                     let parts = pair.components(separatedBy: "\u{0}")
                     if let seconds = lengths[DurationEngine.cacheKey(artist: parts[0], track: parts[1])] { out.append("LEN\t\(parts[0])\t\(parts[1])\t\(seconds)") }
                 }
+                // With SCROBLYTICS_DUPLICATES_MUSIC=1 the running Music library is read too (read-only; Music is never launched), and each
+                // run gets the song's total scrobbles and Music's total plays, to be compared with an independent count.
+                if environment["SCROBLYTICS_DUPLICATES_MUSIC"] != nil {
+                    let snapshot = try await AppleMusicFavoritesReader.read(includePlayed: true)
+                    let totals = Engine.musicTotals(library: snapshot.library)
+                    out.append("MUSIC_TRACKS \(snapshot.library.count)")
+                    for cluster in result.clusters.sorted(by: { ($0.key, $0.first) < ($1.key, $1.first) }) {
+                        let music = totals[cluster.key]
+                        out.append("CMP\t\(cluster.artist)\t\(cluster.track)\t\(cluster.totalScrobbles)\t\(music.map { String($0.plays) } ?? "-")\t\(music.map { String($0.copies) } ?? "-")\t\(Engine.compare(scrobbles: cluster.totalScrobbles, music: music))")
+                    }
+                }
                 try out.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
                 print("wrote \(path)")
                 exit(0)
@@ -57,6 +68,7 @@ enum DuplicateScrobblesChecks {
             handoffChecks(check)
             wordingChecks(check)
             ignoreChecks(check, container: container)
+            musicChecks(check)
             HeadlessTask.finish(failures)
         }
     }
@@ -285,6 +297,57 @@ enum DuplicateScrobblesChecks {
         } else {
             check("two spellings fold into one run", false)
         }
+    }
+
+    // MARK: - Apple Music's play counts
+
+    private static func musicChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        func track(_ artist: String, _ name: String, _ album: String, plays: Int) -> AppleMusicSnapshot.Track {
+            AppleMusicSnapshot.Track(name: name, artist: artist, album: album, playCount: plays)
+        }
+
+        // Scrobble totals come from the whole history of the song, not only the run.
+        var plays = [play("Artist A", "Song 1", at: 0), play("Artist A", "Song 1", at: 5)]
+        plays += [play("Artist A", "Song 1", "Album Y", at: 5_000), play("Artist A", "Song 1", at: 9_000), play("Artist A", "Song 1", at: 20_000)]
+        plays += [play("Artist A", "Song 1 (Remastered 2011)", at: 40_000), play("Artist A", "Song 9", at: 3), play("Artist B", "Song 1", at: 4)]
+        var result = find(plays)
+        let run = result.clusters.first { $0.track == "Song 1" && $0.artist == "Artist A" }
+        check("a run knows the song’s total scrobbles over the whole history, across albums and folded spellings (6 of Artist A’s Song 1)", run?.totalScrobbles == 6, "\(String(describing: run?.totalScrobbles))")
+        SongMatchingSettings.setForTesting(TitleFolding(editionNotes: false, recordingVersions: false, contentRatings: true))
+        result = find(plays)
+        check("…and only the exact spelling’s 5 when edition notes are kept apart", result.clusters.first { $0.track == "Song 1" && $0.artist == "Artist A" }?.totalScrobbles == 5)
+        SongMatchingSettings.setForTesting(TitleFolding(editionNotes: true, recordingVersions: false, contentRatings: true))
+
+        // Music's totals: copies of a song add up.
+        let library = [
+            track("Artist A", "Song 1", "Album X", plays: 4), track("Artist A", "Song 1", "Compilation", plays: 5), track("Artist A", "song 1", "Streaming", plays: 0),
+            track("Artist A", "Song 1 (Remastered 2011)", "Album X (Deluxe)", plays: 2), track("Artist A", "Song 1 (Instrumental)", "Album X", plays: 7),
+            track("Artist B", "Song 1", "Album Z", plays: 3), track("Artist A", "", "Album X", plays: 50), track("Artist A", "Song 9", "Album X", plays: 1),
+        ]
+        let totals = Engine.musicTotals(library: library)
+        let key = AppleMusicMatcher.durationMatchKey(artist: "Artist A", track: "Song 1")
+        check("copies of a song in the library add up their play counts and are counted (4 + 5 + 0 + 2 = 11 plays, 4 copies)", totals[key] == Engine.MusicTotals(plays: 11, copies: 4), "\(String(describing: totals[key]))")
+        check("…an instrumental version and another artist’s song of the same name are other songs, and a track with no name is left out",
+              totals[AppleMusicMatcher.durationMatchKey(artist: "Artist A", track: "Song 1 (Instrumental)")]?.plays == 7 && totals[AppleMusicMatcher.durationMatchKey(artist: "Artist B", track: "Song 1")]?.plays == 3 && totals.count == 4)
+        check("a run finds Music’s totals through its own song key", run.flatMap { totals[$0.key] }?.plays == 11)
+
+        // What the two numbers say.
+        check("equal counts agree", Engine.compare(scrobbles: 12, music: .init(plays: 12, copies: 1)) == .agree)
+        check("more scrobbles than plays says by how many", Engine.compare(scrobbles: 12, music: .init(plays: 10, copies: 1)) == .moreScrobbles(2))
+        check("a song Music has never played, with scrobbles, is more scrobbles too", Engine.compare(scrobbles: 3, music: .init(plays: 0, copies: 1)) == .moreScrobbles(3))
+        check("more plays than scrobbles says by how many", Engine.compare(scrobbles: 5, music: .init(plays: 9, copies: 2)) == .morePlays(4))
+        check("a song not in the library cannot be compared", Engine.compare(scrobbles: 5, music: nil) == .notInMusic)
+        let agree = Engine.comparisonText(scrobbles: 1_200, music: .init(plays: 1_200, copies: 1))
+        check("the text sets the two numbers side by side, with thousands separators", agree.counts == "Scrobbles 1,200 · Apple Music 1,200" && agree.note == "counts agree", agree.counts)
+        check("…says how far apart they are, in the right words", Engine.comparisonText(scrobbles: 7, music: .init(plays: 6, copies: 1)).note == "1 more scrobble than plays" && Engine.comparisonText(scrobbles: 7, music: .init(plays: 4, copies: 1)).note == "3 more scrobbles than plays" && Engine.comparisonText(scrobbles: 1, music: .init(plays: 2, copies: 1)).note == "Music has 1 more play")
+        check("…and says when the song is not in the library", Engine.comparisonText(scrobbles: 4, music: nil).counts == "Scrobbles 4 · not in your Music library" && Engine.comparisonText(scrobbles: 4, music: nil).note == "can’t be compared")
+
+        // The filter.
+        let cases: [Engine.Comparison] = [.agree, .moreScrobbles(2), .morePlays(1), .notInMusic]
+        check("the Apple Music filter keeps what it names: All everything, Counts agree one, More scrobbles one, the rest two",
+              cases.filter(Engine.MusicFilter.all.includes).count == 4 && cases.filter(Engine.MusicFilter.agree.includes) == [.agree]
+              && cases.filter(Engine.MusicFilter.moreScrobbles.includes) == [.moreScrobbles(2)] && cases.filter(Engine.MusicFilter.other.includes) == [.morePlays(1), .notInMusic])
     }
 
     // MARK: - Reviewed runs

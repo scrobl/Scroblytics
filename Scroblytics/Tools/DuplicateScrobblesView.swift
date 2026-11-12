@@ -44,6 +44,9 @@ struct DuplicateScrobblesView: View {
 
     struct Options: Codable, Equatable {
         var listing = Listing.review
+        var musicFilter = DuplicateScrobblesEngine.MusicFilter.all
+        /// Set after Music has been read once (permission is then granted), so a later visit reads it again on open when Music is running.
+        var readMusic = false
         /// Only runs whose last play is within this many days; 0 is all time.
         var windowDays = 0
         var show = Show.all
@@ -62,6 +65,9 @@ struct DuplicateScrobblesView: View {
     @State private var username: String?
     @State private var ignoredRuns = DuplicateScrobblesEngine.IgnoredRuns()
     @State private var confirmingBulk = false
+    @State private var musicTotals: [String: DuplicateScrobblesEngine.MusicTotals]?
+    @State private var isReadingMusic = false
+    @State private var musicError: String?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -70,6 +76,8 @@ struct DuplicateScrobblesView: View {
         let cutoff = options.windowDays > 0 ? Date().addingTimeInterval(-Double(options.windowDays) * 86_400) : nil
         var clusters = DuplicateScrobblesEngine.visible(result.clusters, ignoredRuns: ignoredRuns, ignored: options.listing == .ignored).filter { cluster in
             if let cutoff, cluster.last < cutoff { return false }
+            if let musicTotals, options.musicFilter != .all,
+               !options.musicFilter.includes(DuplicateScrobblesEngine.compare(scrobbles: cluster.totalScrobbles, music: musicTotals[cluster.key])) { return false }
             switch options.show {
             case .all: return true
             case .certain: return cluster.confidence == .certain
@@ -92,6 +100,9 @@ struct DuplicateScrobblesView: View {
                     ToolControlsFlow { controls }
                 }
                 summaryRow
+                if let musicError {
+                    Text(musicError).font(AppTypography.compactMetadata).foregroundStyle(.orange)
+                }
                 if !rows.isEmpty {
                     Text("Last.fm doesn’t let apps delete plays. Open a song on Last.fm to delete the extra plays there, then right-click it here and choose Resync This Track. The first play of each run is the one to keep.")
                         .font(AppTypography.compactMetadata)
@@ -127,6 +138,7 @@ struct DuplicateScrobblesView: View {
             ignoredRuns = ToolFilterSettingsStore.load(DuplicateScrobblesEngine.IgnoredRuns.self, toolId: DuplicateScrobblesEngine.ignoredToolId, context: modelContext, default: .init())
             username = LastfmCredentialsStore.load()?.username
             await recompute()
+            if options.readMusic { await readMusic(quietly: true) }
         }
         .onChange(of: options) { old, new in
             ToolFilterSettingsStore.save(new, toolId: Self.toolId, context: modelContext)
@@ -153,6 +165,13 @@ struct DuplicateScrobblesView: View {
         }
         .pickerStyle(.segmented).labelsHidden()
         .help("Certain: closer together than Last.fm lets two plays of a song be (half its length, or 4 minutes). Possible: closer than 90% of its length, or, when no length is known, under the fixed gap.")
+        if musicTotals != nil {
+            Picker("Apple Music", selection: $options.musicFilter) {
+                ForEach(DuplicateScrobblesEngine.MusicFilter.allCases) { Text($0 == .all ? "Apple Music: all" : $0.label).tag($0) }
+            }
+            .fixedSize()
+            .help("Compare each song’s total scrobbles with its Apple Music play count. Counts that agree suggest the song really was played that many times; more scrobbles than plays is what a double submit looks like.")
+        }
         Picker("Gap when length unknown", selection: $options.fallbackGapSeconds) {
             ForEach(Self.fallbackChoices, id: \.self) { Text("Unknown length: under \($0) s").tag($0) }
         }
@@ -180,6 +199,15 @@ struct DuplicateScrobblesView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if isReadingMusic { ProgressView().controlSize(.small) }
+            Button {
+                Task { await readMusic() }
+            } label: {
+                Label(musicTotals == nil ? "Compare with Apple Music" : "Read Music again", systemImage: "music.note")
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+            .disabled(isReadingMusic)
+            .help("Reads your Music library (about a second) and shows each song’s Apple Music play count next to its total scrobbles. Music must be open, and the first read asks for permission to control it. Nothing is changed.")
             if !shown.isEmpty {
                 Button(reviewing ? "Ignore All Shown…" : "Stop Ignoring All Shown…") { confirmingBulk = true }
                     .buttonStyle(.bordered).controlSize(.small)
@@ -212,6 +240,7 @@ struct DuplicateScrobblesView: View {
                 let image = ImageResolutionEngine.effectiveImageURL(for: target, lookup: imageLookup, fallbackURL: cluster.imageURL)
                 DuplicateScrobbleRow(
                     cluster: cluster, imageURL: image, fallbackGapSeconds: options.fallbackGapSeconds, canOpenLastfm: username != nil,
+                    musicRead: musicTotals != nil, music: musicTotals?[cluster.key],
                     isIgnored: options.listing == .ignored,
                     onToggleIgnored: { setIgnored([cluster], options.listing == .review) },
                     onOpen: { navigation.goToTrack(TrackIdentity(artist: cluster.artist, name: cluster.track, album: album, imageURL: image)) },
@@ -234,6 +263,24 @@ struct DuplicateScrobblesView: View {
     private func openLastfm(_ cluster: DuplicateScrobblesEngine.Cluster) {
         guard let username, let url = LastfmUserLinks.songHistoryURL(username: username, artist: cluster.artist, track: cluster.track) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Reads Music's play counts (Music must be running; it is never launched). `quietly` is the automatic read on open: it says nothing
+    /// when Music isn't open or doesn't answer.
+    private func readMusic(quietly: Bool = false) async {
+        guard !isReadingMusic else { return }
+        isReadingMusic = true
+        if !quietly { musicError = nil }
+        defer { isReadingMusic = false }
+        do {
+            let snapshot = try await AppleMusicFavoritesReader.read(includePlayed: true)
+            let library = snapshot.library
+            musicTotals = await Task.detached(priority: .utility) { DuplicateScrobblesEngine.musicTotals(library: library) }.value
+            musicError = nil
+            options.readMusic = true
+        } catch {
+            if !quietly { musicError = error.localizedDescription }
+        }
     }
 
     private func recompute() async {
@@ -259,6 +306,9 @@ struct DuplicateScrobbleRow: View {
     let imageURL: String?
     let fallbackGapSeconds: Int
     let canOpenLastfm: Bool
+    /// Whether Music has been read, and then Music's totals for the song (nil when it isn't in the library).
+    var musicRead = false
+    var music: DuplicateScrobblesEngine.MusicTotals?
     let isIgnored: Bool
     let onToggleIgnored: () -> Void
     let onOpen: () -> Void
@@ -309,6 +359,15 @@ struct DuplicateScrobbleRow: View {
                     .background((cluster.confidence == .certain ? Color.green : Color.orange).opacity(0.15), in: Capsule())
                 Text(DuplicateScrobblesEngine.lengthText(cluster, fallbackGapSeconds: fallbackGapSeconds))
                     .font(AppTypography.compactMetadata.monospacedDigit()).foregroundStyle(.secondary)
+                if musicRead {
+                    let text = DuplicateScrobblesEngine.comparisonText(scrobbles: cluster.totalScrobbles, music: music)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(text.counts)
+                        Text(text.note).fontWeight(.semibold)
+                    }
+                    .font(AppTypography.compactMetadata.monospacedDigit()).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                }
                 HStack(spacing: 6) {
                     Button("Query", action: onQuery)
                         .help("Open this song’s plays on these days in Query.")

@@ -495,7 +495,7 @@ enum LayoutSnapshots {
         }
     }
 
-    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_DUPLICATES=<folder>`: rows of Duplicate Scrobbles for made-up runs (a certain pair, a long run, a possible
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_DUPLICATES=<folder>`: rows of Duplicate Scrobbles for made-up runs (a song with two runs, a long run, a possible
     /// run with no known length, very long names), light and dark at a few widths.
     @MainActor
     private static func snapshotDuplicateScrobbles(into folder: String, container: ModelContainer) {
@@ -523,6 +523,7 @@ enum LayoutSnapshots {
             }
             let clusters = [
                 cluster("Song One", "Artist A", offsets: [0, 4], length: 225, confidence: .certain, total: 12),
+                cluster("Song One", "Artist A", offsets: [900_000, 900_150], length: 225, confidence: .possible, total: 12),
                 cluster("A Very Long Song Title That Goes On And On For Quite Some Time (Remastered 2011)", "Artist With A Very Long Name & Another Artist Entirely", offsets: [0, 3, 6, 9, 12, 15, 18, 21, 24], length: 303, confidence: .certain),
                 cluster("Song Three", "Artist B", offsets: [0, 38], length: nil, confidence: .possible),
                 cluster("Song Four", "Artist C", offsets: [0, 150], length: 200, confidence: .possible),
@@ -536,7 +537,7 @@ enum LayoutSnapshots {
             for scheme in ["dark", "light"] {
                 for width in [900, 620, 420] as [CGFloat] {
                     let list = VStack(alignment: .leading, spacing: 1) {
-                        ForEach(clusters) { DuplicateScrobbleRow(cluster: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, musicRead: true, music: musicBySong[$0.key], isIgnored: false, onToggleIgnored: {}, onOpen: {}, onLastfm: {}, onQuery: {}) }
+                        ForEach(DuplicateScrobblesEngine.groups(clusters)) { DuplicateScrobbleRow(group: $0, imageURL: nil, fallbackGapSeconds: 60, canOpenLastfm: true, musicRead: true, music: musicBySong[$0.key], isIgnored: false, onToggleIgnored: {}, onOpen: {}, onLastfm: {}, onQuery: {}) }
                     }
                     .padding(.horizontal, 10)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

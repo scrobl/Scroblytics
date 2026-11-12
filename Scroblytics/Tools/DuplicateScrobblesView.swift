@@ -71,10 +71,11 @@ struct DuplicateScrobblesView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    private var rows: [DuplicateScrobblesEngine.Cluster] {
+    /// The runs that pass the List, Period, Apple Music and Show choices.
+    private var shownRuns: [DuplicateScrobblesEngine.Cluster] {
         guard let result else { return [] }
         let cutoff = options.windowDays > 0 ? Date().addingTimeInterval(-Double(options.windowDays) * 86_400) : nil
-        var clusters = DuplicateScrobblesEngine.visible(result.clusters, ignoredRuns: ignoredRuns, ignored: options.listing == .ignored).filter { cluster in
+        return DuplicateScrobblesEngine.visible(result.clusters, ignoredRuns: ignoredRuns, ignored: options.listing == .ignored).filter { cluster in
             if let cutoff, cluster.last < cutoff { return false }
             if let musicTotals, options.musicFilter != .all,
                !options.musicFilter.includes(DuplicateScrobblesEngine.compare(scrobbles: cluster.totalScrobbles, music: musicTotals[cluster.key])) { return false }
@@ -84,13 +85,18 @@ struct DuplicateScrobblesView: View {
             case .possible: return cluster.confidence == .possible
             }
         }
+    }
+
+    /// The runs grouped by song, in the chosen order.
+    private var songs: [DuplicateScrobblesEngine.SongGroup] {
+        var groups = DuplicateScrobblesEngine.groups(shownRuns)
         switch options.sort {
         case .mostRecent: break
-        case .mostExtras: clusters.sort { ($0.extraPlays, $0.last) > ($1.extraPlays, $1.last) }
-        case .smallestGap: clusters.sort { ($0.smallestGap, $1.last) < ($1.smallestGap, $0.last) }
-        case .artist: clusters.sort { ($0.artist.lowercased(), $0.track.lowercased()) < ($1.artist.lowercased(), $1.track.lowercased()) }
+        case .mostExtras: groups.sort { ($0.extraPlays, $0.last) > ($1.extraPlays, $1.last) }
+        case .smallestGap: groups.sort { ($0.smallestGap, $1.last) < ($1.smallestGap, $0.last) }
+        case .artist: groups.sort { ($0.artist.lowercased(), $0.track.lowercased()) < ($1.artist.lowercased(), $1.track.lowercased()) }
         }
-        return clusters
+        return groups
     }
 
     var body: some View {
@@ -103,7 +109,7 @@ struct DuplicateScrobblesView: View {
                 if let musicError {
                     Text(musicError).font(AppTypography.compactMetadata).foregroundStyle(.orange)
                 }
-                if !rows.isEmpty {
+                if !songs.isEmpty {
                     Text("Last.fm doesn’t let apps delete plays. Open a song on Last.fm to delete the extra plays there, then right-click it here and choose Resync This Track. The first play of each run is the one to keep.")
                         .font(AppTypography.compactMetadata)
                         .foregroundStyle(.secondary)
@@ -189,12 +195,14 @@ struct DuplicateScrobblesView: View {
     }
 
     private var summaryRow: some View {
-        let shown = rows
+        let shown = shownRuns
+        let groups = DuplicateScrobblesEngine.groups(shown)
         let extras = shown.reduce(0) { $0 + $1.extraPlays }
         let reviewing = options.listing == .review
         return HStack {
             if result != nil {
-                Text("\(extras.formatted()) extra \(extras == 1 ? "play" : "plays") in \(shown.count.formatted()) \(shown.count == 1 ? "run" : "runs") · \(shown.filter { $0.confidence == .certain }.count.formatted()) certain\(reviewing && reviewedCount > 0 ? " · \(reviewedCount.formatted()) ignored" : "")")
+                Text(DuplicateScrobblesEngine.summaryLine(extras: extras, songs: groups.count, runs: shown.count, certainRuns: shown.filter { $0.confidence == .certain }.count)
+                     + (reviewing && reviewedCount > 0 ? " · \(reviewedCount.formatted()) ignored" : ""))
                     .font(AppTypography.metadata.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -234,22 +242,22 @@ struct DuplicateScrobblesView: View {
 
     private var list: some View {
         LazyVStack(alignment: .leading, spacing: 1) {
-            ForEach(rows) { cluster in
-                let album = cluster.album.isEmpty ? nil : cluster.album
-                let target = ImageTarget(kind: .track, artist: cluster.artist, album: album, track: cluster.track)
-                let image = ImageResolutionEngine.effectiveImageURL(for: target, lookup: imageLookup, fallbackURL: cluster.imageURL)
+            ForEach(songs) { group in
+                let album = group.album.isEmpty ? nil : group.album
+                let target = ImageTarget(kind: .track, artist: group.artist, album: album, track: group.track)
+                let image = ImageResolutionEngine.effectiveImageURL(for: target, lookup: imageLookup, fallbackURL: group.imageURL)
                 DuplicateScrobbleRow(
-                    cluster: cluster, imageURL: image, fallbackGapSeconds: options.fallbackGapSeconds, canOpenLastfm: username != nil,
-                    musicRead: musicTotals != nil, music: musicTotals?[cluster.key],
+                    group: group, imageURL: image, fallbackGapSeconds: options.fallbackGapSeconds, canOpenLastfm: username != nil,
+                    musicRead: musicTotals != nil, music: musicTotals?[group.key],
                     isIgnored: options.listing == .ignored,
-                    onToggleIgnored: { setIgnored([cluster], options.listing == .review) },
-                    onOpen: { navigation.goToTrack(TrackIdentity(artist: cluster.artist, name: cluster.track, album: album, imageURL: image)) },
-                    onLastfm: { openLastfm(cluster) },
+                    onToggleIgnored: { setIgnored(group.runs, options.listing == .review) },
+                    onOpen: { navigation.goToTrack(TrackIdentity(artist: group.artist, name: group.track, album: album, imageURL: image)) },
+                    onLastfm: { openLastfm(group) },
                     onQuery: {
                         openQuery(
-                            DuplicateScrobblesEngine.spec(for: cluster),
-                            "Duplicate Scrobbles · \(cluster.track) by \(cluster.artist)",
-                            "Duplicate plays of \(cluster.track)"
+                            DuplicateScrobblesEngine.spec(for: group),
+                            "Duplicate Scrobbles · \(group.track) by \(group.artist)",
+                            "Duplicate plays of \(group.track)"
                         )
                     }
                 )
@@ -260,8 +268,8 @@ struct DuplicateScrobblesView: View {
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.4), lineWidth: 1) }
     }
 
-    private func openLastfm(_ cluster: DuplicateScrobblesEngine.Cluster) {
-        guard let username, let url = LastfmUserLinks.songHistoryURL(username: username, artist: cluster.artist, track: cluster.track) else { return }
+    private func openLastfm(_ group: DuplicateScrobblesEngine.SongGroup) {
+        guard let username, let url = LastfmUserLinks.songHistoryURL(username: username, artist: group.artist, track: group.track) else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -302,7 +310,7 @@ struct DuplicateScrobblesView: View {
 }
 
 struct DuplicateScrobbleRow: View {
-    let cluster: DuplicateScrobblesEngine.Cluster
+    let group: DuplicateScrobblesEngine.SongGroup
     let imageURL: String?
     let fallbackGapSeconds: Int
     let canOpenLastfm: Bool
@@ -320,6 +328,32 @@ struct DuplicateScrobbleRow: View {
         return Date.FormatStyle(date: .abbreviated, time: .standard, calendar: calendar, timeZone: calendar.timeZone)
     }
 
+    private func color(_ run: DuplicateScrobblesEngine.Cluster) -> Color { run.confidence == .certain ? .green : .orange }
+
+    /// One run under the song: how it reads, how sure it is, and every play with its time.
+    private func runView(_ run: DuplicateScrobblesEngine.Cluster) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text(run.confidence == .certain ? "Certain" : "Possible")
+                    .font(AppTypography.compactMetadata.weight(.semibold))
+                    .foregroundStyle(color(run))
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(color(run).opacity(0.15), in: Capsule())
+                Text(DuplicateScrobblesEngine.summary(run))
+                    .font(AppTypography.metadata.weight(.semibold))
+            }
+            .padding(.bottom, 1)
+            ForEach(Array(run.times.prefix(6).enumerated()), id: \.offset) { index, time in
+                Text("\(index == 0 ? "Keep" : "Extra")  \(time.formatted(timeStyle))")
+                    .font(AppTypography.compactMetadata.monospacedDigit())
+                    .foregroundStyle(index == 0 ? .secondary : .primary)
+            }
+            if run.times.count > 6 {
+                Text("and \(run.times.count - 6) more").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            }
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Button(action: onOpen) {
@@ -328,23 +362,15 @@ struct DuplicateScrobbleRow: View {
                         .frame(width: AppArtworkSizing.thumbnail, height: AppArtworkSizing.thumbnail)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 4) {
-                            Text(cluster.track).font(AppTypography.contentTitle).lineLimit(1)
-                            TrackLovedIndicator(artist: cluster.artist, track: cluster.track, initialValue: false, font: AppTypography.metadata)
+                            Text(group.track).font(AppTypography.contentTitle).lineLimit(1)
+                            TrackLovedIndicator(artist: group.artist, track: group.track, initialValue: false, font: AppTypography.metadata)
                         }
-                        Text(cluster.album.isEmpty ? cluster.artist : "\(cluster.artist) · \(cluster.album)")
+                        Text(group.album.isEmpty ? group.artist : "\(group.artist) · \(group.album)")
                             .font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
-                        Text(DuplicateScrobblesEngine.summary(cluster))
-                            .font(AppTypography.metadata.weight(.semibold))
-                        VStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(cluster.times.prefix(6).enumerated()), id: \.offset) { index, time in
-                                Text("\(index == 0 ? "Keep" : "Extra")  \(time.formatted(timeStyle))")
-                                    .font(AppTypography.compactMetadata.monospacedDigit())
-                                    .foregroundStyle(index == 0 ? .secondary : .primary)
-                            }
-                            if cluster.times.count > 6 {
-                                Text("and \(cluster.times.count - 6) more").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
-                            }
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(group.runs) { runView($0) }
                         }
+                        .padding(.top, 2)
                     }
                     Spacer(minLength: 8)
                 }
@@ -352,15 +378,11 @@ struct DuplicateScrobbleRow: View {
             }
             .buttonStyle(.plain)
             VStack(alignment: .trailing, spacing: 6) {
-                Text(cluster.confidence == .certain ? "Certain" : "Possible")
-                    .font(AppTypography.compactMetadata.weight(.semibold))
-                    .foregroundStyle(cluster.confidence == .certain ? Color.green : Color.orange)
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background((cluster.confidence == .certain ? Color.green : Color.orange).opacity(0.15), in: Capsule())
-                Text(DuplicateScrobblesEngine.lengthText(cluster, fallbackGapSeconds: fallbackGapSeconds))
+                Text(DuplicateScrobblesEngine.lengthText(group, fallbackGapSeconds: fallbackGapSeconds))
                     .font(AppTypography.compactMetadata.monospacedDigit()).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
                 if musicRead {
-                    let text = DuplicateScrobblesEngine.comparisonText(scrobbles: cluster.totalScrobbles, music: music)
+                    let text = DuplicateScrobblesEngine.comparisonText(scrobbles: group.totalScrobbles, music: music)
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(text.counts)
                         Text(text.note).fontWeight(.semibold)
@@ -370,7 +392,7 @@ struct DuplicateScrobbleRow: View {
                 }
                 HStack(spacing: 6) {
                     Button("Query", action: onQuery)
-                        .help("Open this song’s plays on these days in Query.")
+                        .help("Open this song’s plays between its first and last run in Query.")
                     if canOpenLastfm {
                         Button("Last.fm", action: onLastfm)
                             .help("Open this song’s history on Last.fm, where plays can be deleted.")
@@ -378,15 +400,17 @@ struct DuplicateScrobbleRow: View {
                     Button(action: onToggleIgnored) {
                         Image(systemName: isIgnored ? "eye" : "eye.slash")
                     }
-                    .help(isIgnored ? "Put this run back in To Review." : "I’ve reviewed this run and no action is needed: move it to Ignored. If it gains another play it comes back.")
-                    .accessibilityLabel(isIgnored ? "Stop ignoring this run" : "Ignore this run")
+                    .help(isIgnored
+                          ? "Put the runs shown here back in To Review."
+                          : "I’ve reviewed the runs shown here and no action is needed: move them to Ignored. A run that gains another play, or a new run, comes back.")
+                    .accessibilityLabel(isIgnored ? "Stop ignoring these runs" : "Ignore these runs")
                 }
                 .buttonStyle(.bordered).controlSize(.small)
             }
         }
         .padding(.vertical, 10).padding(.horizontal, 4)
         .entityContextMenu(
-            target: ImageTarget(kind: .track, artist: cluster.artist, album: cluster.album.isEmpty ? nil : cluster.album, track: cluster.track),
+            target: ImageTarget(kind: .track, artist: group.artist, album: group.album.isEmpty ? nil : group.album, track: group.track),
             currentImageURL: imageURL, onOpen: onOpen
         )
         Divider()

@@ -75,6 +75,48 @@ enum DuplicateScrobblesEngine {
         var possible: [Cluster] { clusters.filter { $0.confidence == .possible } }
     }
 
+    /// One song's runs, as the list shows them: a song with bursts of close plays at different times is one row with each burst under it.
+    struct SongGroup: Identifiable, Sendable, Equatable {
+        var id: String { key }
+        let key: String
+        /// The song's runs, oldest first.
+        let runs: [Cluster]
+
+        var latest: Cluster { runs[runs.count - 1] }
+        /// The song as its most recent run spelled it.
+        var artist: String { latest.artist }
+        var track: String { latest.track }
+        var album: String { runs.reversed().first { !$0.album.isEmpty }?.album ?? "" }
+        var imageURL: String? { runs.reversed().compactMap(\.imageURL).first }
+        var lengthSeconds: Int? { runs.compactMap(\.lengthSeconds).first }
+        var totalScrobbles: Int { latest.totalScrobbles }
+        /// Every title the song's runs were scrobbled under.
+        var titles: [String] {
+            var seen: [String] = []
+            for run in runs { for title in run.titles where !seen.contains(title) { seen.append(title) } }
+            return seen
+        }
+        var extraPlays: Int { runs.reduce(0) { $0 + $1.extraPlays } }
+        var smallestGap: Double { runs.map(\.smallestGap).min() ?? 0 }
+        var first: Date { runs[0].first }
+        var last: Date { latest.last }
+    }
+
+    /// The runs grouped by song, each song's runs oldest first and the songs with the most recent run first.
+    nonisolated static func groups(_ clusters: [Cluster]) -> [SongGroup] {
+        var byKey: [String: [Cluster]] = [:]
+        for cluster in clusters { byKey[cluster.key, default: []].append(cluster) }
+        return byKey.map { SongGroup(key: $0.key, runs: $0.value.sorted { $0.first < $1.first }) }
+            .sorted { ($0.last, $0.key) > ($1.last, $1.key) }
+    }
+
+    /// "12 extra plays in 33 runs of 31 songs · 24 certain runs".
+    static func summaryLine(extras: Int, songs: Int, runs: Int, certainRuns: Int) -> String {
+        let plays = "\(extras.formatted()) extra \(extras == 1 ? "play" : "plays")"
+        let ofSongs = runs == songs ? "" : " of \(songs.formatted()) \(songs == 1 ? "song" : "songs")"
+        return "\(plays) in \(runs.formatted()) \(runs == 1 ? "run" : "runs")\(ofSongs) · \(certainRuns.formatted()) certain"
+    }
+
     private struct Pair: Hashable { let artist: String; let track: String }
 
     /// - Parameters:
@@ -245,20 +287,25 @@ enum DuplicateScrobblesEngine {
 
     // MARK: - Query hand-off
 
-    /// Query on the single plays of the song around the run: that song's title (every spelling the run used) for the days it spans,
-    /// oldest first, so the extra plays can be seen next to the neighbouring ones.
-    static func spec(for cluster: Cluster, calendar: Calendar = AppCalendars.listening) -> QuerySpec {
+    /// Query on the single plays of the song around its runs: that song's title (every spelling the runs used) from the day of the first
+    /// run to the day of the last, oldest first, so the extra plays can be seen next to the neighbouring ones.
+    static func spec(for group: SongGroup, calendar: Calendar = AppCalendars.listening) -> QuerySpec {
         var spec = QuerySpec(target: .scrobble)
-        let start = calendar.startOfDay(for: cluster.first)
-        let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: cluster.last)) ?? cluster.last
+        let start = calendar.startOfDay(for: group.first)
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: group.last)) ?? group.last
         spec.period = QueryPeriod(from: start, to: nextDay.addingTimeInterval(-1))
-        spec.groups = cluster.titles.map { title in
-            [QueryCondition("artist", .textIs, [.text(cluster.artist)]), QueryCondition("name", .textIs, [.text(title)])]
+        spec.groups = group.titles.map { title in
+            [QueryCondition("artist", .textIs, [.text(group.artist)]), QueryCondition("name", .textIs, [.text(title)])]
         }
         spec.sorts = [QuerySort(key: .field(QueryFieldRef("playedAt")), direction: .ascending)]
         spec.columns = [QueryFieldRef("playedAt"), QueryFieldRef("playAlbum"), QueryFieldRef("playGap")]
         spec.limit = QuerySpec.scrobbleLimit
         return spec
+    }
+
+    /// The same for one run.
+    static func spec(for cluster: Cluster, calendar: Calendar = AppCalendars.listening) -> QuerySpec {
+        spec(for: SongGroup(key: cluster.key, runs: [cluster]), calendar: calendar)
     }
 
     // MARK: - Wording
@@ -277,8 +324,13 @@ enum DuplicateScrobblesEngine {
     }
 
     static func lengthText(_ cluster: Cluster, fallbackGapSeconds: Int) -> String {
-        guard let length = cluster.lengthSeconds else { return "Length unknown · under \(fallbackGapSeconds) s" }
-        let share = Int((cluster.smallestGap / Double(length) * 100).rounded())
+        lengthText(SongGroup(key: cluster.key, runs: [cluster]), fallbackGapSeconds: fallbackGapSeconds)
+    }
+
+    /// "Length 3:45 min · closest gap 2% of it" (the song's closest gap over all its runs), or what is used when no length is known.
+    static func lengthText(_ group: SongGroup, fallbackGapSeconds: Int) -> String {
+        guard let length = group.lengthSeconds else { return "Length unknown · under \(fallbackGapSeconds) s" }
+        let share = Int((group.smallestGap / Double(length) * 100).rounded())
         return "Length \(durationText(Double(length))) · closest gap \(share < 1 ? "under 1" : String(share))% of it"
     }
 }

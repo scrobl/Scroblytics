@@ -24,7 +24,7 @@ enum DuplicateScrobblesChecks {
                 let started = Date()
                 let result = Engine.find(scrobbles: plays, lengths: lengths, options: Engine.Options(fallbackGapSeconds: gap))
                 let elapsed = Date().timeIntervalSince(started)
-                var out = ["PLAYS \(plays.count)", "RUNS \(result.clusters.count)", "EXTRA \(result.extraPlays)",
+                var out = ["PLAYS \(plays.count)", "RUNS \(result.clusters.count)", "SONGS \(Engine.groups(result.clusters).count)", "EXTRA \(result.extraPlays)",
                            "CERTAIN \(result.certain.count)", "POSSIBLE \(result.possible.count)", String(format: "SECONDS %.2f", elapsed)]
                 for cluster in result.clusters.sorted(by: { ($0.key, $0.first) < ($1.key, $1.first) }) {
                     out.append("RUN\t\(cluster.artist)\t\(cluster.track)\t\(cluster.confidence.rawValue)\t\(cluster.lengthSeconds.map(String.init) ?? "-")\t\(cluster.times.count)\t\(cluster.times.map { String(Int($0.timeIntervalSince1970)) }.joined(separator: ","))")
@@ -63,6 +63,8 @@ enum DuplicateScrobblesChecks {
             SongMatchingSettings.setForTesting(TitleFolding(editionNotes: true, recordingVersions: false, contentRatings: true))
             defer { SongMatchingSettings.setForTesting(nil) }
             engineChecks(check)
+            groupChecks(check)
+            groupQueryChecks(check)
             foldingChecks(check)
             crossCheck(check)
             handoffChecks(check)
@@ -162,6 +164,82 @@ enum DuplicateScrobblesChecks {
         // A length found under the other play's spelling.
         result = find([play("Artist A", "Song 10", at: 0), play("Artist A", "Song 10 (Remastered)", at: 100)], lengths: [key("Artist A", "Song 10 (Remastered)"): 240])
         check("a length known only under the later spelling still judges the pair", result.clusters.count == 1 && result.clusters[0].confidence == .certain && result.clusters[0].lengthSeconds == 240)
+    }
+
+    // MARK: - One row per song
+
+    @MainActor
+    private static func groupChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        // Song 1 by Artist A has two runs far apart and one lone play; Song 2 by Artist B has one run.
+        var plays = [play("Artist A", "Song 1", "Album X", at: 0), play("Artist A", "Song 1", "Album X", at: 5)]
+        plays += [play("Artist A", "Song 1 (Remastered 2011)", "Album Y", at: 5_000), play("Artist A", "Song 1", "Album Y", at: 5_030), play("Artist A", "Song 1", "Album Y", at: 20_000)]
+        plays += [play("Artist B", "Song 2", "Album Z", at: 100), play("Artist B", "Song 2", "Album Z", at: 103)]
+        let result = find(plays, lengths: [key("Artist A", "Song 1"): 250])
+        let groups = Engine.groups(result.clusters)
+        check("three runs of two songs make two rows", result.clusters.count == 3 && groups.count == 2, "\(result.clusters.count) runs, \(groups.count) rows")
+        let a = groups.first { $0.artist == "Artist A" }, b = groups.first { $0.artist == "Artist B" }
+        check("a song with two bursts is one row holding both runs, oldest first", a?.runs.count == 2 && a?.runs[0].first == origin && a.map { $0.runs[0].first < $0.runs[1].first } == true)
+        check("…a song with one burst is a row of one run", b?.runs.count == 1)
+        check("…the rows are ordered by their most recent run, newest first", groups.first?.artist == "Artist A")
+        check("a row’s extra plays add up over its runs, and its closest gap is the smallest of them", a?.extraPlays == 2 && a?.smallestGap == 5 && b?.extraPlays == 1 && b?.smallestGap == 3)
+        check("…it covers from the first run’s first play to the last run’s last play", a?.first == origin && a?.last == origin.addingTimeInterval(5_030))
+        check("…its total scrobbles are the whole song’s (5 plays, 2 of them in no run)", a?.totalScrobbles == 5, "\(String(describing: a?.totalScrobbles))")
+        check("…its titles are every spelling its runs used", Set(a?.titles ?? []) == ["Song 1", "Song 1 (Remastered 2011)"])
+        check("…its album is the latest one named, and its length the known one", a?.album == "Album Y" && a?.lengthSeconds == 250)
+        check("…and its identity is the song’s key, so a row keeps its place when a run is added", a?.id == a?.runs.first?.key)
+        check("the length line names the song’s closest gap over all its runs (5 s of 4:10 is 2%)", a.map { Engine.lengthText($0, fallbackGapSeconds: 60) } == "Length 4:10 min · closest gap 2% of it")
+
+        // A song can be in To Review and in Ignored at once: each list shows only its own runs.
+        var ignored = Engine.IgnoredRuns()
+        if let firstRun = a?.runs.first { ignored.ignore([firstRun]) }
+        let review = Engine.groups(Engine.visible(result.clusters, ignoredRuns: ignored, ignored: false))
+        let reviewed = Engine.groups(Engine.visible(result.clusters, ignoredRuns: ignored, ignored: true))
+        check("with one of a song’s runs ignored, To Review keeps the song with its other run", review.first { $0.artist == "Artist A" }?.runs.count == 1 && review.first { $0.artist == "Artist A" }?.runs.first?.first == origin.addingTimeInterval(5_000))
+        check("…and Ignored lists the song with just the ignored run", reviewed.count == 1 && reviewed[0].runs.count == 1 && reviewed[0].runs[0].first == origin)
+        check("…while a song with nothing ignored is only in To Review", review.contains { $0.artist == "Artist B" } && !reviewed.contains { $0.artist == "Artist B" })
+        check("ignoring every run a row shows takes the song out of To Review", { var all = Engine.IgnoredRuns(); all.ignore(a?.runs ?? []); return !Engine.groups(Engine.visible(result.clusters, ignoredRuns: all, ignored: false)).contains { $0.artist == "Artist A" } }())
+
+        // The summary line.
+        check("the summary reads “1 extra play in 1 run · 1 certain” for one run", Engine.summaryLine(extras: 1, songs: 1, runs: 1, certainRuns: 1) == "1 extra play in 1 run · 1 certain")
+        check("…and names the songs only when there are fewer of them than runs", Engine.summaryLine(extras: 12, songs: 31, runs: 33, certainRuns: 24) == "12 extra plays in 33 runs of 31 songs · 24 certain" && Engine.summaryLine(extras: 5, songs: 4, runs: 4, certainRuns: 0) == "5 extra plays in 4 runs · 0 certain")
+    }
+
+    @MainActor
+    private static func groupQueryChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let calendar = AppCalendars.listening
+        func at(_ day: Int, _ hour: Int, _ minute: Int = 0, _ second: Int = 0) -> Date {
+            calendar.date(from: DateComponents(year: 2025, month: 3, day: day, hour: hour, minute: minute, second: second))!
+        }
+        func make(_ track: String, _ artist: String, _ date: Date) -> ScrobbleSnapshot {
+            ScrobbleSnapshot(artistName: artist, albumName: "Album X", trackName: track, imageURL: nil, playedAt: date)
+        }
+        let plays = [
+            make("Song 1", "Artist A", at(1, 9)),                 // before the first run
+            make("Song 1", "Artist A", at(3, 9, 0, 0)), make("Song 1", "Artist A", at(3, 9, 0, 4)),     // first run
+            make("Song 1", "Artist A", at(3, 21)),                // the same song between, in no run
+            make("Song 2", "Artist A", at(4, 12)),                // another song
+            make("Song 1", "Artist B", at(5, 12)),                // another artist
+            make("Song 1", "Artist A", at(6, 9, 0, 0)), make("Song 1", "Artist A", at(6, 9, 0, 10)),    // second run
+            make("Song 1", "Artist A", at(8, 12)),                // after the last run
+        ].sorted { $0.playedAt < $1.playedAt }
+        let result = Engine.find(scrobbles: plays, lengths: [:], options: Engine.Options())
+        guard let group = Engine.groups(result.clusters).first(where: { $0.artist == "Artist A" && $0.track == "Song 1" }) else {
+            check("the song has two runs and one row", false)
+            return
+        }
+        check("the song has two runs in one row", group.runs.count == 2)
+        let spec = Engine.spec(for: group, calendar: calendar)
+        check("the hand-off covers the days from the first run to the last (the 3rd to the 6th)", spec.period == QueryPeriod(from: at(3, 0), to: at(7, 0).addingTimeInterval(-1)))
+        if let validated = try? spec.validate(against: QueryFieldRegistry.standard) {
+            let run = QueryRun(target: .scrobble, asOf: at(20, 12), scrobbles: spec.countedPlays(plays), allTimeScrobbles: plays, snapshots: QuerySnapshots(), sessionGapMinutes: Double(spec.effectiveSessionGapMinutes))
+            let rows = QueryEngine.evaluate(validated, run: run).rows.map { Date(timeIntervalSince1970: $0.entity.id.at) }
+            let expected = plays.filter { $0.artistName == "Artist A" && $0.trackName == "Song 1" && $0.playedAt >= at(3, 0) && $0.playedAt < at(7, 0) }.map(\.playedAt)
+            check("running it lists the song’s plays in between (both runs and the play between them), oldest first, and no other song, artist or day (\(expected.count))", rows == expected && expected.count == 5, "\(rows.count)")
+        } else {
+            check("the song hand-off is a valid query", false)
+        }
     }
 
     // MARK: - Song matching settings

@@ -45,7 +45,10 @@ The DMG itself is tested **once per release**, as below, not for every change.
    It stops at the first problem. In order it: checks the git tree is clean and the signing identity and notary profile exist,
    runs the app's headless checks against a scratch database, archives and exports with Developer ID, verifies the app
    (signature, hardened runtime, entitlements, version, no debug hooks, no personal strings), has Apple notarize and staple it, builds
-   the DMG, notarizes and staples that, and asks Gatekeeper about the finished files. The result is in `build/release/`:
+   the DMG (the app on the left, the Applications folder on the right, an arrow between them, drawn by `scripts/make-dmg-background.swift`
+   and arranged by `scripts/make-dmg.sh`: it tells Finder where to put the icons, so macOS may ask once to let the app you run it from control Finder, and it
+   must run in a logged-in desktop session; without that it warns and still makes a working, unarranged image), notarizes and staples that, and
+   asks Gatekeeper about the finished files. The result is in `build/release/`:
    `Scroblytics-<version>.dmg`, a `.sha256` checksum and the release notes.
 3. **Back up your real data before you install the new version over it.** Quit Scroblytics, then use File › Back Up Scroblytics Data…
    and also copy the database somewhere safe:

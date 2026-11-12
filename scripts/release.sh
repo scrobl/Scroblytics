@@ -217,7 +217,12 @@ rm -rf "$stage"; mkdir -p "$stage"
 ditto "$app" "$stage/Scroblytics.app"
 ln -s /Applications "$stage/Applications"
 dmg="$out/$dmg_name"
-hdiutil create -volname "Scroblytics $version" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null 2>&1 || fail "hdiutil couldn't create the disk image."
+# The app on the left, the Applications folder on the right, an arrow between them (scripts/make-dmg.sh; Finder keeps the layout in the image).
+dmg_result="$("$root/scripts/make-dmg.sh" "$stage" "Scroblytics $version" "$dmg" 2>&1)" || { printf '%s\n' "$dmg_result" >&2; fail "couldn't create the disk image."; }
+case "$dmg_result" in
+  *"layout: ok"*) ok "installer window arranged: app on the left, Applications on the right, arrow between" ;;
+  *) warn "the installer window has no custom layout (${dmg_result#layout: }). The image still works; fix it and rebuild if you want the arrangement." ;;
+esac
 if [ "$test_package" = 1 ]; then
   codesign --force --sign "$identity" "$dmg" >/dev/null 2>&1 || fail "signing the TEST disk image failed."
 else
@@ -240,6 +245,22 @@ hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mount" "$dmg" >/dev/n
 cleanup() { hdiutil detach "$mount" >/dev/null 2>&1 || hdiutil detach -force "$mount" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 [ -d "$mount/Scroblytics.app" ] && [ -L "$mount/Applications" ] && ok "contains Scroblytics.app and an Applications shortcut" || fail "the disk image's contents are wrong."
+if [ -f "$mount/.DS_Store" ]; then
+  layout_check="$(python3 -I - "$mount/.DS_Store" <<'PY'
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+def icon_x(name):
+    key = struct.pack(">I", len(name)) + name.encode("utf-16-be") + b"Iloc" + b"blob" + struct.pack(">I", 16)
+    i = data.find(key)
+    return struct.unpack(">I", data[i + len(key):i + len(key) + 4])[0] if i >= 0 else None
+app, folder = icon_x("Scroblytics.app"), icon_x("Applications")
+print("ok" if app is not None and folder is not None and app < folder else "wrong")
+PY
+)"
+  [ "$layout_check" = ok ] && ok "installer window: the app sits to the left of Applications" || warn "the installer window layout in the image does not put the app to the left of Applications."
+else
+  note "the disk image has no saved window layout (see the warning above)."
+fi
 if [ "$test_package" = 0 ]; then
   verdict="$(spctl -a -vv "$mount/Scroblytics.app" 2>&1 || true)"
   printf '%s\n' "$verdict" | grep -q "source=Notarized Developer ID" && ok "Gatekeeper: app accepted, Notarized Developer ID" || { printf '%s\n' "$verdict" >&2; fail "Gatekeeper doesn't accept the app inside the disk image."; }

@@ -33,6 +33,10 @@ enum LayoutSnapshots {
             snapshotToolControls(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_MENUBADGE"] {
+            snapshotMenuBadge(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_DUPLICATES"] {
             snapshotDuplicateScrobbles(into: folder, container: container)
             return
@@ -491,6 +495,76 @@ enum LayoutSnapshots {
                 await render(Form { ScrobblerWatchSettingsSection(store: on) }.formStyle(.grouped), width: 560, scheme: scheme, name: "settings-on")
             }
             suite.removePersistentDomain(forName: "scrobbler-watch-snapshot")
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_MENUBADGE=<folder>`: Top Charts tiles with and without the "…" badge that opens the right-click menu
+    /// (the badge is drawn as it is while the pointer is over the tile), light and dark. A tile's badge sits in its top-right corner,
+    /// clear of the rank badge in the top-left.
+    @MainActor
+    private static func snapshotMenuBadge(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let appearance = scheme == "dark" ? NSAppearance.Name.darkAqua : .aqua
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                }
+            }
+            func entry(_ rank: Int, _ name: String) -> TopChartEntry {
+                TopChartEntry(rank: rank, name: name, artist: "Artist A", album: "Album Name", playcount: 400 - rank * 30, timeListenedSeconds: nil, imageURL: nil,
+                              hasCompareRange: false, previousRank: nil, peakRank: rank, lastPlayedAt: Date(), loved: false, releaseDateResolution: .unknown)
+            }
+            for scheme in ["dark", "light"] {
+                let tiles = HStack(alignment: .top, spacing: 16) {
+                    ForEach([(1, true), (2, false), (3, false)], id: \.0) { rank, shown in
+                        TopChartGridCell(entity: .track, entry: entry(rank, "Track Title \(rank)"), metric: .scrobbles)
+                            .frame(width: 150)
+                            .entityContextMenu(
+                                target: ImageTarget(kind: .track, artist: "Artist A", album: "Album Name", track: "Track Title \(rank)"),
+                                affordance: .corner(alwaysVisible: shown)
+                            )
+                    }
+                }
+                .padding(16)
+                .environment(LovedTracksStore())
+                .environment(FlaggedTracksStore())
+                .environment(PopularityStore())
+                .environment(LibraryGapBadgeStore())
+                .environment(TagStore())
+                .environment(TagWriteRunner())
+                .environment(PendingSyncEventsStore())
+                .modelContainer(container)
+                await render(tiles, width: 560, scheme: scheme, name: "tiles")
+                // Overview's top picks: the artwork is on the left of a wide tile, and the badge is still in the tile's top-right corner.
+                let picks = VStack(spacing: 1) {
+                    ForEach(["Short", "A Very Long Track Title That Goes On And On Past The End Of The Tile"], id: \.self) { title in
+                        TopPickTile(role: "Top track", entry: OverviewTopEntry(name: title, artist: "Artist A", album: "Album Name", playcount: 412, imageURL: nil, loved: true, timeListenedSeconds: nil),
+                                    trend: (0..<30).map { TrendBucket(start: Date().addingTimeInterval(Double($0 - 30) * 86400), count: [2, 1, 4, 3, 6][$0 % 5]) }, metric: .scrobbles, showsLovedStatus: true)
+                            .entityContextMenu(target: ImageTarget(kind: .track, artist: "Artist A", album: "Album Name", track: title), affordance: .corner(alwaysVisible: true))
+                    }
+                }
+                .padding(16)
+                .environment(LovedTracksStore())
+                .environment(FlaggedTracksStore())
+                .environment(PopularityStore())
+                .environment(LibraryGapBadgeStore())
+                .environment(TagStore())
+                .environment(TagWriteRunner())
+                .environment(PendingSyncEventsStore())
+                .modelContainer(container)
+                await render(picks, width: 460, scheme: scheme, name: "toppicks")
+            }
             exit(0)
         }
     }

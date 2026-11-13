@@ -16,6 +16,58 @@ struct EntityContextAction: Identifiable {
     let action: () -> Void
 }
 
+/// A visible way into the menu, besides right-click. Every style shows the same items as right-click does, from one definition.
+enum EntityMenuAffordance {
+    /// Right-click only (what every screen had before).
+    case none
+    /// A small "…" badge in the top-right corner of what the menu belongs to: the same corner on every screen, so it is always
+    /// where a person looks for it. Shown only while the pointer is over it (or it has keyboard focus), or always; VoiceOver can always
+    /// reach it. `inset` is how far it sits in from the corner (more where the artwork is itself inset in a padded card).
+    case corner(alwaysVisible: Bool = false, inset: CGFloat = 6)
+    /// The view itself becomes a button that opens the menu (for a toolbar-style "…" beside other buttons).
+    case menuButton
+
+    /// Whether a corner badge should be showing: the pointer is over what it belongs to, or over the badge itself (which, once it is
+    /// there, takes the pointer's tracking away from what is under it, so the two must count as one), or it has keyboard focus.
+    static func isRevealed(pointerOverContent: Bool, pointerOverBadge: Bool, hasFocus: Bool) -> Bool {
+        pointerOverContent || pointerOverBadge || hasFocus
+    }
+
+    /// Whether the badge is drawn right now: always, or while revealed.
+    static func badgeIsVisible(alwaysVisible: Bool, revealed: Bool) -> Bool {
+        alwaysVisible || revealed
+    }
+
+    /// How long after the pointer leaves both the tile and the badge it stays, so the hand-over between the two (during which neither
+    /// reports the pointer for an instant) never makes it blink.
+    static let hideDelay: Duration = .milliseconds(160)
+}
+
+/// Set by a tile whose artwork is only part of it (artwork beside text), so the "…" badge goes in the top-right corner of the artwork and
+/// not of the whole tile. A tile that is all artwork says nothing and the badge goes in its own top-right corner.
+struct EntityMenuArtworkWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat? { nil }
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
+}
+
+extension View {
+    /// Tells the "…" badge of the menu around this view how wide the artwork at its left edge is.
+    func entityMenuArtworkWidth(_ width: CGFloat) -> some View {
+        preference(key: EntityMenuArtworkWidthKey.self, value: width)
+    }
+}
+
+enum EntityMenuBadgeGeometry {
+    static let size: CGFloat = 22
+
+    /// How far the badge sits in from the left edge of the tile: against the tile's right edge, or (for a tile whose artwork is
+    /// `artworkWidth` wide at its left) against the artwork's right edge. Always `inset` from the top and from the edge.
+    static func leadingOffset(tileWidth: CGFloat, artworkWidth: CGFloat?, inset: CGFloat) -> CGFloat {
+        let edge = min(artworkWidth ?? tileWidth, tileWidth)
+        return max(0, edge - size - inset)
+    }
+}
+
 struct EntityContextMenuModifier: ViewModifier {
     let target: ImageTarget
     let currentImageURL: String?
@@ -23,6 +75,7 @@ struct EntityContextMenuModifier: ViewModifier {
     let onOpen: (() -> Void)?
     let onImageRefreshed: ((String) -> Void)?
     var extraActions: [EntityContextAction] = []
+    var affordance: EntityMenuAffordance = .none
 
     @Environment(\.modelContext) private var modelContext
     @State private var hasCustomImage = false
@@ -31,27 +84,109 @@ struct EntityContextMenuModifier: ViewModifier {
     @State private var isResyncing = false
     @State private var isRefreshingImage = false
     @State private var imageRefreshMessage: String?
+    @State private var isPointerOver = false
+    @State private var artworkWidth: CGFloat?
+    @State private var tileWidth: CGFloat = 0
+    @State private var isPointerOverBadge = false
+    @State private var isRevealed = false
+    @State private var hideTask: Task<Void, Never>?
+    @FocusState private var badgeHasFocus: Bool
+
+    /// The items, built once for right-click and for the "…" badge or button, so the two can never differ.
+    private var menuItems: some View {
+        EntityContextMenuItems(
+            target: target,
+            currentImageURL: currentImageURL,
+            onFixAlbumMatch: onFixAlbumMatch,
+            onOpen: onOpen,
+            onImageRefreshed: onImageRefreshed,
+            extraActions: extraActions,
+            hasCustomImage: $hasCustomImage,
+            errorMessage: $errorMessage,
+            resyncMessage: $resyncMessage,
+            isResyncing: $isResyncing,
+            imageRefreshMessage: $imageRefreshMessage,
+            isRefreshingImage: $isRefreshingImage
+        )
+        .onAppear(perform: refreshState)
+    }
+
+    /// The "…" itself: it opens the same menu as right-click.
+    private func badge(visible: Bool) -> some View {
+        Menu { menuItems } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: EntityMenuBadgeGeometry.size, height: EntityMenuBadgeGeometry.size)
+                .background(.black.opacity(0.62), in: Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .focused($badgeHasFocus)
+        .onHover { isPointerOverBadge = $0 }
+        .opacity(visible ? 1 : 0)
+        .animation(.easeOut(duration: 0.12), value: visible)
+        .accessibilityLabel("Actions for \(subject)")
+        .help("Actions")
+    }
+
+    /// Shows the badge at once when the pointer (or focus) arrives, and hides it a moment after both have gone. It is never made
+    /// untouchable while hidden: it sits where the pointer already is when it appears, and switching it off and on under the pointer made it flicker.
+    private func updateReveal() {
+        if EntityMenuAffordance.isRevealed(pointerOverContent: isPointerOver, pointerOverBadge: isPointerOverBadge, hasFocus: badgeHasFocus) {
+            hideTask?.cancel()
+            hideTask = nil
+            isRevealed = true
+        } else if isRevealed, hideTask == nil {
+            hideTask = Task { @MainActor in
+                try? await Task.sleep(for: EntityMenuAffordance.hideDelay)
+                guard !Task.isCancelled else { return }
+                isRevealed = false
+                hideTask = nil
+            }
+        }
+    }
+
+    /// What the menu belongs to, for VoiceOver: "Actions for <track, album or artist>".
+    private var subject: String { target.track ?? target.album ?? target.artist }
+
+    @ViewBuilder
+    private func presented(_ content: Content) -> some View {
+        switch affordance {
+        case .none:
+            content
+                .contextMenu { menuItems }
+                .onDrop(of: [.image], isTargeted: nil, perform: receiveDrop)
+        case .corner(let alwaysVisible, let inset):
+            let visible = EntityMenuAffordance.badgeIsVisible(alwaysVisible: alwaysVisible, revealed: isRevealed)
+            content
+                .contextMenu { menuItems }
+                .onDrop(of: [.image], isTargeted: nil, perform: receiveDrop)
+                .onHover { isPointerOver = $0 }
+                .onChange(of: isPointerOver) { updateReveal() }
+                .onChange(of: isPointerOverBadge) { updateReveal() }
+                .onChange(of: badgeHasFocus) { updateReveal() }
+                .onPreferenceChange(EntityMenuArtworkWidthKey.self) { artworkWidth = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
+                .overlay(alignment: .topLeading) {
+                    badge(visible: visible)
+                        .padding(.top, inset)
+                        .padding(.leading, EntityMenuBadgeGeometry.leadingOffset(tileWidth: tileWidth, artworkWidth: artworkWidth, inset: inset))
+                }
+        case .menuButton:
+            Menu { menuItems } label: { content }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel("Actions for \(subject)")
+                .help("Actions")
+        }
+    }
 
     func body(content: Content) -> some View {
-        content
-            .contextMenu {
-                EntityContextMenuItems(
-                    target: target,
-                    currentImageURL: currentImageURL,
-                    onFixAlbumMatch: onFixAlbumMatch,
-                    onOpen: onOpen,
-                    onImageRefreshed: onImageRefreshed,
-                    extraActions: extraActions,
-                    hasCustomImage: $hasCustomImage,
-                    errorMessage: $errorMessage,
-                    resyncMessage: $resyncMessage,
-                    isResyncing: $isResyncing,
-                    imageRefreshMessage: $imageRefreshMessage,
-                    isRefreshingImage: $isRefreshingImage
-                )
-                .onAppear(perform: refreshState)
-            }
-            .onDrop(of: [.image], isTargeted: nil, perform: receiveDrop)
+        presented(content)
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -459,7 +594,8 @@ extension View {
         onFixAlbumMatch: (() -> Void)? = nil,
         onOpen: (() -> Void)? = nil,
         onImageRefreshed: ((String) -> Void)? = nil,
-        extraActions: [EntityContextAction] = []
+        extraActions: [EntityContextAction] = [],
+        affordance: EntityMenuAffordance = .none
     ) -> some View {
         modifier(EntityContextMenuModifier(
             target: target,
@@ -467,7 +603,8 @@ extension View {
             onFixAlbumMatch: onFixAlbumMatch,
             onOpen: onOpen,
             onImageRefreshed: onImageRefreshed,
-            extraActions: extraActions
+            extraActions: extraActions,
+            affordance: affordance
         ))
     }
 }

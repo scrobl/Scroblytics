@@ -303,11 +303,11 @@ struct EntitySubListView: View {
         case .album:
             NavigationLink(value: AlbumIdentity(from: entry)) { gridContent(entry) }
                 .drillDownHighlight()
-                .entityContextMenu(target: imageTarget(for: entry), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: imageTarget(for: entry), currentImageURL: entry.imageURL, affordance: .corner(inset: 16))
         case .track:
             NavigationLink(value: TrackIdentity(from: entry)) { gridContent(entry) }
                 .drillDownHighlight()
-                .entityContextMenu(target: imageTarget(for: entry), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: imageTarget(for: entry), currentImageURL: entry.imageURL, affordance: .corner(inset: 16))
         case .artist:
             gridContent(entry)
         }

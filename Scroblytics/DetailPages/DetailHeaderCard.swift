@@ -45,10 +45,13 @@ struct DetailHeaderCard<Tags: View>: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topTrailing) {
-            if sharePeriodLabel != nil {
-                ShareButton(card: { makeShareCard() }, isEnabled: stats != nil)
-                    .padding(14)
+            HStack(spacing: 8) {
+                if sharePeriodLabel != nil {
+                    ShareButton(card: { makeShareCard() }, isEnabled: stats != nil)
+                }
+                actionsButton
             }
+            .padding(14)
         }
         .background {
             ColorWashView(imageURLs: [effectiveImageURL ?? imageURL].compactMap { $0 }, strength: 0.78)
@@ -121,8 +124,8 @@ struct DetailHeaderCard<Tags: View>: View {
                     TrackLibraryGapBadge(artist: subtitle ?? "", track: name, font: AppTypography.entitySubtitle)
                 }
             }
-            // Room for the Share button in the card's corner, so a long title never runs under it.
-            .padding(.trailing, sharePeriodLabel != nil ? Self.shareButtonReserve : 0)
+            // Room for the Share and Actions buttons in the card's corner, so a long title never runs under them.
+            .padding(.trailing, Self.cornerButtonsReserve(sharing: sharePeriodLabel != nil))
             if let subtitle {
                 Text(subtitle).font(AppTypography.entitySubtitle).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -192,8 +195,26 @@ struct DetailHeaderCard<Tags: View>: View {
             onImageRefreshed: { refreshedURL in
                 effectiveImageURL = refreshedURL
                 artworkRefreshID = UUID()
-            }
+            },
+            affordance: .corner()
         )
+    }
+
+    /// "…" beside Share: the same menu as right-clicking the artwork, for anyone who doesn't know that menu is there.
+    private var actionsButton: some View {
+        Image(systemName: "ellipsis")
+            .font(.system(size: 13, weight: .semibold))
+            .frame(width: 22, height: 17)
+            .entityContextMenu(
+                target: imageTarget,
+                currentImageURL: effectiveImageURL ?? imageURL,
+                onFixAlbumMatch: onFixAlbumMatch,
+                onImageRefreshed: { refreshedURL in
+                    effectiveImageURL = refreshedURL
+                    artworkRefreshID = UUID()
+                },
+                affordance: .menuButton
+            )
     }
 
     private var artworkThumbnail: some View {
@@ -211,8 +232,8 @@ struct DetailHeaderCard<Tags: View>: View {
     }
 
     static var artworkSize: CGFloat { 128 }
-    /// How much of the title row the corner Share button takes.
-    static var shareButtonReserve: CGFloat { 96 }
+    /// How much of the title row the corner buttons take: Share (when the page has one) and the Actions button.
+    static func cornerButtonsReserve(sharing: Bool) -> CGFloat { (sharing ? 96 + 8 : 0) + 40 }
 
     private var canShowLargerArtwork: Bool { (effectiveImageURL ?? imageURL) != nil }
 

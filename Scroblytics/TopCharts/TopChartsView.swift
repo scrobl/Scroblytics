@@ -274,7 +274,7 @@ struct TopChartsView: View {
                     spacing: AppArtworkSizing.tileSpacing
                 ) {
                     ForEach(entries) { entry in
-                        drillLink(for: entry) {
+                        drillLink(for: entry, affordance: .corner()) {
                             TopChartGridCell(entity: entity, entry: entry, metric: displayedMetric)
                         }
                         .drillDownHighlight()
@@ -320,17 +320,17 @@ struct TopChartsView: View {
     /// Dispatches to the right identity type for `.navigationDestination(for:)`
     /// to match on, based on which entity tab is currently selected.
     @ViewBuilder
-    private func drillLink<Content: View>(for entry: TopChartEntry, @ViewBuilder content: () -> Content) -> some View {
+    private func drillLink<Content: View>(for entry: TopChartEntry, affordance: EntityMenuAffordance = .none, @ViewBuilder content: () -> Content) -> some View {
         switch entity {
         case .artist:
             NavigationLink(value: ArtistIdentity(from: entry)) { content() }
-                .entityContextMenu(target: ImageTarget(kind: .artist, artist: entry.name, album: nil, track: nil), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: ImageTarget(kind: .artist, artist: entry.name, album: nil, track: nil), currentImageURL: entry.imageURL, affordance: affordance)
         case .album:
             NavigationLink(value: AlbumIdentity(from: entry)) { content() }
-                .entityContextMenu(target: ImageTarget(kind: .album, artist: entry.artist ?? "", album: entry.name, track: nil), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: ImageTarget(kind: .album, artist: entry.artist ?? "", album: entry.name, track: nil), currentImageURL: entry.imageURL, affordance: affordance)
         case .track:
             NavigationLink(value: TrackIdentity(from: entry)) { content() }
-                .entityContextMenu(target: ImageTarget(kind: .track, artist: entry.artist ?? "", album: entry.album, track: entry.name), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: ImageTarget(kind: .track, artist: entry.artist ?? "", album: entry.album, track: entry.name), currentImageURL: entry.imageURL, affordance: affordance)
         }
     }
 
@@ -642,7 +642,7 @@ struct RankChangeBadge: View {
     }
 }
 
-private struct TopChartGridCell: View {
+struct TopChartGridCell: View {
     let entity: TopChartsEntity
     let entry: TopChartEntry
     let metric: TopChartsMetric

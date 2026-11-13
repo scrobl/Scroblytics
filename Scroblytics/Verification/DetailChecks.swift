@@ -50,6 +50,28 @@ enum DetailChecks {
 
             check("the countdown to the next milestone is labelled", DetailHeaderCard<EmptyView>.nextMilestoneText(remaining: 186, next: 500) == "Next milestone: 186 to 500")
 
+            // The "…" badge and button that open the right-click menu.
+            check("a corner badge is revealed by the pointer over the tile, by the pointer over the badge itself, or by keyboard focus, and by nothing else",
+                  EntityMenuAffordance.isRevealed(pointerOverContent: true, pointerOverBadge: false, hasFocus: false)
+                  && EntityMenuAffordance.isRevealed(pointerOverContent: false, pointerOverBadge: true, hasFocus: false)
+                  && EntityMenuAffordance.isRevealed(pointerOverContent: false, pointerOverBadge: false, hasFocus: true)
+                  && !EntityMenuAffordance.isRevealed(pointerOverContent: false, pointerOverBadge: false, hasFocus: false))
+            check("…so moving from the tile onto the badge (the tile stops reporting the pointer) keeps it revealed",
+                  EntityMenuAffordance.isRevealed(pointerOverContent: false, pointerOverBadge: true, hasFocus: false))
+            check("a badge is drawn when it is always shown or revealed, and hidden otherwise",
+                  EntityMenuAffordance.badgeIsVisible(alwaysVisible: true, revealed: false) && EntityMenuAffordance.badgeIsVisible(alwaysVisible: false, revealed: true)
+                  && !EntityMenuAffordance.badgeIsVisible(alwaysVisible: false, revealed: false))
+            check("the badge sits against the right edge of an all-artwork tile, inset from the top and the edge (tile 150 wide, inset 6: 122 from the left)",
+                  EntityMenuBadgeGeometry.leadingOffset(tileWidth: 150, artworkWidth: nil, inset: 6) == 122)
+            check("…and against the right edge of the artwork on a tile where the artwork is only its left part (artwork 100 wide in a 400 wide tile: 72 from the left)",
+                  EntityMenuBadgeGeometry.leadingOffset(tileWidth: 400, artworkWidth: 100, inset: 6) == 72)
+            check("…never past the tile, and never before its left edge, whatever width is reported",
+                  EntityMenuBadgeGeometry.leadingOffset(tileWidth: 80, artworkWidth: 300, inset: 6) == 52 && EntityMenuBadgeGeometry.leadingOffset(tileWidth: 20, artworkWidth: nil, inset: 6) == 0)
+            check("the hide delay is short but longer than one frame", EntityMenuAffordance.hideDelay > .milliseconds(50) && EntityMenuAffordance.hideDelay < .milliseconds(500))
+            check("the header leaves room under the title for the Actions button alone, or for it and Share, so a long title never runs under them",
+                  DetailHeaderCard<EmptyView>.cornerButtonsReserve(sharing: false) == 40 && DetailHeaderCard<EmptyView>.cornerButtonsReserve(sharing: true) == 144
+                  && DetailHeaderCard<EmptyView>.cornerButtonsReserve(sharing: true) > DetailHeaderCard<EmptyView>.cornerButtonsReserve(sharing: false))
+
             // MARK: The track page's own facts
             let model = TrackDetailModel()
             var edits = 0

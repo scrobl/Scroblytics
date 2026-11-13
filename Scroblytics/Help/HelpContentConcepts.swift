@@ -26,7 +26,7 @@ extension HelpContent {
                 .callout(.note, "Because of these differences an album’s play count can differ between screens, most often for compilations, collaborations and editions. Wherever editions are counted together (Collage, Chart Toppers, album turnover) the same two rules apply: an edition you chose to count on its own stays a separate album, and a combined album is shown under its plain name. Scrobbles with no album are skipped wherever albums are counted. Artist totals don’t have this problem: every screen combines an artist’s spellings (below)."),
                 .heading("Tracks"),
                 .paragraph("A track is an artist plus a title. Loved, flagged and duration data are matched by artist and title **regardless of album**, so every album’s copy of a song shares them. Where the app compares tracks against your Apple Music library or tracklists, edition brackets, “feat.” credits and endings such as “– Remastered” are ignored."),
-                .callout(.tip, "If a play counts under the wrong album, use **Fix album match…** (right-click the album art) or correct it on Last.fm and run a [Resync](help://sync-types)."),
+                .callout(.tip, "If a play counts under the wrong album, use **Fix album match…** (right-click the album art, or use its **…** button) or correct it on Last.fm and run a [Resync](help://sync-types)."),
             ]
         ),
         HelpArticle(

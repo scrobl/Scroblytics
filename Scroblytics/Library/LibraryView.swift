@@ -209,7 +209,7 @@ struct LibraryView: View {
                                     ForEach(sections) { section in
                                         Section {
                                             ForEach(section.entries) { entry in
-                                                drillLink(for: entry) {
+                                                drillLink(for: entry, affordance: .corner()) {
                                                     LibraryGridCell(entity: tab.chartsEntity, entry: entry)
                                                 }
                                                 .drillDownHighlight()
@@ -292,14 +292,14 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func drillLink<Content: View>(for entry: TopChartEntry, @ViewBuilder content: () -> Content) -> some View {
+    private func drillLink<Content: View>(for entry: TopChartEntry, affordance: EntityMenuAffordance = .none, @ViewBuilder content: () -> Content) -> some View {
         switch tab {
         case .artist:
             NavigationLink(value: ArtistIdentity(from: entry)) { content() }
-                .entityContextMenu(target: ImageTarget(kind: .artist, artist: entry.name, album: nil, track: nil), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: ImageTarget(kind: .artist, artist: entry.name, album: nil, track: nil), currentImageURL: entry.imageURL, affordance: affordance)
         case .album:
             NavigationLink(value: AlbumIdentity(from: entry)) { content() }
-                .entityContextMenu(target: ImageTarget(kind: .album, artist: entry.artist ?? "", album: entry.name, track: nil), currentImageURL: entry.imageURL)
+                .entityContextMenu(target: ImageTarget(kind: .album, artist: entry.artist ?? "", album: entry.name, track: nil), currentImageURL: entry.imageURL, affordance: affordance)
         }
     }
 

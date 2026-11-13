@@ -1528,7 +1528,8 @@ private struct TopPicksSection: View {
                         .drillDownHighlight()
                         .entityContextMenu(
                             target: ImageTarget(kind: .artist, artist: topArtist.name, album: nil, track: nil),
-                            currentImageURL: topArtist.imageURL
+                            currentImageURL: topArtist.imageURL,
+                            affordance: .corner()
                         )
                     }
                     if let topAlbum, let artist = topAlbum.artist {
@@ -1538,7 +1539,8 @@ private struct TopPicksSection: View {
                         .drillDownHighlight()
                         .entityContextMenu(
                             target: ImageTarget(kind: .album, artist: artist, album: topAlbum.name, track: nil),
-                            currentImageURL: topAlbum.imageURL
+                            currentImageURL: topAlbum.imageURL,
+                            affordance: .corner()
                         )
                     }
                     if let topTrack, let artist = topTrack.artist {
@@ -1548,7 +1550,8 @@ private struct TopPicksSection: View {
                         .drillDownHighlight()
                         .entityContextMenu(
                             target: ImageTarget(kind: .track, artist: artist, album: topTrack.album, track: topTrack.name),
-                            currentImageURL: topTrack.imageURL
+                            currentImageURL: topTrack.imageURL,
+                            affordance: .corner()
                         )
                     }
                 }
@@ -1567,7 +1570,7 @@ private struct TileHeightKey: PreferenceKey {
     }
 }
 
-private struct TopPickTile: View {
+struct TopPickTile: View {
     let role: String
     let entry: OverviewTopEntry
     let trend: [TrendBucket]
@@ -1624,6 +1627,7 @@ private struct TopPickTile: View {
             )
         }
         .onPreferenceChange(TileHeightKey.self) { contentHeight = $0 }
+        .entityMenuArtworkWidth(contentHeight)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.quaternary.opacity(0.3))
     }

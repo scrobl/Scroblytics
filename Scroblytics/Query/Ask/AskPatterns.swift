@@ -266,6 +266,7 @@ enum AskPatterns {
         applyBreakdown(to: &spec, request: request)
         applyYearOrder(to: &spec, request: request)
         applyRecentlyAdded(to: &spec, request: request)
+        AskInterpreter.keepHistoryWhole(&spec, registry: registry)
         spec.columns = AskInterpreter.columns(for: spec, target: target, registry: registry)
         result.spec = spec
         return result

@@ -18,6 +18,7 @@ enum QueryCapChecks {
         engineChecks(check)
         modelChecks(check)
         askChecks(check)
+        historyScopeChecks(check)
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)
     }
@@ -957,6 +958,98 @@ enum QueryCapChecks {
         chipSpec.groupLimit = QueryGroupLimit(perArtist: 2, perAlbum: 1, perReleaseYear: 3)
         let chipTexts = AskChips.describe(chipSpec, registry: .standard).map(\.text)
         check("the chips say each cap", chipTexts.contains("≤2 per artist") && chipTexts.contains("≤1 per album") && chipTexts.contains("≤3 per release year"), "\(chipTexts)")
+    }
+
+
+    // MARK: - "Hasn't been played since" under a day or time filter
+
+    /// "Songs I play on Saturday mornings that I haven't played since April" is about each song's last play on any day. Made-up plays
+    /// through the real interpreter and engine, against a hand count, and the date shown beside them.
+    private static func historyScopeChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let calendar = AppCalendars.listening
+        func at(_ y: Int, _ m: Int, _ d: Int, _ hour: Int) -> Date { calendar.date(from: DateComponents(year: y, month: m, day: d, hour: hour, minute: 13))! }
+        // Saturdays: 2025-10-18, 2025-10-25, 2026-02-14, 2026-10-17. Tuesdays: 2026-10-20, 2025-10-21.
+        func play(_ track: String, _ date: Date) -> ScrobbleSnapshot {
+            ScrobbleSnapshot(artistName: "Artist A", albumName: "A One", trackName: track, imageURL: nil, playedAt: date)
+        }
+        let all = [
+            play("quiet", at(2025, 10, 18, 9)), play("quiet", at(2026, 2, 14, 10)),
+            play("alive", at(2025, 10, 25, 10)), play("alive", at(2026, 10, 20, 20)),   // a Tuesday evening since April
+            play("recent", at(2026, 10, 17, 10)),
+            play("evening", at(2025, 10, 18, 20)), play("evening", at(2025, 10, 21, 9)),
+        ].sorted { $0.playedAt < $1.playedAt }
+        let now = at(2026, 11, 14, 12)
+
+        let lastPlayedBefore = #"[{"field":"lastPlayed","op":"before","value":null,"valueTo":null,"text":null,"date":"2026-04-29","dateTo":null,"tags":[],"parameters":[],"scope":null,"comparedAgo":null}]"#
+        func saturdayMornings(_ wire: String) -> String {
+            "\"playWeekdays\":[\"Saturday\"],\"playMonths\":[],\"playFromHour\":5,\"playToHour\":11,\"playWeather\":[],\"playTemperature\":[],\"playCity\":[],\"playRegion\":[],\"playCountry\":[],\(wire)"
+        }
+        let request = "show me the top 10 songs played on saturday mornings that hasn't been played since april 29th 2026"
+        let translated = try? AskModelEngine.read(reply(conditions: lastPlayedBefore, sorts: playsDescending, limit: "10", caps: saturdayMornings("")), request: request, registry: .standard, context: .none, now: now, engine: "test", seconds: 0)
+        guard var spec = translated?.interpretation.spec else { check("the request is read", false); return }
+
+        func names(_ spec: QuerySpec) -> [String] {
+            guard let validated = try? spec.validate(against: .standard) else { return ["invalid"] }
+            let run = QueryRun(target: .track, asOf: now, scrobbles: spec.countedPlays(all), allTimeScrobbles: all, snapshots: QuerySnapshots())
+            return QueryEngine.evaluate(validated, run: run).rows.map(\.entity.name).sorted()
+        }
+        let condition = spec.groups.first?.first { $0.field.id == "lastPlayed" }
+        check("under a Saturday-morning filter, “not played since” looks at all time", condition?.field.scope == .allTime && spec.playFilter?.weekdays == [6], "\(String(describing: condition?.field.scope))")
+        check("the Last played column shows the same all-time date as the condition", spec.columns.first { $0.id == "lastPlayed" }?.scope == .allTime, "\(spec.columns)")
+        check("there is one Last played column, not that one plus a second that counts only Saturday mornings", spec.columns.filter { $0.id == "lastPlayed" }.count == 1 && spec.columns.map(\.id) == ["plays", "lastPlayed"], "\(spec.columns.map(\.id)) \(spec.columns.map { String(describing: $0.scope) })")
+        check("a request with no history condition still ends with Plays and Last played", AskInterpreter.columns(for: QuerySpec(target: .track), target: .track, registry: .standard).map(\.id) == ["plays", "lastPlayed"])
+        check("only a song with no play of any kind since 29 April comes back (hand count: quiet)", names(spec) == ["quiet"], "\(names(spec))")
+        var asBefore = spec
+        asBefore.groups = asBefore.groups.map { $0.map { var c = $0; c.field.scope = nil; return c } }
+        check("without the all-time scope a song played last Tuesday would have come back (the old answer)", names(asBefore) == ["alive", "quiet"], "\(names(asBefore))")
+        check("the plays counted are still the Saturday-morning ones", {
+            guard let validated = try? spec.validate(against: .standard) else { return false }
+            let run = QueryRun(target: .track, asOf: now, scrobbles: spec.countedPlays(all), allTimeScrobbles: all, snapshots: QuerySnapshots())
+            let result = QueryEngine.evaluate(validated, run: run)
+            let key = result.columns.first { $0.field.id == "plays" }?.cacheKey ?? ""
+            return result.rows.first { $0.entity.name == "quiet" }.map { $0.cells[key] } == .value(.number(2))
+        }())
+
+        // With no day or time filter there is nothing to widen: the condition keeps the query's own period.
+        let plain = try? AskModelEngine.read(reply(conditions: lastPlayedBefore, sorts: playsDescending, limit: "10"), request: "songs I haven't played since april 29th 2026", registry: .standard, context: .none, now: now, engine: "test", seconds: 0)
+        check("without a play filter the condition keeps no scope of its own", plain?.interpretation.spec.groups.first?.first?.field.scope == nil)
+        // A scope the request named is left alone, and fields about counts are never touched.
+        var named = QuerySpec(target: .track)
+        named.playFilter = QueryPlayFilter(weekdays: [6], fromHour: nil, toHour: nil)
+        var trailing = QueryScope(kind: .trailing)
+        trailing.days = 365
+        var ref = QueryFieldRef("lastPlayed")
+        ref.scope = trailing
+        named.groups = [[QueryCondition(ref, .before, [.date(at(2026, 4, 29, 0))]), QueryCondition("plays", .greaterThan, [.number(3)]), QueryCondition("firstPlayed", .after, [.date(at(2025, 1, 1, 0))])]]
+        AskInterpreter.keepHistoryWhole(&named, registry: .standard)
+        check("a scope the request named is kept, “plays” is not widened, and first played is", named.groups[0][0].field.scope == trailing && named.groups[0][1].field.scope == nil && named.groups[0][2].field.scope == .allTime)
+        var days = QuerySpec(target: .track)
+        days.playFilter = QueryPlayFilter(weekdays: [6], fromHour: nil, toHour: nil)
+        days.groups = [[QueryCondition("daysSinceLastPlayed", .greaterThan, [.number(180)])]]
+        AskInterpreter.keepHistoryWhole(&days, registry: .standard)
+        check("“days since last played” is read over all time too", days.groups[0][0].field.scope == .allTime)
+
+        // The on-device reading adds the gap condition itself, and gets the same scope.
+        let gapRequest = "songs I play on saturday mornings that I haven't played in 6 months"
+        let hints = AskPatterns.read(gapRequest, knownTags: nil)
+        var base = QuerySpec(target: .track)
+        base.playFilter = QueryPlayFilter(weekdays: [6], fromHour: 5, toHour: 11)
+        let applied = AskPatterns.apply(hints, to: AskInterpretation(spec: base, dropped: [], unsupported: []), target: .track, registry: .standard, request: gapRequest)
+        let gap = applied.spec.groups.flatMap { $0 }.first { $0.field.id == "daysSinceLastPlayed" }
+        check("the on-device path puts its “haven't played in 6 months” gap on all time under a play filter", hints.gapDays != nil && gap?.field.scope == .allTime, "\(String(describing: hints.gapDays)) \(String(describing: gap))")
+
+        // A date shown without its year can't be told from this year, so the Query table always says which.
+        func text(_ date: Date) -> String { AppDateFormatting.recentPlayText(date, now: now, calendar: calendar) }
+        check("Overview's recent plays leave the year off for this year", text(at(2026, 10, 17, 10)) == "Oct 17 10:13 AM", text(at(2026, 10, 17, 10)))
+        check("…and say it for another year", text(at(2025, 10, 25, 10)) == "Oct 25, 2025 10:13 AM", text(at(2025, 10, 25, 10)))
+        check("the year is whatever year the date was in, at its own edge", text(at(2025, 12, 31, 23)).contains("2025") && !text(at(2026, 1, 1, 0)).contains("2026"))
+        check("a play time with its year always has it", AppDateFormatting.playDateTimeText(at(2026, 4, 26, 16)) == "Apr 26, 2026 4:13 PM" && AppDateFormatting.playDateTimeText(at(2025, 10, 25, 10)) == "Oct 25, 2025 10:13 AM", AppDateFormatting.playDateTimeText(at(2026, 4, 26, 16)))
+        let lastPlayedDate = at(2025, 10, 25, 10)
+        let thisYearDate = at(2026, 4, 26, 16)
+        let cellDate = MainActor.assumeIsolated { QueryCellText.date(lastPlayedDate, fieldID: "lastPlayed") }
+        let cellThisYear = MainActor.assumeIsolated { QueryCellText.date(thisYearDate, fieldID: "lastPlayed") }
+        check("the query table writes Last played with its year, for this year too", cellDate.contains("2025") && cellThisYear.contains("2026"), "\(cellDate) / \(cellThisYear)")
     }
 }
 #endif

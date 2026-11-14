@@ -2308,7 +2308,7 @@ private struct RecentScrobbleRow: View {
     }
 
     private var playedText: some View {
-        Text(AppDateFormatting.recentPlay.string(from: entry.playedAt))
+        Text(AppDateFormatting.recentPlayText(entry.playedAt))
             .font(AppTypography.metadata)
             .foregroundStyle(.tertiary)
             .lineLimit(1)

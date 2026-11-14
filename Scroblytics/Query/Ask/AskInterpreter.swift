@@ -103,9 +103,31 @@ enum AskInterpreter {
 
         spec.groupLimit = groupLimit(perArtist: query.perArtist, perAlbum: query.perAlbum, perReleaseYear: query.perReleaseYear, target: target, dropped: &dropped)
 
+        keepHistoryWhole(&spec, registry: registry)
         spec.columns = columns(for: spec, target: target, registry: registry)
         let unsupported = (query.unsupported ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.contains { $0.isLetter || $0.isNumber } }
         return AskInterpretation(spec: spec, dropped: dropped, unsupported: unsupported)
+    }
+
+    /// The fields that describe a song's whole listening history: when it was last or first played, and how long ago.
+    static let historyFieldIDs: Set<String> = ["lastPlayed", "firstPlayed", "daysSinceLastPlayed", "daysSinceFirstPlayed"]
+
+    /// "Saturday-morning songs I haven't played since April" is about the song's last play on any day, not its last
+    /// Saturday-morning play. With no scope of its own, a condition on one of those fields reads only the plays the query
+    /// counts, and a day or time filter narrows those, so a song played last week on a Tuesday would still count as unplayed
+    /// since April. Under such a filter these conditions look at all time instead, and the columns follow, since they are
+    /// read from the conditions. A scope the request named is left as it is.
+    static func keepHistoryWhole(_ spec: inout QuerySpec, registry: QueryFieldRegistry) {
+        guard let filter = spec.playFilter, !filter.isEmpty else { return }
+        spec.groups = spec.groups.map { group in
+            group.map { condition in
+                guard historyFieldIDs.contains(condition.field.id), condition.field.scope == nil,
+                      (try? registry.field(condition.field.id))?.supportsScope == true else { return condition }
+                var whole = condition
+                whole.field.scope = .allTime
+                return whole
+            }
+        }
     }
 
     /// The plays to count, as the model named them, kept only where the app would accept them: day names become weekday numbers, months
@@ -424,7 +446,10 @@ enum AskInterpreter {
         for group in spec.groups { for condition in group { add(condition.field) } }
         // A cap filters and sorts on nothing, but the result can't be read without the thing it groups by.
         if spec.groupLimit?.perReleaseYear != nil { add(QueryFieldRef("releaseYear")) }
-        for id in (target == .scrobble ? scrobbleBaseColumns : (target == .session ? sessionBaseColumns : baseColumns)) where refs.count < 3 { add(QueryFieldRef(id)) }
+        // The usual columns only fill what the request left open. A history date already shown, in any scope, is not added again:
+        // a second Last played that counts only the filtered plays would sit beside the all-time one and contradict it.
+        for id in (target == .scrobble ? scrobbleBaseColumns : (target == .session ? sessionBaseColumns : baseColumns))
+        where refs.count < 3 && !(historyFieldIDs.contains(id) && refs.contains(where: { $0.id == id })) { add(QueryFieldRef(id)) }
         return refs
     }
 }

@@ -57,6 +57,23 @@ enum AppDateFormatting {
         return formatter
     }()
 
+    private static let recentPlayWithYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        return formatter
+    }()
+
+    /// The day and time of a play. The year is left out for a play from this year, where "Oct 25" can only mean this
+    /// October, and shown for any other year, where leaving it out reads as a recent date.
+    /// The day and time of a play with its year always, for the Query table and the cards made from it, where plays from any
+    /// year sit in one column and a missing year can't be told from this year.
+    static func playDateTimeText(_ date: Date) -> String { recentPlayWithYear.string(from: date) }
+
+    static func recentPlayText(_ date: Date, now: Date = Date(), calendar: Calendar = AppCalendars.listening) -> String {
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+        return (sameYear ? recentPlay : recentPlayWithYear).string(from: date)
+    }
+
     static let releaseDate: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = AppCalendars.releaseDates

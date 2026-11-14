@@ -862,10 +862,16 @@ struct QueryView: View {
                                 get: { model.spec.columns[safe: index]?.scope },
                                 set: { new in
                                     guard model.spec.columns.indices.contains(index) else { return }
-                                    // Clearing the scope would silently turn it into a plain column — keep it scoped.
-                                    if let new { model.spec.columns[index].scope = new }
+                                    // A comparison needs its own scope; any other column can go back to the query's period.
+                                    guard new != nil || model.spec.columns[index].baseline == nil else { return }
+                                    model.spec.columns[index].scope = new
+                                    // Back on the query's period it is the plain column, which may already be there.
+                                    if new == nil, let this = try? model.registry.resolve(model.spec.columns[index], target: model.spec.target).cacheKey,
+                                       model.spec.columns.enumerated().contains(where: { $0.offset != index && (try? model.registry.resolve($0.element, target: model.spec.target).cacheKey) == this }) {
+                                        model.spec.columns.remove(at: index)
+                                    }
                                 }
-                            ), asOf: model.spec.asOf ?? Date(), compact: true)
+                            ), asOf: model.spec.asOf ?? Date(), compact: true, allowsQueryPeriod: ref.baseline == nil)
                         }
                         if ref.baseline != nil {
                             QueryScopeButton(scope: Binding(
@@ -874,7 +880,7 @@ struct QueryView: View {
                                     guard model.spec.columns.indices.contains(index) else { return }
                                     if let new { model.spec.columns[index].baseline = new }
                                 }
-                            ), asOf: model.spec.asOf ?? Date(), compact: true, symbol: "arrow.left.arrow.right")
+                            ), asOf: model.spec.asOf ?? Date(), compact: true, symbol: "arrow.left.arrow.right", allowsQueryPeriod: false)
                         }
                     }
                 }
@@ -1298,7 +1304,7 @@ struct QueryConditionRow: View {
                 if field.comparesPeriods {
                     HStack {
                         Text("Compared with").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
-                        QueryScopeButton(scope: Binding(get: { condition.field.baseline }, set: { if let new = $0 { condition.field.baseline = new } }), asOf: asOf, symbol: "arrow.left.arrow.right")
+                        QueryScopeButton(scope: Binding(get: { condition.field.baseline }, set: { if let new = $0 { condition.field.baseline = new } }), asOf: asOf, symbol: "arrow.left.arrow.right", allowsQueryPeriod: false)
                     }
                 }
                 if field.supportsScope {

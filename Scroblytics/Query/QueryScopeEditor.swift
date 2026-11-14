@@ -8,6 +8,8 @@ struct QueryScopeButton: View {
     var asOf: Date = Date()
     var compact = false
     var symbol = "calendar"
+    /// False where there is no query period to fall back on (a comparison's baseline), so the choice isn't offered.
+    var allowsQueryPeriod = true
 
     @State private var isEditing = false
 
@@ -31,7 +33,7 @@ struct QueryScopeButton: View {
         }
         .controlSize(.small)
         .popover(isPresented: $isEditing, arrowEdge: .bottom) {
-            QueryScopeEditor(scope: $scope, asOf: asOf).padding(14).frame(width: 300)
+            QueryScopeEditor(scope: $scope, asOf: asOf, allowsQueryPeriod: allowsQueryPeriod).padding(14).frame(width: 300)
         }
     }
 }
@@ -41,6 +43,7 @@ struct QueryScopeButton: View {
 struct QueryScopeEditor: View {
     @Binding var scope: QueryScope?
     let asOf: Date
+    var allowsQueryPeriod = true
 
     /// The base period choices, including "follow the query's period" (no scope at all).
     private enum Choice: String, CaseIterable, Identifiable {
@@ -87,7 +90,7 @@ struct QueryScopeEditor: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Date scope").font(AppTypography.sectionTitle)
             Menu("Presets") {
-                ForEach(Array(Self.presets.enumerated()), id: \.offset) { _, preset in
+                ForEach(Array(Self.presets.enumerated()).filter { allowsQueryPeriod || $0.element.1 != nil }, id: \.offset) { _, preset in
                     Button(preset.0) { scope = preset.1 }
                 }
             }
@@ -95,7 +98,7 @@ struct QueryScopeEditor: View {
             .help("Choose a commonly used date scope.")
 
             Picker("Period", selection: Binding(get: { choice }, set: choose)) {
-                ForEach(Choice.allCases) { Text($0.title).tag($0) }
+                ForEach(Choice.allCases.filter { allowsQueryPeriod || $0 != .queryPeriod }) { Text($0.title).tag($0) }
             }
             .help("Choose how this field’s date range is defined.")
 

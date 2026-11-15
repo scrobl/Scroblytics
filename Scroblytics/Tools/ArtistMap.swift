@@ -158,7 +158,11 @@ struct ArtistMapGraph: Sendable, Equatable {
     /// stays readable. The panel lists at most six closest links, so none of those is ever lost.
     static let linksPerArtist = 8
 
-    func filtered(minMatch: Double, showGhosts: Bool, linksPerArtist limit: Int? = ArtistMapGraph.linksPerArtist) -> ArtistMapGraph {
+    func filtered(
+        minMatch: Double, showGhosts: Bool, linksPerArtist limit: Int? = ArtistMapGraph.linksPerArtist, alwaysKeep pinned: String? = nil,
+        dropUnlinked: Bool = false
+    ) -> ArtistMapGraph {
+        let pinnedIndex = pinned.flatMap { index(ofKey: $0) }
         var keep = edges.filter { $0.weight >= minMatch - 1e-9 }
         if let limit {
             var strongest = [[Int]](repeating: [], count: nodes.count)
@@ -170,14 +174,26 @@ struct ArtistMapGraph: Sendable, Equatable {
             for list in strongest {
                 for i in list.sorted(by: { keep[$0].weight != keep[$1].weight ? keep[$0].weight > keep[$1].weight : $0 < $1 }).prefix(limit) { retained.insert(i) }
             }
-            keep = keep.enumerated().filter { retained.contains($0.offset) || nodes[$0.element.a].isGhost || nodes[$0.element.b].isGhost }.map(\.element)
+            // Every link of the pinned artist (a map's seed) stays, however many it has.
+            keep = keep.enumerated().filter {
+                retained.contains($0.offset) || nodes[$0.element.a].isGhost || nodes[$0.element.b].isGhost
+                    || $0.element.a == pinnedIndex || $0.element.b == pinnedIndex
+            }.map(\.element)
         }
         var linkedGhosts = Set<Int>()
         for edge in keep where nodes[edge.b].isGhost { linkedGhosts.insert(edge.b) }
+        // Artists with a line to something on screen. A map drawn from a seed passes `dropUnlinked`: everything on it is there because it is
+        // linked to the seed or to a neighbor, so one whose links all fall below the minimum match is left off rather than shown alone.
+        var linked = Set<Int>()
+        for edge in keep where showGhosts || !nodes[edge.b].isGhost {
+            linked.insert(edge.a)
+            linked.insert(edge.b)
+        }
         var remap: [Int: Int] = [:]
         var out = ArtistMapGraph()
         for (i, node) in nodes.enumerated() {
             if node.isGhost, !(showGhosts && linkedGhosts.contains(i)) { continue }
+            if dropUnlinked, !node.isGhost, !linked.contains(i), i != pinnedIndex { continue }
             remap[i] = out.nodes.count
             out.nodes.append(node)
         }
@@ -187,6 +203,67 @@ struct ArtistMapGraph: Sendable, Equatable {
             }
         }
         return out
+    }
+}
+
+// MARK: - Seed scope
+
+/// Which artists a map drawn from one seed contains: the seed, the artists in your library that Last.fm lists as most similar to it, and
+/// (two steps out) the ones those list in turn. Pure; the answers come from `ArtistMapLoader`.
+enum ArtistMapSeedScope {
+    /// The most similar artists of your own shown around the seed, and the weakest match counted.
+    static let ringCap = 24
+    static let ringFloor = 0.15
+    /// Two steps out: at most this many of each neighbor's own closest, at or above the floor, and this many in all.
+    static let outerPerArtist = 3
+    static let outerFloor = 0.3
+    static let outerCap = 20
+
+    struct Result: Equatable {
+        /// The seed first, then its neighbors, then (two steps) theirs.
+        var scope: [ArtistMapEntry]
+        /// The artists whose answer is still needed (or out of date): the seed, then its neighbors. The outer ring is never looked up.
+        var lookups: [String]
+    }
+
+    /// `library` holds every artist you have played, by `ArtistMapNames.key`; `answers` what is known so far.
+    static func build(seed: String, library: [String: ArtistMapEntry], answers: [String: [SimilarArtist]], steps: Int, stale: Set<String> = []) -> Result {
+        let seedKey = ArtistMapNames.key(seed)
+        let seedEntry = library[seedKey] ?? ArtistMapEntry(name: seed, plays: 0)
+        var result = Result(scope: [seedEntry], lookups: [])
+        guard let seedAnswer = answers[seedKey] else {
+            result.lookups = [seedEntry.name]
+            return result
+        }
+        if stale.contains(seedKey) { result.lookups = [seedEntry.name] }
+        var included: Set<String> = [seedKey]
+        var ringMatch: [String: Double] = [:]
+        for similar in seedAnswer where similar.match >= ringFloor {
+            let key = ArtistMapNames.key(similar.name)
+            if key != seedKey, library[key] != nil { ringMatch[key] = max(ringMatch[key] ?? 0, similar.match) }
+        }
+        let ring = ringMatch.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(ringCap).map(\.key)
+        for key in ring {
+            if let entry = library[key] { result.scope.append(entry); included.insert(key) }
+            if answers[key] == nil || stale.contains(key), let entry = library[key] { result.lookups.append(entry.name) }
+        }
+        guard steps >= 2 else { return result }
+        var outerMatch: [String: Double] = [:]
+        for key in ring {
+            guard let list = answers[key] else { continue }
+            var candidates: [String: Double] = [:]
+            for similar in list where similar.match >= outerFloor {
+                let other = ArtistMapNames.key(similar.name)
+                if !included.contains(other), library[other] != nil { candidates[other] = max(candidates[other] ?? 0, similar.match) }
+            }
+            for (other, match) in candidates.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }).prefix(outerPerArtist) {
+                outerMatch[other] = max(outerMatch[other] ?? 0, match)
+            }
+        }
+        for key in outerMatch.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }).prefix(outerCap).map(\.key) {
+            if let entry = library[key] { result.scope.append(entry) }
+        }
+        return result
     }
 }
 
@@ -333,6 +410,61 @@ enum ArtistMapLayout {
         return (0..<n).map { CGPoint(x: x[$0] / width, y: y[$0] / height) }
     }
 
+    /// The seed in the middle, the artists it is linked to in a ring around it (the stronger the match, the closer), and the artists only
+    /// reached through those beyond them, each near the neighbor that brought it in. `order` (node indices) says which neighbors sit next to
+    /// each other round the ring, so a group stays together; otherwise the strongest come first. Falls back to `force` if the seed isn't there.
+    static func radial(
+        graph: ArtistMapGraph, seedKey: String, canvas: CGSize = defaultCanvas, radii: [Double] = [], gap: Double = defaultGap, order: [Int]? = nil
+    ) -> [CGPoint] {
+        guard let seed = graph.index(ofKey: seedKey) else { return force(graph: graph, canvas: canvas, radii: radii, gap: gap) }
+        let n = graph.nodes.count
+        let width = max(Double(canvas.width), 50), height = max(Double(canvas.height), 50)
+        let radius: [Double] = (0..<n).map { $0 < radii.count ? radii[$0] : defaultRadius }
+        let margin = (radius.max() ?? defaultRadius) + gap
+        let (cx, cy) = (width / 2, height / 2)
+        let rx = max(width / 2 - margin, 10), ry = max(height / 2 - margin, 10)
+
+        var adjacent = [[(index: Int, weight: Double)]](repeating: [], count: n)
+        for edge in graph.edges {
+            adjacent[edge.a].append((edge.b, edge.weight))
+            adjacent[edge.b].append((edge.a, edge.weight))
+        }
+        var weightToSeed: [Int: Double] = [:]
+        for link in adjacent[seed] { weightToSeed[link.index] = max(weightToSeed[link.index] ?? 0, link.weight) }
+        var ring = weightToSeed.keys.sorted { weightToSeed[$0]! != weightToSeed[$1]! ? weightToSeed[$0]! > weightToSeed[$1]! : $0 < $1 }
+        if let order {
+            let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+            ring.sort { (rank[$0] ?? Int.max) != (rank[$1] ?? Int.max) ? (rank[$0] ?? Int.max) < (rank[$1] ?? Int.max) : $0 < $1 }
+        }
+        var x = [Double](repeating: cx, count: n), y = [Double](repeating: cy, count: n)
+        var angle = [Int: Double]()
+        for (i, node) in ring.enumerated() {
+            let a = -Double.pi / 2 + 2 * Double.pi * Double(i) / Double(max(ring.count, 1))
+            let t = min(0.9, max(0.3, 0.3 + (1 - (weightToSeed[node] ?? 0)) * 0.55))
+            angle[node] = a
+            x[node] = cx + cos(a) * rx * t
+            y[node] = cy + sin(a) * ry * t
+        }
+        var siblings: [Int: Int] = [:]
+        for node in 0..<n where node != seed && angle[node] == nil {
+            let parent = adjacent[node].filter { angle[$0.index] != nil }.max { $0.weight != $1.weight ? $0.weight < $1.weight : $0.index > $1.index }?.index
+            var a: Double
+            if let parent {
+                let k = siblings[parent, default: 0]
+                siblings[parent] = k + 1
+                a = angle[parent]! + (k % 2 == 0 ? 1 : -1) * 0.16 * Double(k / 2 + 1)
+            } else {
+                var h: UInt64 = 14_695_981_039_346_656_037
+                for byte in graph.nodes[node].key.utf8 { h ^= UInt64(byte); h = h &* 1_099_511_628_211 }
+                a = Double(h % 3600) / 3600 * 2 * Double.pi
+            }
+            x[node] = cx + cos(a) * rx * 0.97
+            y[node] = cy + sin(a) * ry * 0.97
+        }
+        separate(&x, &y, radii: radius, gap: gap, within: CGSize(width: width, height: height))
+        return (0..<n).map { CGPoint(x: x[$0] / width, y: y[$0] / height) }
+    }
+
     /// Pushes apart any two dots closer than their radii plus `gap`, keeping every dot inside the canvas.
     static func separate(_ x: inout [Double], _ y: inout [Double], radii: [Double], gap: Double, within canvas: CGSize) {
         let n = x.count
@@ -367,6 +499,13 @@ protocol ArtistMapNeighborProviding: Sendable {
     func savedNeighbors(of artist: String) async -> [SimilarArtist]?
     /// Asks Last.fm and saves the answer. A failure (offline, rate limit, network) is thrown and nothing is saved.
     func fetchNeighbors(of artist: String) async throws -> [SimilarArtist]
+    /// An answer that is saved but out of date: still good for drawing the map, and worth asking again. nil when there is none (or the
+    /// answer is current: that one comes from `savedNeighbors`).
+    func staleNeighbors(of artist: String) async -> [SimilarArtist]?
+}
+
+extension ArtistMapNeighborProviding {
+    func staleNeighbors(of artist: String) async -> [SimilarArtist]? { nil }
 }
 
 private struct ArtistMapStored: Codable {
@@ -387,6 +526,13 @@ enum ArtistMapAnswers {
         return stored.map { SimilarArtist(name: $0.name, match: $0.match) }
     }
 
+    /// An answer older than the cache's life, which `read` leaves out.
+    static func readStale(_ store: SimilarityCacheStore, artist: String, now: Date = Date()) async -> [SimilarArtist]? {
+        guard let entry = await store.readEntry(cacheKey(artist)), now.timeIntervalSince(entry.cachedAt) > LastfmSimilarityProvider.maxAge,
+              let stored = try? JSONDecoder().decode([ArtistMapStored].self, from: entry.payload) else { return nil }
+        return stored.map { SimilarArtist(name: $0.name, match: $0.match) }
+    }
+
     static func write(_ store: SimilarityCacheStore, list: [SimilarArtist], artist: String) async {
         guard let data = try? JSONEncoder().encode(list.map { ArtistMapStored(name: $0.name, match: $0.match) }) else { return }
         await store.write(cacheKey(artist), payload: data)
@@ -398,6 +544,8 @@ extension LastfmSimilarityProvider: ArtistMapNeighborProviding {
     static func mapCacheKey(_ artist: String) -> String { ArtistMapAnswers.cacheKey(artist) }
 
     func savedNeighbors(of artist: String) async -> [SimilarArtist]? { await ArtistMapAnswers.read(store, artist: artist) }
+
+    func staleNeighbors(of artist: String) async -> [SimilarArtist]? { await ArtistMapAnswers.readStale(store, artist: artist) }
 
     func saveNeighbors(_ list: [SimilarArtist], of artist: String) async { await ArtistMapAnswers.write(store, list: list, artist: artist) }
 
@@ -414,6 +562,7 @@ struct ArtistMapSavedProvider: ArtistMapNeighborProviding {
     let store: SimilarityCacheStore
 
     func savedNeighbors(of artist: String) async -> [SimilarArtist]? { await ArtistMapAnswers.read(store, artist: artist) }
+    func staleNeighbors(of artist: String) async -> [SimilarArtist]? { await ArtistMapAnswers.readStale(store, artist: artist) }
     func fetchNeighbors(of artist: String) async throws -> [SimilarArtist] { throw NoAccount() }
 }
 
@@ -446,6 +595,8 @@ enum ArtistMapLoader {
         var fetched = 0
         var missing = 0
         var failed = 0
+        /// The artists whose saved answer is out of date. It is still used, and counted in `missing` since it should be asked again.
+        var staleKeys: Set<String> = []
         /// Why fetching ended early, when it did.
         var stopped: Stop?
     }
@@ -454,6 +605,8 @@ enum ArtistMapLoader {
 
     /// After this many failures in a row the lookups stop instead of hammering a service that is down.
     static let failureLimit = 5
+    /// Lookups in flight at once.
+    static let concurrency = 6
 
     struct Update: Sendable {
         let key: String
@@ -482,31 +635,55 @@ enum ArtistMapLoader {
                 summary.fromSaved += 1
                 onUpdate(Update(key: key, neighbors: saved, fromSaved: true, done: summary.fromSaved, total: seen.count))
             } else {
+                // An out-of-date answer still draws the map; it is asked for again below, and kept if that fails.
+                if let stale = await provider.staleNeighbors(of: artist) {
+                    neighbors[key] = stale
+                    summary.staleKeys.insert(key)
+                }
                 missing.append(artist)
             }
         }
         summary.missing = missing.count
         guard fetchMissing, !missing.isEmpty else { return (neighbors, summary) }
 
+        // A few lookups run at once, since each spends most of its time waiting on the network; the app-wide request pacer still keeps
+        // Last.fm to four requests a second however many are in flight.
+        if Task.isCancelled { summary.stopped = .cancelled } else if isOffline() { summary.stopped = .offline }
+        guard summary.stopped == nil else { return (neighbors, summary) }
         var consecutiveFailures = 0
-        for artist in missing {
-            if Task.isCancelled { summary.stopped = .cancelled; break }
-            if isOffline() { summary.stopped = .offline; break }
-            do {
-                let list = try await provider.fetchNeighbors(of: artist)
-                let key = ArtistMapNames.key(artist)
-                neighbors[key] = list
-                summary.fetched += 1
-                summary.missing -= 1
-                consecutiveFailures = 0
-                onUpdate(Update(key: key, neighbors: list, fromSaved: false, done: summary.fromSaved + summary.fetched, total: seen.count))
-            } catch is CancellationError {
-                summary.stopped = .cancelled
-                break
-            } catch {
-                summary.failed += 1
-                consecutiveFailures += 1
-                if consecutiveFailures >= failureLimit { summary.stopped = .tooManyFailures; break }
+        var next = 0
+        await withTaskGroup(of: (String, [SimilarArtist]?, Bool).self) { group in
+            func startOne() {
+                guard next < missing.count else { return }
+                let artist = missing[next]
+                next += 1
+                group.addTask {
+                    do { return (artist, try await provider.fetchNeighbors(of: artist), false) }
+                    catch is CancellationError { return (artist, nil, true) }
+                    catch { return (artist, nil, false) }
+                }
+            }
+            for _ in 0..<min(concurrency, missing.count) { startOne() }
+            while let (artist, list, wasCancelled) = await group.next() {
+                if wasCancelled {
+                    summary.stopped = .cancelled
+                } else if let list {
+                    let key = ArtistMapNames.key(artist)
+                    neighbors[key] = list
+                    summary.fetched += 1
+                    summary.missing -= 1
+                    summary.staleKeys.remove(key)
+                    consecutiveFailures = 0
+                    onUpdate(Update(key: key, neighbors: list, fromSaved: false, done: summary.fromSaved + summary.fetched, total: seen.count))
+                } else {
+                    summary.failed += 1
+                    consecutiveFailures += 1
+                    if consecutiveFailures >= failureLimit { summary.stopped = .tooManyFailures }
+                }
+                if summary.stopped == nil {
+                    if Task.isCancelled { summary.stopped = .cancelled } else if isOffline() { summary.stopped = .offline }
+                }
+                if summary.stopped == nil { startOne() }
             }
         }
         return (neighbors, summary)

@@ -30,19 +30,22 @@ enum ArtistMapChecks {
     /// Stands in for Last.fm and the saved answers.
     private final class StubProvider: ArtistMapNeighborProviding, @unchecked Sendable {
         let saved: Box<[String: [SimilarArtist]]>
+        let stale: [String: [SimilarArtist]]
         let answers: [String: [SimilarArtist]]
         let failing: Set<String>
         let delay: UInt64
         let calls = Box<[String]>([])
 
-        init(saved: [String: [SimilarArtist]] = [:], answers: [String: [SimilarArtist]] = [:], failing: Set<String> = [], delay: UInt64 = 0) {
+        init(saved: [String: [SimilarArtist]] = [:], stale: [String: [SimilarArtist]] = [:], answers: [String: [SimilarArtist]] = [:], failing: Set<String> = [], delay: UInt64 = 0) {
             self.saved = Box(saved)
+            self.stale = stale
             self.answers = answers
             self.failing = failing
             self.delay = delay
         }
 
         func savedNeighbors(of artist: String) async -> [SimilarArtist]? { saved.with { $0[artist] } }
+        func staleNeighbors(of artist: String) async -> [SimilarArtist]? { stale[artist] }
 
         func fetchNeighbors(of artist: String) async throws -> [SimilarArtist] {
             calls.with { $0.append(artist) }
@@ -81,6 +84,8 @@ enum ArtistMapChecks {
             sliderChecks(report, graph)
             groupChecks(report)
             layoutChecks(report, container)
+            seedChecks(report)
+            refinementChecks(report, container)
             await lookupChecks(report)
             await cacheChecks(report, container)
             print(report.failures == 0 ? "ALL CHECKS PASSED" : "\(report.failures) CHECK(S) FAILED")
@@ -341,6 +346,136 @@ enum ArtistMapChecks {
         r.check("200 artists are laid out in under 3 seconds, inside the square, none on top of another", seconds < 3 && bigInside && bigClosest >= clearance - 0.01, "\(seconds) s, closest \(bigClosest)")
     }
 
+
+    // MARK: Seed mode
+
+    @MainActor
+    private static func seedChecks(_ r: Report) {
+        let ringNames = (1...30).map { "Ring \($0)" }, outerNames = (1...6).map { "Outer \($0)" }
+        var library: [String: ArtistMapEntry] = [key("Seed"): ArtistMapEntry(name: "Seed", plays: 500)]
+        for (i, name) in (ringNames + outerNames).enumerated() { library[key(name)] = ArtistMapEntry(name: name, plays: 300 - i) }
+        var answers: [String: [SimilarArtist]] = [:]
+        answers[key("Seed")] = ringNames.enumerated().map { sim($0.element, 0.9 - Double($0.offset) * 0.02) } + [sim("Never Played", 0.7), sim("Unknown Y", 0.6), sim("Seed", 0.99)]
+        answers[key("Ring 1")] = [sim("Outer 1", 0.8), sim("Outer 2", 0.7), sim("Outer 3", 0.6), sim("Outer 4", 0.5), sim("The Ring 2", 0.9), sim("Seed", 0.8)]
+        answers[key("Ring 2")] = [sim("Outer 1", 0.85), sim("Outer 5", 0.35), sim("Outer 6", 0.2)]
+
+        let none = ArtistMapSeedScope.build(seed: "Seed", library: library, answers: [:], steps: 1)
+        r.check("with no answer for the seed there is only the seed, and the seed is what to look up", none.scope.map(\.name) == ["Seed"] && none.lookups == ["Seed"], "\(none)")
+        let one = ArtistMapSeedScope.build(seed: "Seed", library: library, answers: answers, steps: 1)
+        let expectedRing = (1...ArtistMapSeedScope.ringCap).map { "Ring \($0)" }
+        r.check("one step: the seed and its \(ArtistMapSeedScope.ringCap) closest artists you play, strongest first", one.scope.map(\.name) == ["Seed"] + expectedRing, "\(one.scope.count)")
+        let neither = !one.scope.contains { $0.name == "Never Played" || $0.name == "Unknown Y" }
+        r.check("an artist you haven't played is never in the scope (it can only be a dashed dot), and the seed isn't listed twice", neither && one.scope.filter { $0.name == "Seed" }.count == 1)
+        let wanted = (3...ArtistMapSeedScope.ringCap).map { "Ring \($0)" }
+        r.check("the neighbors without an answer are what to look up next (not the two that have one)", one.lookups == wanted, "\(one.lookups.count)")
+        let two = ArtistMapSeedScope.build(seed: "Seed", library: library, answers: answers, steps: 2)
+        let outer = two.scope.dropFirst(1 + ArtistMapSeedScope.ringCap).map(\.name)
+        r.check("two steps: each neighbor adds its own closest three, ranked by match, once however many point at them", outer == ["Outer 1", "Outer 2", "Outer 3", "Outer 5"], "\(outer)")
+        r.check("…and never an artist already in the ring, one below the floor, or past a neighbor's top three", !outer.contains("Outer 4") && !outer.contains("Outer 6") && !outer.contains("Ring 2"))
+        r.check("looking up is still only for the seed and its neighbors, never the outer ring", two.lookups == one.lookups)
+        let staleSeed = ArtistMapSeedScope.build(seed: "Seed", library: library, answers: answers, steps: 1, stale: [key("Seed"), key("Ring 1")])
+        r.check("an out-of-date answer for the seed or a neighbor is looked up again, while the scope is still drawn from it", staleSeed.lookups.first == "Seed" && staleSeed.lookups.contains("Ring 1") && !staleSeed.lookups.contains("Ring 2") && staleSeed.scope == one.scope, "\(staleSeed.lookups.prefix(3))")
+        let stranger = ArtistMapSeedScope.build(seed: "Not In Library", library: library, answers: [:], steps: 1)
+        r.check("a seed that isn't in your library still gets a map, with no plays", stranger.scope.first?.plays == 0 && stranger.scope.first?.name == "Not In Library")
+
+        // The seed's own links are never thinned away.
+        let leaves = (1...12).map { "Leaf \($0)" }
+        var starAnswers: [String: [SimilarArtist]] = [key("Hub"): leaves.map { sim($0, 0.35) }]
+        for name in leaves { starAnswers[key(name)] = leaves.filter { $0 != name }.map { sim($0, 0.9) } }
+        let starScope = ([ArtistMapEntry(name: "Hub", plays: 900)] + leaves.map { ArtistMapEntry(name: $0, plays: 100) })
+        let star = ArtistMapGraph.build(scope: starScope, libraryKeys: Set(starScope.map { key($0.name) }), neighbors: starAnswers)
+        let hub = star.index(ofKey: key("Hub")) ?? -1
+        let thinnedLinks = star.filtered(minMatch: 0.3, showGhosts: false).edges.filter { star.nodes[$0.a].key == key("Hub") || star.nodes[$0.b].key == key("Hub") }.count
+        let pinnedGraph = star.filtered(minMatch: 0.3, showGhosts: false, alwaysKeep: key("Hub"))
+        let pinnedLinks = pinnedGraph.edges.filter { pinnedGraph.nodes[$0.a].key == key("Hub") || pinnedGraph.nodes[$0.b].key == key("Hub") }.count
+        r.check("without pinning, a crowded neighbor list loses some of the seed's links; pinned, all \(leaves.count) stay", hub >= 0 && thinnedLinks < leaves.count && pinnedLinks == leaves.count, "\(thinnedLinks) vs \(pinnedLinks)")
+
+        // The radial layout.
+        let graph = ArtistMapGraph.build(scope: two.scope, libraryKeys: Set(library.keys), neighbors: answers).filtered(minMatch: 0.2, showGhosts: false, alwaysKeep: key("Seed"))
+        let canvas = CGSize(width: 700, height: 450)
+        let sizes = graph.nodes.indices.map { 6.0 + Double($0 % 4) * 3 }
+        let radial = ArtistMapLayout.radial(graph: graph, seedKey: key("Seed"), canvas: canvas, radii: sizes)
+        let seedAt = radial[graph.index(ofKey: key("Seed")) ?? 0]
+        r.check("the seed sits in the middle", abs(seedAt.x - 0.5) < 0.02 && abs(seedAt.y - 0.5) < 0.02, "\(seedAt)")
+        func away(_ index: Int) -> Double { hypot(Double(radial[index].x - seedAt.x) * 700, Double(radial[index].y - seedAt.y) * 450) }
+        let ringIndexes = graph.nodes.indices.filter { i in graph.edges.contains { ($0.a == i && graph.nodes[$0.b].key == key("Seed")) || ($0.b == i && graph.nodes[$0.a].key == key("Seed")) } }
+        let weightTo: (Int) -> Double = { i in graph.edges.first { ($0.a == i && graph.nodes[$0.b].key == key("Seed")) || ($0.b == i && graph.nodes[$0.a].key == key("Seed")) }?.weight ?? 0 }
+        let byMatch = ringIndexes.sorted { weightTo($0) > weightTo($1) }
+        let nearHalf = byMatch.prefix(byMatch.count / 2).map(away), farHalf = byMatch.suffix(byMatch.count / 2).map(away)
+        let nearMean = nearHalf.reduce(0, +) / Double(max(nearHalf.count, 1)), farMean = farHalf.reduce(0, +) / Double(max(farHalf.count, 1))
+        r.check("the stronger the match, the closer to the seed", nearMean < farMean, "near \(nearMean) far \(farMean)")
+        let outerIndexes = graph.nodes.indices.filter { !ringIndexes.contains($0) && graph.nodes[$0].key != key("Seed") }
+        let ringMedian = ringIndexes.map(away).sorted()[ringIndexes.count / 2]
+        r.check("artists reached only through a neighbor sit beyond the ring", !outerIndexes.isEmpty && outerIndexes.allSatisfy { away($0) > ringMedian }, "\(outerIndexes.count) outer, ring median \(ringMedian)")
+        var worst = 0.0
+        for i in radial.indices { for j in (i + 1)..<radial.count {
+            let d = hypot(Double(radial[i].x - radial[j].x) * 700, Double(radial[i].y - radial[j].y) * 450)
+            worst = max(worst, sizes[i] + sizes[j] - d)
+        } }
+        let inside = radial.allSatisfy { $0.x >= 0 && $0.x <= 1 && $0.y >= 0 && $0.y <= 1 }
+        r.check("no dots overlap and all stay inside the canvas, and the same map lays out the same way", worst <= 0 && inside && radial == ArtistMapLayout.radial(graph: graph, seedKey: key("Seed"), canvas: canvas, radii: sizes), "worst overlap \(worst)")
+        let lost = ArtistMapLayout.radial(graph: graph, seedKey: key("Nobody"), canvas: canvas, radii: sizes)
+        r.check("a seed that isn't on the map falls back to the ordinary layout instead of failing", lost.count == graph.nodes.count)
+    }
+
+
+    // MARK: Period, counts, artwork, unlinked artists
+
+    @MainActor
+    private static func refinementChecks(_ r: Report, _ container: ModelContainer) {
+        // The same period list and default as Overview.
+        let model = ArtistMapModel(container: container)
+        let ids = model.rangeOptions.map(\.id)
+        let overview = DateRangePresets.build(oldestScrobbleDate: nil).map(\.id)
+        r.check("the period choices are Overview's, in the same order", ids == overview && ids.first == "alltime" && ids.contains("last30") && ids.contains("ytd"), "\(ids)")
+        let from30 = model.selectedRange().from
+        let near = from30.map { abs($0.timeIntervalSinceNow + 30 * 86_400) < 120 } ?? false
+        r.check("the default period is Last 30 days, as on Overview", ArtistMapModel.Options().periodId == "last30" && near)
+        model.options.periodId = "year-1990"
+        let fellBack = model.selectedRange().from.map { abs($0.timeIntervalSinceNow + 30 * 86_400) < 120 } ?? false
+        r.check("a saved period that no longer exists falls back to Last 30 days", fellBack)
+        model.options.periodId = "alltime"
+        r.check("All time starts at the beginning", (model.selectedRange().from ?? .now) < Date(timeIntervalSince1970: 86_400))
+        r.check("the artist counts offered are 10, 25, 50, 100 and 200", ArtistMapModel.countChoices == [10, 25, 50, 100, 200])
+        let old = Data(#"{"mode":"top","count":25,"period":"allTime","minMatchPercent":50,"showGhosts":true}"#.utf8)
+        let decoded = try? JSONDecoder().decode(ArtistMapModel.Options.self, from: old)
+        r.check("settings saved before the period change still open (period back to the default, the rest kept, artwork on)", decoded?.periodId == "last30" && decoded?.count == 25 && decoded?.minMatchPercent == 50 && decoded?.showGhosts == true && decoded?.showArtwork == true)
+        var chosen = ArtistMapModel.Options()
+        chosen.periodId = "year-2020"; chosen.showArtwork = false; chosen.mode = .seed; chosen.seedArtist = "Artist A"; chosen.reach = 2
+        let round = (try? JSONEncoder().encode(chosen)).flatMap { try? JSONDecoder().decode(ArtistMapModel.Options.self, from: $0) }
+        r.check("a chosen period, artwork setting and seed survive saving", round == chosen)
+
+        // A map from a seed shows no artist that has no link on screen.
+        let names = ["Near", "Medium", "Weak", "Weaker"]
+        var answers: [String: [SimilarArtist]] = [key("Seed"): [sim("Near", 0.8), sim("Medium", 0.5), sim("Weak", 0.35), sim("Weaker", 0.2)]]
+        answers[key("Near")] = [sim("Seed", 0.7)]
+        let scope = ([ArtistMapEntry(name: "Seed", plays: 100)] + names.map { ArtistMapEntry(name: $0, plays: 50) })
+        let graph = ArtistMapGraph.build(scope: scope, libraryKeys: Set(scope.map { key($0.name) }), neighbors: answers)
+        let kept = graph.filtered(minMatch: 0.4, showGhosts: false, alwaysKeep: key("Seed"), dropUnlinked: true).nodes.map(\.name)
+        r.check("from a seed, artists linked only below the minimum match are left off, not shown alone", Set(kept) == ["Seed", "Near", "Medium"], "\(kept)")
+        let topMode = graph.filtered(minMatch: 0.4, showGhosts: false).nodes.map(\.name)
+        r.check("in the Top artists map every artist stays, linked or not", Set(topMode) == Set(["Seed"] + names), "\(topMode)")
+        let lonely = graph.filtered(minMatch: 0.95, showGhosts: false, alwaysKeep: key("Seed"), dropUnlinked: true).nodes.map(\.name)
+        r.check("the seed stays even when nothing is linked to it", lonely == ["Seed"], "\(lonely)")
+        var ghostAnswers = answers
+        ghostAnswers[key("Weak")] = [sim("Ghost Only", 0.9)]
+        let withGhost = ArtistMapGraph.build(scope: scope, libraryKeys: Set(scope.map { key($0.name) }), neighbors: ghostAnswers)
+        let hiddenGhost = withGhost.filtered(minMatch: 0.3, showGhosts: false, alwaysKeep: key("Seed"), dropUnlinked: true).nodes.map(\.name)
+        let shownGhost = withGhost.filtered(minMatch: 0.3, showGhosts: true, alwaysKeep: key("Seed"), dropUnlinked: true).nodes.map(\.name)
+        r.check("an artist linked only to a never-played dot is left off while those are hidden, and kept once they are shown", hiddenGhost.contains("Weak") && shownGhost.contains("Ghost Only"), "\(hiddenGhost) \(shownGhost)")
+
+        // Artwork thumbnails.
+        let wide = NSImage(size: NSSize(width: 200, height: 100))
+        wide.lockFocus()
+        NSColor.red.setFill(); NSRect(x: 0, y: 0, width: 100, height: 100).fill()
+        NSColor.blue.setFill(); NSRect(x: 100, y: 0, width: 100, height: 100).fill()
+        wide.unlockFocus()
+        let thumb = ArtistMapArtwork.thumbnail(wide, side: 96)
+        r.check("a picture is cut to a square of the asked size", thumb.size == NSSize(width: 96, height: 96), "\(thumb.size)")
+        let empty = ArtistMapArtwork.thumbnail(NSImage(size: .zero))
+        r.check("a picture with no size is handed back rather than failing", empty.size == .zero)
+    }
+
     // MARK: Lookups
 
     @MainActor
@@ -355,7 +490,7 @@ enum ArtistMapChecks {
         r.check("saved answers load with no lookups, and the artists still without one are counted", savedOnly.summary == expected && provider.calls.with { $0.isEmpty } && savedOnly.neighbors.count == 2, "\(savedOnly.summary)")
         let full = await ArtistMapLoader.load(artists: four + ["artist c"], provider: provider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
         let fetchedCalls = provider.calls.with { $0 }
-        r.check("the missing ones are fetched, once each, even if named twice", full.summary.fetched == 2 && full.summary.missing == 0 && fetchedCalls == ["Artist C", "Artist D"], "\(full.summary) \(fetchedCalls)")
+        r.check("the missing ones are fetched, once each, even if named twice", full.summary.fetched == 2 && full.summary.missing == 0 && fetchedCalls.sorted() == ["Artist C", "Artist D"], "\(full.summary) \(fetchedCalls)")
         r.check("a genuinely empty answer is kept as an answer, not as a gap", full.neighbors[key("Artist D")]?.isEmpty == true && full.neighbors.count == 4)
 
         let progressProvider = StubProvider(saved: ["Artist A": savedList], answers: ["Artist B": savedList])
@@ -380,13 +515,52 @@ enum ArtistMapChecks {
         let downProvider = StubProvider(failing: Set(down))
         let stopped = await ArtistMapLoader.load(artists: down, provider: downProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
         let attempts = downProvider.calls.with { $0.count }
-        r.check("after \(ArtistMapLoader.failureLimit) failures in a row the lookups stop", stopped.summary.stopped == .tooManyFailures && attempts == ArtistMapLoader.failureLimit && stopped.summary.missing == 9, "\(stopped.summary) \(attempts)")
+        let inFlightAtStop = ArtistMapLoader.failureLimit + ArtistMapLoader.concurrency - 1
+        r.check("after \(ArtistMapLoader.failureLimit) failures in a row no new lookups start (only those already under way finish)", stopped.summary.stopped == .tooManyFailures && attempts >= ArtistMapLoader.failureLimit && attempts <= inFlightAtStop && stopped.summary.missing == 9, "\(stopped.summary) \(attempts)")
+
+
+        let peak = Box<(now: Int, max: Int)>((0, 0))
+        final class OverlapProvider: ArtistMapNeighborProviding, @unchecked Sendable {
+            let peak: Box<(now: Int, max: Int)>
+            init(_ peak: Box<(now: Int, max: Int)>) { self.peak = peak }
+            func savedNeighbors(of artist: String) async -> [SimilarArtist]? { nil }
+            func fetchNeighbors(of artist: String) async throws -> [SimilarArtist] {
+                peak.with { $0.now += 1; $0.max = max($0.max, $0.now) }
+                try await Task.sleep(nanoseconds: 20_000_000)
+                peak.with { $0.now -= 1 }
+                return []
+            }
+        }
+        let many = (1...16).map { "Overlap \($0)" }
+        let overlapped = await ArtistMapLoader.load(artists: many, provider: OverlapProvider(peak), fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
+        let highest = peak.with { $0.max }
+        r.check("lookups overlap, a few at a time and never more than \(ArtistMapLoader.concurrency)", highest > 1 && highest <= ArtistMapLoader.concurrency && overlapped.summary.fetched == 16, "peak \(highest)")
+
+
+        // Out-of-date answers still draw the map and are asked for again.
+        let oldList = [sim("Old Neighbor", 0.7)], newList = [sim("New Neighbor", 0.8)]
+        let staleProvider = StubProvider(stale: ["Artist A": oldList], answers: ["Artist A": newList])
+        let staleRead = await ArtistMapLoader.load(artists: ["Artist A"], provider: staleProvider, fetchMissing: false, isOffline: neverOffline, onUpdate: { _ in })
+        let noCallsYet = staleProvider.calls.with { $0.isEmpty }
+        r.check("an out-of-date answer is used for the map and counted as waiting for a refresh, with no lookup made", staleRead.neighbors[key("Artist A")]?.first?.name == "Old Neighbor" && staleRead.summary.staleKeys == [key("Artist A")] && staleRead.summary.missing == 1 && noCallsYet, "\(staleRead.summary)")
+        let refreshed = await ArtistMapLoader.load(artists: ["Artist A"], provider: staleProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
+        r.check("refreshing replaces it with the new answer and it is no longer stale", refreshed.neighbors[key("Artist A")]?.first?.name == "New Neighbor" && refreshed.summary.staleKeys.isEmpty && refreshed.summary.fetched == 1 && refreshed.summary.missing == 0, "\(refreshed.summary)")
+        let staleOffline = StubProvider(stale: ["Artist A": oldList], answers: ["Artist A": newList])
+        let offlineRead = await ArtistMapLoader.load(artists: ["Artist A"], provider: staleOffline, fetchMissing: true, isOffline: { true }, onUpdate: { _ in })
+        let untouched = staleOffline.calls.with { $0.isEmpty }
+        r.check("offline, an old answer keeps drawing and nothing is asked", offlineRead.neighbors[key("Artist A")]?.first?.name == "Old Neighbor" && untouched && offlineRead.summary.stopped == .offline && offlineRead.summary.staleKeys.count == 1)
+        let staleFailing = StubProvider(stale: ["Artist A": oldList], answers: [:], failing: ["Artist A"])
+        let failedRefresh = await ArtistMapLoader.load(artists: ["Artist A"], provider: staleFailing, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
+        r.check("a refresh that fails keeps the old answer rather than losing the links", failedRefresh.neighbors[key("Artist A")]?.first?.name == "Old Neighbor" && failedRefresh.summary.failed == 1 && failedRefresh.summary.staleKeys.count == 1)
+        let freshAndStale = StubProvider(saved: ["Artist B": newList], stale: ["Artist A": oldList])
+        let both = await ArtistMapLoader.load(artists: ["Artist A", "Artist B"], provider: freshAndStale, fetchMissing: false, isOffline: neverOffline, onUpdate: { _ in })
+        r.check("a current answer is not marked stale", both.summary.staleKeys == [key("Artist A")] && both.summary.fromSaved == 1 && both.neighbors.count == 2)
 
         let slow = (1...20).map { "Slow \($0)" }
         let slowAnswers = Dictionary(uniqueKeysWithValues: slow.map { ($0, savedList) })
-        let slowProvider = StubProvider(answers: slowAnswers, delay: 30_000_000)
+        let slowProvider = StubProvider(answers: slowAnswers, delay: 60_000_000)
         let task = Task { await ArtistMapLoader.load(artists: slow, provider: slowProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in }) }
-        try? await Task.sleep(nanoseconds: 110_000_000)
+        try? await Task.sleep(nanoseconds: 150_000_000)
         task.cancel()
         let cancelled = await task.value
         let keptSome = cancelled.summary.fetched > 0 && cancelled.summary.fetched < 20 && cancelled.neighbors.count == cancelled.summary.fetched
@@ -420,6 +594,11 @@ enum ArtistMapChecks {
         await store.write(LastfmSimilarityProvider.mapCacheKey("Artist Old"), payload: stale, now: Date().addingTimeInterval(-40 * 86_400))
         let old = await provider.savedNeighbors(of: "Artist Old")
         r.check("an answer older than 30 days is not used", old == nil)
+        let oldStale = await provider.staleNeighbors(of: "Artist Old")
+        r.check("…but it is still there to draw from, as an out-of-date answer", oldStale?.first?.name == "X")
+        let freshStale = await provider.staleNeighbors(of: "Artist Cache")
+        let neverStale = await provider.staleNeighbors(of: "Artist Nobody")
+        r.check("a current answer, or none at all, is not an out-of-date one", freshStale == nil && neverStale == nil)
     }
 }
 
@@ -477,9 +656,14 @@ enum ArtistMapSnapshots {
             let variants: [(name: String, artists: Int, ghosts: Bool, scheme: String, width: CGFloat, area: CGSize)] = [
                 ("dark-wide", 60, true, "dark", 1100, wideArea), ("light-wide", 60, true, "light", 1100, wideArea),
                 ("dark-narrow", 60, false, "dark", 760, narrowArea), ("light-large", 200, false, "light", 1100, wideArea),
+                ("seed-one-light", 90, true, "light", 1100, wideArea), ("seed-two-dark", 90, true, "dark", 1100, wideArea),
+                ("seed-two-narrow", 90, false, "light", 760, narrowArea),
+                ("waiting-light", 60, false, "light", 1100, wideArea), ("refresh-dark", 60, false, "dark", 1100, wideArea),
             ]
             for variant in variants {
-                let model = ArtistMapModel.sample(container: container, artists: variant.artists, showGhosts: variant.ghosts, canvas: variant.area)
+                let model = variant.name.hasPrefix("seed")
+                    ? ArtistMapModel.sampleSeed(container: container, steps: variant.name.contains("two") ? 2 : 1, showGhosts: variant.ghosts, canvas: variant.area)
+                    : ArtistMapModel.sample(container: container, artists: variant.artists, showGhosts: variant.ghosts, canvas: variant.area)
                 let view = NavigationStack {
                     ArtistMapView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), openQuery: { _, _, _ in }, sample: model)
                 }
@@ -490,6 +674,8 @@ enum ArtistMapSnapshots {
                 .environment(LibraryGapBadgeStore())
                 .modelContainer(container)
                 .environment(\.colorScheme, variant.scheme == "dark" ? .dark : .light)
+                if variant.name.hasPrefix("waiting") { model.installSampleWaiting(count: 14, stale: false) }
+                if variant.name.hasPrefix("refresh") { model.installSampleWaiting(count: 14, stale: true) }
                 let height: CGFloat = 900
                 let host = NSHostingView(rootView: view.frame(width: variant.width, height: height))
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: variant.width, height: height), styleMask: [.titled], backing: .buffered, defer: false)

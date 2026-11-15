@@ -9,47 +9,42 @@ import SwiftData
 @Observable
 final class ArtistMapModel {
     struct Options: Codable, Equatable {
-        enum Period: String, Codable, CaseIterable, Identifiable {
-            case allTime, year, days90, days30
+        enum Mode: String, Codable, CaseIterable, Identifiable {
+            case top, seed
             var id: String { rawValue }
-            var title: String {
-                switch self {
-                case .allTime: "All time"
-                case .year: "Last year"
-                case .days90: "Last 90 days"
-                case .days30: "Last 30 days"
-                }
-            }
-
-            func range(now: Date, calendar: Calendar = AppCalendars.listening) -> (from: Date?, to: Date?) {
-                switch self {
-                case .allTime: (nil, nil)
-                case .year: (calendar.date(byAdding: .year, value: -1, to: now), nil)
-                case .days90: (calendar.date(byAdding: .day, value: -90, to: now), nil)
-                case .days30: (calendar.date(byAdding: .day, value: -30, to: now), nil)
-                }
-            }
+            var title: String { self == .top ? "Top artists" : "From a seed" }
         }
 
+        var mode: Mode = .top
         var count = 100
-        var period: Period = .allTime
+        /// The same choices and default as the Overview's period (`DateRangePresets`): "last30" is Last 30 days.
+        var periodId = "last30"
         var minMatchPercent = 40
         var showGhosts = false
+        var showArtwork = true
+        /// From a seed: the artist the map is drawn from, and how many steps out it reaches (1 or 2).
+        var seedArtist: String?
+        var reach = 1
 
         init() {}
 
-        private enum CodingKeys: String, CodingKey { case count, period, minMatchPercent, showGhosts }
+        private enum CodingKeys: String, CodingKey { case mode, count, periodId, minMatchPercent, showGhosts, showArtwork, seedArtist, reach }
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
+            mode = try values.decodeIfPresent(Mode.self, forKey: .mode) ?? .top
             count = try values.decodeIfPresent(Int.self, forKey: .count) ?? 100
-            period = try values.decodeIfPresent(Period.self, forKey: .period) ?? .allTime
+            // An earlier version saved a different, shorter list of periods under another name; it is not carried over.
+            periodId = try values.decodeIfPresent(String.self, forKey: .periodId) ?? "last30"
             minMatchPercent = try values.decodeIfPresent(Int.self, forKey: .minMatchPercent) ?? 40
             showGhosts = try values.decodeIfPresent(Bool.self, forKey: .showGhosts) ?? false
+            showArtwork = try values.decodeIfPresent(Bool.self, forKey: .showArtwork) ?? true
+            seedArtist = try values.decodeIfPresent(String.self, forKey: .seedArtist)
+            reach = min(2, max(1, try values.decodeIfPresent(Int.self, forKey: .reach) ?? 1))
         }
     }
 
-    static let countChoices = [50, 100, 200]
+    static let countChoices = [10, 25, 50, 100, 200]
     static let minMatchRange = 30...90
 
     /// One line of the side panel's "closest links".
@@ -86,6 +81,10 @@ final class ArtistMapModel {
     private(set) var lookupDone = 0
     private(set) var lookupTotal = 0
     private(set) var lookupMessage: String?
+    /// The period choices (as on Overview), bounded by your first scrobble once the history is read.
+    private(set) var rangeOptions = DateRangePresets.build(oldestScrobbleDate: nil)
+    /// Artist pictures drawn on the dots, cut square and small, by artist key.
+    private(set) var artwork: [String: NSImage] = [:]
 
     let container: ModelContainer
     private var snapshots: [ScrobbleSnapshot] = []
@@ -97,6 +96,17 @@ final class ArtistMapModel {
     private var rebuildTask: Task<Void, Never>?
     private var lookupTask: Task<Void, Never>?
     private var throttlePending = false
+    /// Every artist you have played, by key, which a seed's neighbors are taken from.
+    private var library: [String: ArtistMapEntry] = [:]
+    /// The artists whose answer is still missing and would add to the map.
+    private(set) var lookupTargets: [String] = []
+    private var lookupAfterRescope = false
+    /// Artists whose saved answer is older than 30 days: still drawn, and offered for a refresh.
+    private var staleKeys = Set<String>()
+    private(set) var hasAnswers = false
+    private var imageLookup: [String: String]?
+    private var artworkTried = Set<String>()
+    private var artworkTask: Task<Void, Never>?
     /// The drawing area (the canvas less its margin), which the layout is worked out for.
     private(set) var canvasSize = ArtistMapLayout.defaultCanvas
     static let canvasPadding: CGFloat = 36
@@ -105,7 +115,12 @@ final class ArtistMapModel {
 
     init(container: ModelContainer) { self.container = container }
 
-    var missingCount: Int { max(0, scopeCount - answeredCount) }
+    var missingCount: Int { lookupTargets.count }
+    /// Everything waiting is an old answer to refresh, rather than an artist with no answer yet.
+    var lookupIsRefresh: Bool { !lookupTargets.isEmpty && lookupTargets.allSatisfy { staleKeys.contains(ArtistMapNames.key($0)) } }
+    var staleCount: Int { scope.filter { staleKeys.contains(ArtistMapNames.key($0.name)) }.count }
+    /// The seed's key when the map is drawn from one.
+    var seedKey: String? { options.mode == .seed ? options.seedArtist.map(ArtistMapNames.key) : nil }
     var maxPlays: Int { shown.nodes.map(\.plays).max() ?? 1 }
 
     /// The drawing area changed size: lay the map out again for the new shape (a small change is ignored).
@@ -124,8 +139,21 @@ final class ArtistMapModel {
         let ghosts = shown.nodes.count - shownArtists
         var parts = ["\(shownArtists) artists", "\(shown.edges.count) links"]
         if ghosts > 0 { parts.append("\(ghosts) you haven't played") }
-        parts.append(missingCount == 0 ? "saved answers for all \(scopeCount)" : "saved answers for \(answeredCount) of \(scopeCount)")
+        if options.mode == .seed {
+            parts.append(options.reach == 1 ? "one step out" : "two steps out")
+            if missingCount > 0 { parts.append("\(missingCount) \(missingCount == 1 ? "lookup" : "lookups") waiting") }
+        } else {
+            parts.append(missingCount == 0 ? "saved answers for all \(scopeCount)" : "saved answers for \(answeredCount) of \(scopeCount)")
+        }
+        if staleCount > 0 { parts.append("\(staleCount) older than 30 days") }
         return parts.joined(separator: " · ")
+    }
+
+    /// The dates the chosen period covers; Last 30 days if the saved choice no longer exists (a year before your first scrobble, say).
+    func selectedRange() -> (from: Date?, to: Date?) {
+        let option = rangeOptions.first { $0.id == options.periodId } ?? rangeOptions.first { $0.id == "last30" }
+        guard let range = option?.range() else { return (nil, nil) }
+        return (range.from, range.to)
     }
 
     // MARK: Loading
@@ -133,38 +161,102 @@ final class ArtistMapModel {
     func start() async {
         isLoadingHistory = true
         snapshots = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
+        rangeOptions = DateRangePresets.build(oldestScrobbleDate: snapshots.first?.playedAt)
         hasHistory = !snapshots.isEmpty
         isLoadingHistory = false
         await rescope()
     }
 
-    /// The artists on the map changed (a different count or period): take the top artists again and read what is saved about them.
+    /// The artists on the map changed (another count, period, mode or seed): choose them again and read what is saved about them.
     func rescope() async {
         lookupTask?.cancel()
-        let snaps = snapshots, count = options.count, range = options.period.range(now: Date())
-        let top = await Task.detached(priority: .userInitiated) {
-            ArtistMapScope.top(snapshots: snaps, count: count, from: range.from, to: range.to)
-        }.value
-        scope = top.entries
-        libraryKeys = top.libraryKeys
-        scopeCount = scope.count
-        let provider = ArtistMapSavedProvider(store: SimilarityCacheStore(modelContainer: container))
-        let saved = await ArtistMapLoader.load(artists: scope.map(\.name), provider: provider, fetchMissing: false, isOffline: { false }, onUpdate: { _ in })
-        answers = saved.neighbors
-        updateAnswered()
+        imageLookup = nil
+        let snaps = snapshots
+        if options.mode == .seed {
+            await rescopeSeed(snaps)
+        } else {
+            let count = options.count, range = selectedRange()
+            let top = await Task.detached(priority: .userInitiated) {
+                ArtistMapScope.top(snapshots: snaps, count: count, from: range.from, to: range.to)
+            }.value
+            scope = top.entries
+            libraryKeys = top.libraryKeys
+            scopeCount = scope.count
+            let provider = ArtistMapSavedProvider(store: SimilarityCacheStore(modelContainer: container))
+            let saved = await ArtistMapLoader.load(artists: scope.map(\.name), provider: provider, fetchMissing: false, isOffline: { false }, onUpdate: { _ in })
+            answers = saved.neighbors
+            staleKeys = saved.summary.staleKeys
+            updateAnswered()
+        }
         await rebuild()
+        if lookupAfterRescope {
+            lookupAfterRescope = false
+            lookUpMissing()
+        }
+    }
+
+    /// A map from one seed: its neighbors in your library, and (two steps) theirs. What is saved is read in two rounds, since the
+    /// neighbors are only known once the seed's own answer is.
+    private func rescopeSeed(_ snaps: [ScrobbleSnapshot]) async {
+        let range = selectedRange()
+        let everyone = await Task.detached(priority: .userInitiated) { ArtistMapScope.top(snapshots: snaps, count: Int.max, from: range.from, to: range.to) }.value
+        libraryKeys = everyone.libraryKeys
+        library = Dictionary(everyone.entries.map { (ArtistMapNames.key($0.name), $0) }, uniquingKeysWith: { first, _ in first })
+        answers = [:]
+        staleKeys = []
+        if let key = seedKey { selectedKey = key }
+        guard options.seedArtist != nil else { updateAnswered(); return }
+        let provider = ArtistMapSavedProvider(store: SimilarityCacheStore(modelContainer: container))
+        for _ in 0..<2 {
+            updateAnswered()
+            let saved = await ArtistMapLoader.load(artists: scope.map(\.name), provider: provider, fetchMissing: false, isOffline: { false }, onUpdate: { _ in })
+            answers.merge(saved.neighbors) { _, new in new }
+            staleKeys.formUnion(saved.summary.staleKeys)
+        }
+        updateAnswered()
+    }
+
+    /// Picks `name` as the seed, switches to the seed map and, once it is drawn from what is saved, looks up what is missing (choosing a
+    /// seed is the request to ask Last.fm about it).
+    func chooseSeed(_ name: String) {
+        lookupAfterRescope = true
+        let before = options
+        options.mode = .seed
+        options.seedArtist = name
+        if options == before { Task { await rescope() } }
     }
 
     func optionsChanged(from old: Options) {
-        if old.count != options.count || old.period != options.period {
+        if old.count != options.count || old.periodId != options.periodId || old.mode != options.mode
+            || old.seedArtist != options.seedArtist || old.reach != options.reach {
             Task { await rescope() }
         } else {
             scheduleRebuild()
         }
     }
 
+    /// What the answers so far say is on the map and still to look up.
     private func updateAnswered() {
-        answeredCount = scope.filter { answers[ArtistMapNames.key($0.name)] != nil }.count
+        if options.mode == .seed {
+            guard let seed = options.seedArtist else {
+                scope = []; lookupTargets = []; scopeCount = 0; answeredCount = 0
+                return
+            }
+            let result = ArtistMapSeedScope.build(seed: seed, library: library, answers: answers, steps: options.reach, stale: staleKeys)
+            scope = result.scope
+            lookupTargets = result.lookups
+            scopeCount = scope.count
+        } else {
+            lookupTargets = scope.filter {
+                let key = ArtistMapNames.key($0.name)
+                return answers[key] == nil || staleKeys.contains(key)
+            }.map(\.name)
+        }
+        hasAnswers = scope.contains { answers[ArtistMapNames.key($0.name)] != nil }
+        answeredCount = scope.filter {
+            let key = ArtistMapNames.key($0.name)
+            return answers[key] != nil && !staleKeys.contains(key)
+        }.count
     }
 
     // MARK: Drawing
@@ -193,14 +285,21 @@ final class ArtistMapModel {
         generation += 1
         let mine = generation
         let graph = ArtistMapGraph.build(scope: scope, libraryKeys: libraryKeys, neighbors: answers)
-        let filtered = graph.filtered(minMatch: Double(options.minMatchPercent) / 100, showGhosts: options.showGhosts)
+        let seed = seedKey
+        let filtered = graph.filtered(minMatch: Double(options.minMatchPercent) / 100, showGhosts: options.showGhosts, alwaysKeep: seed, dropUnlinked: seed != nil)
         let found = ArtistMapGroups.find(in: filtered)
+        // Round a seed, the members of a group sit together.
+        let ringOrder = filtered.nodes.indices.sorted { a, b in
+            let ga = found.groupOfNode[a] < 0 ? Int.max : found.groupOfNode[a], gb = found.groupOfNode[b] < 0 ? Int.max : found.groupOfNode[b]
+            return ga != gb ? ga < gb : a < b
+        }
         let previous = positionsByKey
         let canvas = canvasSize
         let top = filtered.nodes.map(\.plays).max() ?? 1
         let radii = filtered.nodes.map { Double(Self.radius(of: $0, maxPlays: top)) }
         let laidOut = await Task.detached(priority: .userInitiated) {
-            ArtistMapLayout.force(graph: filtered, previous: previous, canvas: canvas, radii: radii)
+            if let seed { return ArtistMapLayout.radial(graph: filtered, seedKey: seed, canvas: canvas, radii: radii, order: ringOrder) }
+            return ArtistMapLayout.force(graph: filtered, previous: previous, canvas: canvas, radii: radii)
         }.value
         guard mine == generation else { return }
         shown = filtered
@@ -208,35 +307,79 @@ final class ArtistMapModel {
         positions = laidOut
         for (index, node) in filtered.nodes.enumerated() { positionsByKey[node.key] = laidOut[index] }
         if let key = selectedKey, !filtered.nodes.contains(where: { $0.key == key }) { selectedKey = nil }
+        refreshArtwork()
+    }
+
+    // MARK: Artwork
+
+    /// Loads the pictures for the artists now on the map that have one saved (or reachable, when online). The map draws at once with
+    /// colored dots and the pictures come in as they load; an artist with no picture keeps its colored dot, and is not asked for again.
+    func refreshArtwork() {
+        guard options.showArtwork else { return }
+        let wanted = shown.nodes.filter { !$0.isGhost && artwork[$0.key] == nil && !artworkTried.contains($0.key) }
+        guard !wanted.isEmpty else { return }
+        artworkTask?.cancel()
+        let container = self.container
+        let known = imageLookup
+        artworkTask = Task { [weak self] in
+            let lookup: [String: String]
+            if let known { lookup = known } else {
+                lookup = await Task.detached(priority: .utility) { (try? ImageResolutionEngine.imageLookup(context: ModelContext(container))) ?? [:] }.value
+                self?.imageLookup = lookup
+            }
+            var urls: [String: String] = [:]
+            for node in wanted {
+                let target = ImageTarget(kind: .artist, artist: node.name, album: nil, track: nil)
+                if let url = ImageResolutionEngine.effectiveImageURL(for: target, lookup: lookup) { urls[node.key] = url }
+            }
+            let loaded = await ShareArtwork.load(Array(urls.values))
+            guard !Task.isCancelled, let self else { return }
+            for node in wanted {
+                artworkTried.insert(node.key)
+                if let url = urls[node.key], let image = loaded[url] { artwork[node.key] = ArtistMapArtwork.thumbnail(image) }
+            }
+        }
     }
 
     // MARK: Lookups
 
     func lookUpMissing() {
-        guard !isLookingUp else { return }
+        guard !isLookingUp, !lookupTargets.isEmpty else { return }
         guard let credentials = LastfmCredentialsStore.load() else {
             lookupMessage = "Connect Last.fm in Settings to look up similar artists."
             return
         }
         let client = LastfmAPIClient(apiKey: credentials.apiKey, username: credentials.username)
         let provider = LastfmSimilarityProvider(client: client, store: SimilarityCacheStore(modelContainer: container))
-        let names = scope.map(\.name)
         isLookingUp = true
         lookupMessage = nil
-        lookupDone = answeredCount
-        lookupTotal = names.count
+        lookupDone = 0
+        lookupTotal = lookupTargets.count
         lookupTask = Task { [weak self] in
-            let (stream, continuation) = AsyncStream.makeStream(of: ArtistMapLoader.Update.self)
-            let consumer = Task { @MainActor in
-                for await update in stream { self?.apply(update) }
+            var combined = ArtistMapLoader.Summary()
+            // A map from a seed learns its neighbors from the seed's answer, so it looks up in rounds: the seed, then its neighbors.
+            for _ in 0..<3 {
+                guard let self else { return }
+                let names = self.lookupTargets
+                if names.isEmpty { break }
+                self.lookupDone = 0
+                self.lookupTotal = names.count
+                let (stream, continuation) = AsyncStream.makeStream(of: ArtistMapLoader.Update.self)
+                let consumer = Task { @MainActor in
+                    for await update in stream { self.apply(update) }
+                }
+                let result = await ArtistMapLoader.load(
+                    artists: names, provider: provider, fetchMissing: true,
+                    isOffline: { ConnectivityGate.isOffline }, onUpdate: { continuation.yield($0) }
+                )
+                continuation.finish()
+                await consumer.value
+                combined.fetched += result.summary.fetched
+                combined.failed += result.summary.failed
+                if let stopped = result.summary.stopped { combined.stopped = stopped; break }
+                if result.summary.fetched == 0 || self.options.mode == .top { break }
             }
-            let result = await ArtistMapLoader.load(
-                artists: names, provider: provider, fetchMissing: true,
-                isOffline: { ConnectivityGate.isOffline }, onUpdate: { continuation.yield($0) }
-            )
-            continuation.finish()
-            await consumer.value
-            await self?.finishLookup(result.summary)
+            await self?.finishLookup(combined)
         }
     }
 
@@ -244,6 +387,7 @@ final class ArtistMapModel {
 
     private func apply(_ update: ArtistMapLoader.Update) {
         answers[update.key] = update.neighbors
+        if !update.fromSaved { staleKeys.remove(update.key) }
         lookupDone = update.done
         lookupTotal = update.total
         updateAnswered()
@@ -269,7 +413,7 @@ final class ArtistMapModel {
     static func radius(of node: ArtistMapGraph.Node, maxPlays: Int) -> CGFloat {
         if node.isGhost { return 8 }
         let share = (Double(node.plays) / Double(max(maxPlays, 1))).squareRoot()
-        return 5 + 13 * CGFloat(share)
+        return 6 + 14 * CGFloat(share)
     }
 
     func index(ofKey key: String?) -> Int? {
@@ -305,6 +449,24 @@ final class ArtistMapModel {
     }
 }
 
+// MARK: - Artwork
+
+enum ArtistMapArtwork {
+    /// A square, centered crop of `image`, `side` points across: dots are small, so a full-size picture would only cost memory.
+    @MainActor
+    static func thumbnail(_ image: NSImage, side: CGFloat = 96) -> NSImage {
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return image }
+        let short = min(size.width, size.height)
+        let source = NSRect(x: (size.width - short) / 2, y: (size.height - short) / 2, width: short, height: short)
+        let result = NSImage(size: NSSize(width: side, height: side))
+        result.lockFocus()
+        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side), from: source, operation: .copy, fraction: 1)
+        result.unlockFocus()
+        return result
+    }
+}
+
 // MARK: - Colors
 
 enum ArtistMapPalette {
@@ -324,6 +486,7 @@ struct ArtistMapView: View {
 
     @Environment(\.modelContext) private var modelContext
     @State private var model: ArtistMapModel
+    @State private var showingSeedSearch = false
 
     init(
         modelContainer: ModelContainer, navigation: DetailNavigationCoordinator, openQuery: @escaping (QuerySpec, String, String?) -> Void,
@@ -345,12 +508,21 @@ struct ArtistMapView: View {
                     ContentUnavailableView("No scrobbles yet", systemImage: "point.3.connected.trianglepath.dotted",
                                            description: Text("Once your history is imported, your artists appear here, joined by how similar Last.fm says they are."))
                         .frame(maxWidth: .infinity, minHeight: 240)
+                } else if model.options.mode == .seed && model.options.seedArtist == nil {
+                    ContentUnavailableView {
+                        Label("Pick an artist to map from", systemImage: "point.3.connected.trianglepath.dotted")
+                    } description: {
+                        Text("The map puts that artist in the middle and draws the artists in your library that Last.fm says are most similar around it, the closest ones nearest.")
+                    } actions: {
+                        Button("Choose artist…") { showingSeedSearch = true }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
                     statusStrip
                     HStack(alignment: .top, spacing: 12) {
                         ArtistMapCanvas(model: model, onOpen: openArtist, onQuery: query)
                             .frame(minWidth: 360, minHeight: 520)
-                        ArtistMapPanel(model: model, onOpen: openArtist, onQuery: query)
+                        ArtistMapPanel(model: model, onOpen: openArtist, onQuery: query, onSeed: { model.chooseSeed($0) })
                             .frame(width: 250)
                     }
                     legend
@@ -359,6 +531,15 @@ struct ArtistMapView: View {
             .padding(16)
         }
         .navigationTitle("Artist Map")
+        .overlay {
+            if showingSeedSearch {
+                GlobalSearchOverlay(
+                    isPresented: $showingSeedSearch,
+                    onSelect: { result in if let name = result.artist?.name { model.chooseSeed(name) } },
+                    allowedKinds: [.artist]
+                )
+            }
+        }
         .task {
             guard !model.isSnapshotSample else { return }
             model.options = ToolFilterSettingsStore.load(ArtistMapModel.Options.self, toolId: Self.toolId, context: modelContext, default: ArtistMapModel.Options())
@@ -375,14 +556,34 @@ struct ArtistMapView: View {
 
     private var controls: some View {
         ToolControlsFlow {
-            Picker("Artists", selection: $model.options.count) {
-                ForEach(ArtistMapModel.countChoices, id: \.self) { Text("\($0)").tag($0) }
+            Picker("Map", selection: $model.options.mode) {
+                ForEach(ArtistMapModel.Options.Mode.allCases) { Text($0.title).tag($0) }
             }
-            .help("How many of your most played artists are on the map.")
-            Picker("Period", selection: $model.options.period) {
-                ForEach(ArtistMapModel.Options.Period.allCases) { Text($0.title).tag($0) }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help("Your top artists together, or the neighborhood of one artist.")
+            if model.options.mode == .top {
+                Picker("Artists", selection: $model.options.count) {
+                    ForEach(ArtistMapModel.countChoices, id: \.self) { Text("\($0)").tag($0) }
+                }
+                .help("How many of your most played artists are on the map.")
+            } else {
+                Button { showingSeedSearch = true } label: {
+                    Label(model.options.seedArtist ?? "Choose artist…", systemImage: "person.crop.circle.badge.plus").lineLimit(1)
+                }
+                .help("Search your library for the artist to draw the map from.")
+                Picker("Reach", selection: $model.options.reach) {
+                    Text("1 step").tag(1)
+                    Text("2 steps").tag(2)
+                }
+                .help("One step shows the artists most similar to the seed. Two steps also shows the closest few of each of those.")
             }
-            .help("The period that ranks your artists and sizes the dots.")
+            Picker("Period", selection: $model.options.periodId) {
+                ForEach(model.rangeOptions) { Text($0.label).tag($0.id) }
+            }
+            .help(model.options.mode == .top
+                  ? "The period that ranks your artists and sizes the dots."
+                  : "Only artists you played in this period are on the map, and it sizes the dots.")
             HStack(spacing: 8) {
                 Text("Minimum match").font(AppTypography.metadata)
                 Slider(value: minMatchBinding, in: Double(ArtistMapModel.minMatchRange.lowerBound)...Double(ArtistMapModel.minMatchRange.upperBound), step: 5)
@@ -390,6 +591,9 @@ struct ArtistMapView: View {
                 Text("\(model.options.minMatchPercent)%").font(AppTypography.metadata).monospacedDigit().frame(width: 36, alignment: .leading)
             }
             .help("Show only links at least this strong. Last.fm scores similarity from 0 to 100%.")
+            Toggle("Artwork", isOn: $model.options.showArtwork)
+                .toggleStyle(.checkbox)
+                .help("Draw each artist's picture on its dot. The colored ring still shows its group.")
             Toggle("Show artists I haven't played", isOn: $model.options.showGhosts)
                 .toggleStyle(.checkbox)
                 .help("Also draw the artists Last.fm says are most similar to yours that you've never played, as dashed dots.")
@@ -406,23 +610,28 @@ struct ArtistMapView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Text(model.statusText).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(2)
-                Spacer(minLength: 8)
                 if model.isLookingUp {
                     ProgressView(value: Double(model.lookupDone), total: Double(max(model.lookupTotal, 1))).frame(width: 140)
                     Text("\(model.lookupDone) of \(model.lookupTotal)").font(AppTypography.compactMetadata).monospacedDigit().foregroundStyle(.secondary)
                     Button("Stop") { model.stopLookup() }.controlSize(.small)
                 } else if model.missingCount > 0 {
-                    Button("Look up \(model.missingCount) artists") { model.lookUpMissing() }
+                    let noun = model.missingCount == 1 ? "artist" : "artists"
+                    Button { model.lookUpMissing() } label: {
+                        Label("\(model.lookupIsRefresh ? "Refresh" : "Look up") \(model.missingCount) \(noun)", systemImage: "arrow.triangle.2.circlepath")
+                    }
                         .controlSize(.small)
                         .disabled(Connectivity.shared.isOffline)
                         .help(Connectivity.shared.isOffline
                               ? "Offline mode is on. Go online to look up similar artists."
-                              : "Asks Last.fm which artists are similar to each of these, about four a second. The answers are saved for 30 days.")
+                              : (model.lookupIsRefresh
+                                 ? "These answers are more than 30 days old. They still draw the map; this asks Last.fm again."
+                                 : "Asks Last.fm which artists are similar to each of these, a few at a time (about 40 seconds for 100). The answers are saved for 30 days, after which they are offered for a refresh."))
                 }
+                Spacer(minLength: 0)
             }
             if let message = model.lookupMessage {
                 Text(message).font(AppTypography.compactMetadata).foregroundStyle(.orange)
-            } else if model.answeredCount == 0 && model.scopeCount > 0 && !model.isLookingUp {
+            } else if !model.hasAnswers && model.scopeCount > 0 && !model.isLookingUp {
                 Text("No similar-artist answers are saved for these artists yet. Look them up to draw the links.")
                     .font(AppTypography.compactMetadata).foregroundStyle(.orange)
             }
@@ -433,6 +642,9 @@ struct ArtistMapView: View {
         HStack(spacing: 16) {
             Text("Dot size = plays").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             Text("Line thickness = match").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            if model.options.mode == .seed {
+                Text("Closer to the seed = stronger match").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            }
             Text("Color = a group of artists that point at each other").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             if model.options.showGhosts {
                 Text("Dashed = not played").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
@@ -528,7 +740,7 @@ private struct ArtistMapCanvas: View {
         let everyone = scale >= 2.5
         for (index, node) in nodes.enumerated() {
             var priority = 99
-            if node.key == selected { priority = 0 }
+            if node.key == selected || node.key == model.seedKey { priority = 0 }
             else if node.key == model.hoveredKey { priority = 1 }
             else if topLinked.contains(node.key) { priority = 2 }
             else if everyone { priority = 4 }
@@ -560,8 +772,17 @@ private struct ArtistMapCanvas: View {
                 context.fill(circle, with: .color(Color(nsColor: .windowBackgroundColor)))
                 context.stroke(circle, with: .color(.secondary.opacity(dim ? 0.4 : 0.9)), style: StrokeStyle(lineWidth: 1.4, dash: [3, 3]))
             } else {
-                context.fill(circle, with: .color(color.opacity(dim ? 0.3 : 0.85)))
-                context.stroke(circle, with: .color(isSelected ? Color.primary : color), lineWidth: isSelected ? 2.5 : 1)
+                let ring: Color = isSelected ? Color.primary : (node.key == model.seedKey ? Color.accentColor : color)
+                if model.options.showArtwork, let image = model.artwork[node.key] {
+                    var layer = context
+                    layer.clip(to: circle)
+                    layer.opacity = dim ? 0.35 : 1
+                    layer.draw(Image(nsImage: image), in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+                    context.stroke(circle, with: .color(ring.opacity(dim ? 0.5 : 1)), lineWidth: isSelected ? 3 : (node.key == model.seedKey ? 3.5 : 2.2))
+                } else {
+                    context.fill(circle, with: .color(color.opacity(dim ? 0.3 : 0.85)))
+                    context.stroke(circle, with: .color(ring), lineWidth: isSelected ? 2.5 : (node.key == model.seedKey ? 3 : 1))
+                }
             }
         }
         for (index, point) in labelAt {
@@ -628,6 +849,7 @@ private struct ArtistMapPanel: View {
     let model: ArtistMapModel
     let onOpen: (String) -> Void
     let onQuery: (String) -> Void
+    let onSeed: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -656,7 +878,8 @@ private struct ArtistMapPanel: View {
                     Circle().fill(ArtistMapPalette.color(group: s.group)).frame(width: 10, height: 10)
                     Text(s.groupName.map { "\($0) and friends" } ?? "Not in a group").font(AppTypography.compactMetadata)
                 }
-                Text("\(s.node.plays.formatted()) plays in this period").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                Text(s.node.key == model.seedKey ? "The seed · \(s.node.plays.formatted()) plays" : "\(s.node.plays.formatted()) plays in this period")
+                    .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             }
         }
     }
@@ -697,6 +920,10 @@ private struct ArtistMapPanel: View {
             } else {
                 Button { onOpen(s.node.name) } label: { Label("Open artist page", systemImage: "person.crop.circle").frame(maxWidth: .infinity, alignment: .leading) }
                 Button { onQuery(s.node.name) } label: { Label("Open in Query", systemImage: "tablecells").frame(maxWidth: .infinity, alignment: .leading) }
+                if s.node.key != model.seedKey {
+                    Button { onSeed(s.node.name) } label: { Label("Map from this artist", systemImage: "scope").frame(maxWidth: .infinity, alignment: .leading) }
+                        .help("Draw a map with this artist in the middle.")
+                }
             }
         }
         .controlSize(.small)
@@ -710,11 +937,9 @@ private struct ArtistMapPanel: View {
 
 #if DEBUG
 extension ArtistMapModel {
-    /// A made-up map for the offscreen snapshots: three clusters of artists, a few bridges between them, some never-played dots and some
-    /// awkward names (very long, another script).
-    static func sample(container: ModelContainer, artists: Int = 60, showGhosts: Bool = true, minMatch: Int = 40, canvas: CGSize = ArtistMapLayout.defaultCanvas) -> ArtistMapModel {
-        let model = ArtistMapModel(container: container)
-        model.canvasSize = canvas
+    /// Made-up artists for the offscreen snapshots: three clusters, a few bridges between them, some never-played artists and some awkward
+    /// names (very long, another script).
+    private static func sampleData(artists: Int) -> (scope: [ArtistMapEntry], answers: [String: [SimilarArtist]]) {
         var rng = SeededRandom(seed: 7)
         var scope: [ArtistMapEntry] = []
         var answers: [String: [SimilarArtist]] = [:]
@@ -737,30 +962,107 @@ extension ArtistMapModel {
                     if r < 0.28 { list.append(SimilarArtist(name: names[j], match: 0.35 + r * 2)) }
                 }
                 if i % 6 == 0 { list.append(SimilarArtist(name: "Never Played \(c)-\(i % 5)", match: 0.5 + Double(i % 4) * 0.1)) }
-                answers[ArtistMapNames.key(name)] = list
+                answers[ArtistMapNames.key(name), default: []] += list
             }
         }
         for c in clusters.indices {
             let from = ArtistMapNames.key(firstOfCluster[c]), to = firstOfCluster[(c + 1) % clusters.count]
             answers[from, default: []].append(SimilarArtist(name: to, match: 0.45))
         }
-        model.scope = scope
-        model.libraryKeys = Set(scope.map { ArtistMapNames.key($0.name) })
-        model.answers = answers
-        model.scopeCount = scope.count
-        model.answeredCount = scope.count
+        return (scope, answers)
+    }
+
+    /// Marks some artists as waiting for a lookup (and, if `stale`, as old answers to refresh), so a snapshot shows the status strip's button.
+    func installSampleWaiting(count: Int, stale: Bool) {
+        let names = shown.nodes.filter { !$0.isGhost }.prefix(count).map(\.name)
+        lookupTargets = names
+        if stale { staleKeys = Set(names.map { ArtistMapNames.key($0) }) }
+        answeredCount = max(0, scopeCount - names.count)
+    }
+
+    /// Pictures for two artists in three, made up (a color block with a stripe), so the snapshots show how artwork sits on a dot.
+    func installSampleArtwork() {
+        for (index, node) in shown.nodes.enumerated() where !node.isGhost && index % 3 != 1 {
+            let image = NSImage(size: NSSize(width: 120, height: 120))
+            image.lockFocus()
+            NSColor(hue: CGFloat((index * 37) % 100) / 100, saturation: 0.55, brightness: 0.85, alpha: 1).setFill()
+            NSRect(x: 0, y: 0, width: 120, height: 120).fill()
+            NSColor.white.withAlphaComponent(0.7).setFill()
+            NSRect(x: 0, y: 50, width: 120, height: 22).fill()
+            image.unlockFocus()
+            artwork[node.key] = image
+        }
+    }
+
+    private func install(scope: [ArtistMapEntry], answers: [String: [SimilarArtist]], graph: ArtistMapGraph, positions: [CGPoint]) {
+        self.scope = scope
+        libraryKeys = Set(scope.map { ArtistMapNames.key($0.name) })
+        self.answers = answers
+        scopeCount = scope.count
+        answeredCount = scope.count
+        hasAnswers = true
+        shown = graph
+        groups = ArtistMapGroups.find(in: graph)
+        self.positions = positions
+        isLoadingHistory = false
+        hasHistory = true
+        isSnapshotSample = true
+    }
+
+    /// A made-up map for the offscreen snapshots.
+    static func sample(container: ModelContainer, artists: Int = 60, showGhosts: Bool = true, minMatch: Int = 40, canvas: CGSize = ArtistMapLayout.defaultCanvas) -> ArtistMapModel {
+        let model = ArtistMapModel(container: container)
+        model.canvasSize = canvas
+        let data = sampleData(artists: artists)
         model.options.showGhosts = showGhosts
         model.options.minMatchPercent = minMatch
-        let graph = ArtistMapGraph.build(scope: scope, libraryKeys: model.libraryKeys, neighbors: answers)
-            .filtered(minMatch: Double(minMatch) / 100, showGhosts: showGhosts)
-        model.shown = graph
-        model.groups = ArtistMapGroups.find(in: graph)
+        let keys = Set(data.scope.map { ArtistMapNames.key($0.name) })
+        let graph = ArtistMapGraph.build(scope: data.scope, libraryKeys: keys, neighbors: data.answers).filtered(minMatch: Double(minMatch) / 100, showGhosts: showGhosts)
         let top = graph.nodes.map(\.plays).max() ?? 1
-        model.positions = ArtistMapLayout.force(graph: graph, canvas: canvas, radii: graph.nodes.map { Double(radius(of: $0, maxPlays: top)) })
-        model.isLoadingHistory = false
-        model.hasHistory = true
-        model.isSnapshotSample = true
+        let positions = ArtistMapLayout.force(graph: graph, canvas: canvas, radii: graph.nodes.map { Double(radius(of: $0, maxPlays: top)) })
+        model.install(scope: data.scope, answers: data.answers, graph: graph, positions: positions)
+        model.installSampleArtwork()
         model.selectedKey = graph.nodes.first { $0.name.hasPrefix("Bravo 2") }?.key ?? graph.nodes.first?.key
+        return model
+    }
+
+    /// A made-up map drawn from a seed, for the offscreen snapshots.
+    static func sampleSeed(container: ModelContainer, steps: Int = 2, showGhosts: Bool = true, minMatch: Int = 30, canvas: CGSize = ArtistMapLayout.defaultCanvas) -> ArtistMapModel {
+        let model = ArtistMapModel(container: container)
+        model.canvasSize = canvas
+        let data = sampleData(artists: 90)
+        var answers = data.answers
+        let seed = "Bravo 2"
+        // The seed's own answer is long and strong, as a real one is; only the seed and its neighbors have answers, like a real lookup.
+        let library = Dictionary(data.scope.map { (ArtistMapNames.key($0.name), $0) }, uniquingKeysWith: { a, _ in a })
+        var seedList = (answers[ArtistMapNames.key(seed)] ?? []).filter { library[ArtistMapNames.key($0.name)] != nil }
+        for (i, entry) in data.scope.filter({ $0.name.hasPrefix("Alpha") || $0.name.hasPrefix("Charlie") }).prefix(6).enumerated() {
+            seedList.append(SimilarArtist(name: entry.name, match: 0.32 + Double(i) * 0.03))
+        }
+        seedList.append(SimilarArtist(name: "Never Played Seed", match: 0.62))
+        answers[ArtistMapNames.key(seed)] = seedList
+        let ringKeys = Set(ArtistMapSeedScope.build(seed: seed, library: library, answers: answers, steps: 1).scope.map { ArtistMapNames.key($0.name) })
+        answers = answers.filter { ringKeys.contains($0.key) }
+        let result = ArtistMapSeedScope.build(seed: seed, library: library, answers: answers, steps: steps)
+        model.options.mode = .seed
+        model.options.seedArtist = seed
+        model.options.reach = steps
+        model.options.showGhosts = showGhosts
+        model.options.minMatchPercent = minMatch
+        model.library = library
+        let graph = ArtistMapGraph.build(scope: result.scope, libraryKeys: Set(library.keys), neighbors: answers)
+            .filtered(minMatch: Double(minMatch) / 100, showGhosts: showGhosts, alwaysKeep: ArtistMapNames.key(seed))
+        let groups = ArtistMapGroups.find(in: graph)
+        let order = graph.nodes.indices.sorted { a, b in
+            let ga = groups.groupOfNode[a] < 0 ? Int.max : groups.groupOfNode[a], gb = groups.groupOfNode[b] < 0 ? Int.max : groups.groupOfNode[b]
+            return ga != gb ? ga < gb : a < b
+        }
+        let top = graph.nodes.map(\.plays).max() ?? 1
+        let positions = ArtistMapLayout.radial(graph: graph, seedKey: ArtistMapNames.key(seed), canvas: canvas, radii: graph.nodes.map { Double(radius(of: $0, maxPlays: top)) }, order: order)
+        model.install(scope: result.scope, answers: answers, graph: graph, positions: positions)
+        model.lookupTargets = result.lookups
+        model.installSampleArtwork()
+        model.selectedKey = ArtistMapNames.key(seed)
         return model
     }
 }

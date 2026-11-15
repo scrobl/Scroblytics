@@ -128,6 +128,14 @@ actor SimilarityCacheStore {
         return entry.payload
     }
 
+    /// The saved answer whatever its age, with when it was saved.
+    func readEntry(_ key: String) -> (payload: Data, cachedAt: Date)? {
+        var descriptor = FetchDescriptor<SimilarityLookupCacheEntry>(predicate: #Predicate { $0.cacheKey == key })
+        descriptor.fetchLimit = 1
+        guard let entry = try? modelContext.fetch(descriptor).first else { return nil }
+        return (entry.payload, entry.cachedAt)
+    }
+
     func write(_ key: String, payload: Data, now: Date = Date()) {
         var descriptor = FetchDescriptor<SimilarityLookupCacheEntry>(predicate: #Predicate { $0.cacheKey == key })
         descriptor.fetchLimit = 1

@@ -1,0 +1,406 @@
+import Foundation
+import SwiftData
+import CoreGraphics
+
+#if DEBUG
+/// `SCROBLYTICS_ARTISTMAP_CHECK=1` (with `SCROBLYTICS_STORE_PATH` on a scratch path): the Artist Map engine on made-up artists. How Last.fm
+/// names are joined to yours, the graph (both directions of a score, never-played neighbors, the slider and toggle), the groups, the layout
+/// (deterministic, inside the square, no two dots on top of each other, linked artists closer), the lookups (saved answers first, never any
+/// network while offline, a failure never recorded as "nothing similar") and the local answer cache. Exits 0 on success.
+enum ArtistMapChecks {
+    @MainActor
+    private final class Report {
+        var failures = 0
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty || ok ? "" : "  [\(detail)]"))
+            if !ok { failures += 1 }
+        }
+    }
+
+    /// A value several tasks can share.
+    private final class Box<T>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: T
+        init(_ value: T) { self.value = value }
+        func with<R>(_ body: (inout T) -> R) -> R { lock.lock(); defer { lock.unlock() }; return body(&value) }
+    }
+
+    /// Stands in for Last.fm and the saved answers.
+    private final class StubProvider: ArtistMapNeighborProviding, @unchecked Sendable {
+        let saved: Box<[String: [SimilarArtist]]>
+        let answers: [String: [SimilarArtist]]
+        let failing: Set<String>
+        let delay: UInt64
+        let calls = Box<[String]>([])
+
+        init(saved: [String: [SimilarArtist]] = [:], answers: [String: [SimilarArtist]] = [:], failing: Set<String> = [], delay: UInt64 = 0) {
+            self.saved = Box(saved)
+            self.answers = answers
+            self.failing = failing
+            self.delay = delay
+        }
+
+        func savedNeighbors(of artist: String) async -> [SimilarArtist]? { saved.with { $0[artist] } }
+
+        func fetchNeighbors(of artist: String) async throws -> [SimilarArtist] {
+            calls.with { $0.append(artist) }
+            if delay > 0 { try await Task.sleep(nanoseconds: delay) }
+            if failing.contains(artist) { throw URLError(.notConnectedToInternet) }
+            let list = answers[artist] ?? []
+            saved.with { $0[artist] = list }
+            return list
+        }
+    }
+
+    private static func sim(_ name: String, _ match: Double) -> SimilarArtist { SimilarArtist(name: name, match: match) }
+    private static func key(_ name: String) -> String { ArtistMapNames.key(name) }
+    private static func distance(_ p: CGPoint, _ q: CGPoint) -> Double { hypot(Double(p.x - q.x), Double(p.y - q.y)) }
+
+    /// Every name pointing at all the others at 70%.
+    private static func clique(_ names: [String]) -> [String: [SimilarArtist]] {
+        var out: [String: [SimilarArtist]] = [:]
+        for name in names { out[key(name)] = names.filter { $0 != name }.map { sim($0, 0.7) } }
+        return out
+    }
+
+    @MainActor
+    static func runHeadlessIfRequested(container: ModelContainer) {
+        guard ProcessInfo.processInfo.environment["SCROBLYTICS_ARTISTMAP_CHECK"] != nil else { return }
+        Task { @MainActor in
+            let report = Report()
+            namesAndScope(report)
+            let graph = graphChecks(report)
+            sliderChecks(report, graph)
+            groupChecks(report)
+            layoutChecks(report)
+            await lookupChecks(report)
+            await cacheChecks(report, container)
+            print(report.failures == 0 ? "ALL CHECKS PASSED" : "\(report.failures) CHECK(S) FAILED")
+            exit(report.failures == 0 ? 0 : 1)
+        }
+    }
+
+    // MARK: Names and scope
+
+    @MainActor
+    private static func namesAndScope(_ r: Report) {
+        let joined = key("The Artist A") == key("artist a") && key("Artist & B") == key("Artist and B")
+        let folded = key("Café Band") == key("Cafe Band") && key("Band-C") == key("Band C")
+        let punctuated = key("Band: D") == key("Band:D") && key("Jim O'Rourke") == key("Jim O’Rourke")
+        r.check("case, accents, “The”, “&”/“and” and punctuation all join", joined && folded && punctuated)
+        let apart = key("Artist A") != key("Artist B")
+        let edgeCases = key("The") == "the" && key("").isEmpty && key("!!!").isEmpty
+        r.check("different artists stay apart; a name that is only “The” keeps it; empty stays empty", apart && edgeCases)
+        r.check("a name in another script keeps its letters", key("日本のバンド") == "日本のバンド")
+
+        func play(_ artist: String, _ day: Int) -> ScrobbleSnapshot {
+            ScrobbleSnapshot(artistName: artist, albumName: "Album", trackName: "Track", imageURL: nil, playedAt: Date(timeIntervalSince1970: Double(day) * 86_400))
+        }
+        let history = [play("Artist A", 1), play("Artist A", 2), play("The Artist A", 3), play("Artist B", 3), play("Artist B", 40), play("Artist C", 41), play("Artist C", 42), play("Artist Old", 1)]
+        let top2 = ArtistMapScope.top(snapshots: history, count: 2)
+        let plays = top2.entries.map(\.plays)
+        r.check("the top artists are ranked by plays, spellings that join counting together", plays == [3, 2] && top2.entries[0].name.hasSuffix("Artist A"), "\(top2.entries)")
+        let everyone = Set(["Artist A", "Artist B", "Artist C", "Artist Old"].map(key))
+        r.check("the library is every artist ever played, not just those on the map", top2.libraryKeys == everyone, "\(top2.libraryKeys)")
+        let late = ArtistMapScope.top(snapshots: history, count: 5, from: Date(timeIntervalSince1970: 30 * 86_400), to: nil)
+        r.check("a period counts only its plays but keeps the whole library", late.entries.map(\.name) == ["Artist C", "Artist B"] && late.libraryKeys.count == 4, "\(late.entries)")
+        let none = ArtistMapScope.top(snapshots: history, count: 0).entries.isEmpty && ArtistMapScope.top(snapshots: history, count: -3).entries.isEmpty
+        r.check("a count of zero or below gives an empty map", none)
+    }
+
+    // MARK: Graph
+
+    @MainActor
+    private static func graphChecks(_ r: Report) -> ArtistMapGraph {
+        let names = [("Artist D", 40), ("Artist A", 100), ("Artist C", 60), ("Artist B", 80), ("Artist E", 20)]
+        let scope = names.map { ArtistMapEntry(name: $0.0, plays: $0.1) }
+        let library = Set(["artist a", "artist b", "artist c", "artist d", "artist e", "artist f"])
+        var answers: [String: [SimilarArtist]] = [:]
+        answers[key("Artist A")] = [sim("Artist B", 0.8), sim("Artist C", 0.5), sim("Artist F", 0.9), sim("Artist A", 0.7), sim("artist b", 0.85), sim("Ghost One", 0.6)]
+        answers[key("Artist B")] = [sim("Artist A", 0.6), sim("Artist D", 0.3), sim("Ghost One", 0.5), sim("Ghost Two", 0.25)]
+        answers[key("Artist E")] = [sim("The Artist A", 0.45)]
+        let graph = ArtistMapGraph.build(scope: scope, libraryKeys: library, neighbors: answers)
+        let order = graph.nodes.map(\.name)
+        r.check("the busiest artist comes first, then the rest in order, then the never-played", order == ["Artist A", "Artist B", "Artist C", "Artist D", "Artist E", "Ghost One"], "\(order)")
+
+        func edge(_ a: String, _ b: String) -> ArtistMapGraph.Edge? {
+            guard let i = graph.index(ofKey: key(a)), let j = graph.index(ofKey: key(b)) else { return nil }
+            return graph.edges.first { ($0.a == i && $0.b == j) || ($0.a == j && $0.b == i) }
+        }
+        let ab = edge("Artist A", "Artist B")
+        r.check("both directions of a score are kept, and the line takes the higher", ab?.aToB == 0.85 && ab?.bToA == 0.6 && ab?.weight == 0.85, "\(String(describing: ab))")
+        let ac = edge("Artist A", "Artist C"), bd = edge("Artist B", "Artist D")
+        r.check("a score listed one way only still joins the two", ac?.aToB == 0.5 && ac?.bToA == 0 && bd?.weight == 0.3)
+        let ae = edge("Artist A", "Artist E")
+        r.check("another spelling of the same artist (“The Artist A”) is the same dot", ae?.aToB == 0 && ae?.bToA == 0.45)
+        r.check("an artist is never joined to itself", !graph.edges.contains { $0.a == $0.b })
+        r.check("a neighbor you have played but who isn't on the map is left off", graph.index(ofKey: key("Artist F")) == nil)
+        let ghostOne = graph.index(ofKey: key("Ghost One")) != nil, ghostTwo = graph.index(ofKey: key("Ghost Two")) != nil
+        r.check("a never-played neighbor is a dot only when listed strongly enough (Ghost Two at 25% is not)", ghostOne && !ghostTwo)
+        let ghostLinks = graph.edges.filter { $0.b == 5 }.map(\.aToB).sorted()
+        r.check("the never-played dot is joined to each artist that lists it", graph.nodes[5].isGhost && graph.nodes[5].plays == 0 && ghostLinks == [0.5, 0.6], "\(ghostLinks)")
+        r.check("in all there are 6 dots and 6 lines", graph.nodes.count == 6 && graph.edges.count == 6, "\(graph.nodes.count) \(graph.edges.count)")
+
+        let twoSpellings = [ArtistMapEntry(name: "artist a", plays: 40), ArtistMapEntry(name: "Artist A", plays: 60)]
+        let merged = ArtistMapGraph.build(scope: twoSpellings, libraryKeys: library, neighbors: [:])
+        r.check("two spellings of one artist become one dot with their plays added, shown as the busier spelling", merged.nodes.count == 1 && merged.nodes[0].plays == 100 && merged.nodes[0].name == "Artist A")
+        r.check("no artists give an empty graph", ArtistMapGraph.build(scope: [], libraryKeys: [], neighbors: [:]).nodes.isEmpty)
+
+        let many = (1...30).map { sim(String(format: "Ghost %02d", $0), 0.9 - Double($0) * 0.01) }
+        let two = [ArtistMapEntry(name: "Artist A", plays: 9), ArtistMapEntry(name: "Artist B", plays: 8)]
+        var cappedAnswers: [String: [SimilarArtist]] = [:]
+        cappedAnswers[key("Artist A")] = many
+        cappedAnswers[key("Artist B")] = [sim("Ghost 30", 0.9)]
+        let capped = ArtistMapGraph.build(scope: two, libraryKeys: library, neighbors: cappedAnswers)
+        let cappedGhosts = capped.nodes.filter(\.isGhost).map(\.name)
+        r.check("never-played dots are capped at \(ArtistMapGraph.ghostCap)", cappedGhosts.count == ArtistMapGraph.ghostCap, "\(cappedGhosts.count)")
+        let rankedFirst = cappedGhosts.first == "Ghost 30" && cappedGhosts.contains("Ghost 24") && !cappedGhosts.contains("Ghost 28")
+        r.check("and the ones several of your artists point at rank first, even when each link is weaker", rankedFirst, "\(cappedGhosts.prefix(3)) … \(cappedGhosts.suffix(2))")
+        return graph
+    }
+
+    // MARK: Slider and toggle
+
+    @MainActor
+    private static func sliderChecks(_ r: Report, _ graph: ArtistMapGraph) {
+        let atForty = graph.filtered(minMatch: 0.4, showGhosts: false)
+        let keepsD = atForty.nodes.contains { $0.name == "Artist D" }
+        r.check("the slider hides the weaker lines and keeps every artist you play, linked or not", atForty.nodes.count == 5 && atForty.edges.count == 3 && keepsD, "\(atForty.nodes.count) \(atForty.edges.count)")
+        let atFifty = graph.filtered(minMatch: 0.5, showGhosts: false)
+        r.check("a line exactly at the minimum stays", atFifty.edges.contains { $0.weight == 0.5 })
+        let withGhosts = graph.filtered(minMatch: 0.4, showGhosts: true)
+        r.check("the never-played toggle adds the dot with its lines", withGhosts.nodes.count == 6 && withGhosts.edges.count == 5)
+        let atFiftyFive = graph.filtered(minMatch: 0.55, showGhosts: true)
+        r.check("only the lines that clear the slider are kept, and the dot stays while one of them reaches it", atFiftyFive.edges.count == 2 && atFiftyFive.nodes.contains { $0.isGhost })
+        let atSeventy = graph.filtered(minMatch: 0.7, showGhosts: true)
+        r.check("a never-played dot with no line left is dropped", !atSeventy.nodes.contains { $0.isGhost })
+        let valid = atForty.edges.allSatisfy { $0.a >= 0 && $0.b < atForty.nodes.count && $0.a < $0.b }
+        r.check("the filtered graph's lines point at real dots", valid)
+    }
+
+    // MARK: Groups
+
+    @MainActor
+    private static func groupChecks(_ r: Report) {
+        let xs = ["X1", "X2", "X3", "X4"], ys = ["Y1", "Y2", "Y3"], pair = ["P1", "P2"]
+        var answers = clique(xs).merging(clique(ys)) { a, _ in a }.merging(clique(pair)) { a, _ in a }
+        answers[key("X4")]?.append(sim("Y1", 0.35))
+        let plays = [90, 80, 70, 60, 50, 40, 30, 5, 4, 10]
+        let scope: [ArtistMapEntry] = zip(xs + ys + pair + ["Z"], plays).map { ArtistMapEntry(name: $0, plays: $1) }
+        let libraryKeys = Set(scope.map { key($0.name) })
+        let graph = ArtistMapGraph.build(scope: scope, libraryKeys: libraryKeys, neighbors: answers)
+        let groups = ArtistMapGroups.find(in: graph)
+        func groupOf(_ name: String) -> Int { graph.index(ofKey: key(name)).map { groups.groupOfNode[$0] } ?? -9 }
+        r.check("two clusters are found, the larger first", groups.names.count == 2 && groups.sizes == [4, 3], "\(groups.names) \(groups.sizes)")
+        let xGroup = Set(xs.map(groupOf)), yGroup = Set(ys.map(groupOf))
+        r.check("each artist is in its own cluster, a weak link between clusters doesn't merge them", xGroup == [0] && yGroup == [1])
+        r.check("a cluster is named after its busiest artist", groups.names == ["X1", "Y1"])
+        r.check("a pair or a lone artist is in no group", groupOf("P1") == -1 && groupOf("P2") == -1 && groupOf("Z") == -1)
+
+        var sameEveryTime = true
+        for seed in 0..<6 {
+            var rng = SeededRandom(seed: UInt64(seed + 1))
+            let shuffled = ArtistMapGraph.build(scope: scope.shuffled(using: &rng), libraryKeys: libraryKeys, neighbors: answers)
+            let found = ArtistMapGroups.find(in: shuffled)
+            for index in shuffled.nodes.indices where found.groupOfNode[index] != groupOf(shuffled.nodes[index].name) { sameEveryTime = false }
+        }
+        r.check("the same artists give the same groups whatever order they arrive in", sameEveryTime)
+
+        var withGhostAnswers = answers
+        withGhostAnswers[key("X1")] = (answers[key("X1")] ?? []) + [sim("Ghost One", 0.9)]
+        let withGhost = ArtistMapGraph.build(scope: scope, libraryKeys: libraryKeys, neighbors: withGhostAnswers)
+        let ghostGroups = ArtistMapGroups.find(in: withGhost)
+        r.check("a never-played dot is never in a group", withGhost.nodes.last?.isGhost == true && ghostGroups.groupOfNode[withGhost.nodes.count - 1] == -1)
+        let hidden = ArtistMapGroups.find(in: graph.filtered(minMatch: 0.4, showGhosts: false))
+        r.check("groups follow the lines left on screen (the weak bridge is gone and nothing changes)", hidden.sizes == [4, 3])
+    }
+
+    // MARK: Layout
+
+    @MainActor
+    private static func layoutChecks(_ r: Report) {
+        var answers: [String: [SimilarArtist]] = [:]
+        var scope: [ArtistMapEntry] = []
+        for c in 0..<3 {
+            let names = (1...5).map { "C\(c)-\($0)" }
+            for (i, name) in names.enumerated() { scope.append(ArtistMapEntry(name: name, plays: 1000 - c * 100 - i * 10)) }
+            answers.merge(clique(names)) { a, _ in a }
+        }
+        answers[key("C0-1")]?.append(sim("C1-1", 0.35))
+        answers[key("C1-1")]?.append(sim("C2-1", 0.35))
+        let libraryKeys = Set(scope.map { key($0.name) })
+        let graph = ArtistMapGraph.build(scope: scope, libraryKeys: libraryKeys, neighbors: answers)
+        let layout = ArtistMapLayout.force(graph: graph)
+        let inside = layout.allSatisfy { $0.x >= 0 && $0.x <= 1 && $0.y >= 0 && $0.y <= 1 }
+        r.check("every dot gets a position inside the square", layout.count == graph.nodes.count && inside)
+        r.check("the same map is laid out the same way every time", layout == ArtistMapLayout.force(graph: graph))
+
+        var closest = Double.infinity
+        for i in layout.indices { for j in (i + 1)..<layout.count { closest = min(closest, distance(layout[i], layout[j])) } }
+        r.check("no two dots sit on top of each other", closest >= 0.04 - 1e-6, "closest \(closest)")
+
+        var linked: [Double] = [], others: [Double] = []
+        let linkedPairs = Set(graph.edges.filter { $0.weight >= 0.5 }.map { "\($0.a),\($0.b)" })
+        for i in layout.indices {
+            for j in (i + 1)..<layout.count {
+                let d = distance(layout[i], layout[j])
+                if linkedPairs.contains("\(i),\(j)") { linked.append(d) } else { others.append(d) }
+            }
+        }
+        let linkedMean = linked.reduce(0, +) / Double(max(linked.count, 1)), otherMean = others.reduce(0, +) / Double(max(others.count, 1))
+        r.check("artists that point at each other sit much closer than those that don't", linkedMean < otherMean * 0.6, "linked \(linkedMean) vs others \(otherMean)")
+
+        var withoutBridge = answers
+        withoutBridge[key("C0-1")] = (answers[key("C0-1")] ?? []).filter { $0.name != "C1-1" }
+        let nudged = ArtistMapGraph.build(scope: scope, libraryKeys: libraryKeys, neighbors: withoutBridge)
+        var previous: [String: CGPoint] = [:]
+        for (i, node) in graph.nodes.enumerated() { previous[node.key] = layout[i] }
+        let relaid = ArtistMapLayout.force(graph: nudged, previous: previous)
+        var shift = 0.0
+        for (i, node) in nudged.nodes.enumerated() { shift += distance(relaid[i], previous[node.key] ?? .zero) }
+        let averageShift = shift / Double(nudged.nodes.count)
+        r.check("changing one line moves the picture only a little (it starts from where the dots were)", averageShift < 0.08, "average move \(averageShift)")
+
+        let single = ArtistMapGraph(nodes: [ArtistMapGraph.Node(key: "a", name: "A", plays: 1, isGhost: false)], edges: [])
+        r.check("an empty map has no positions and a single artist sits in the middle", ArtistMapLayout.force(graph: ArtistMapGraph()).isEmpty && ArtistMapLayout.force(graph: single) == [CGPoint(x: 0.5, y: 0.5)])
+
+        // 200 artists, each pointing at a few others: the size the Top artists mode can reach.
+        var bigAnswers: [String: [SimilarArtist]] = [:]
+        let bigScope = (0..<200).map { ArtistMapEntry(name: "Big \($0)", plays: 5000 - $0 * 10) }
+        for i in 0..<200 {
+            bigAnswers[key("Big \(i)")] = [1, 2, 7, 31].map { sim("Big \((i + $0 * 3) % 200)", 0.9 - Double($0) * 0.02) }
+        }
+        let bigGraph = ArtistMapGraph.build(scope: bigScope, libraryKeys: Set(bigScope.map { key($0.name) }), neighbors: bigAnswers)
+        let startedAt = Date()
+        let bigLayout = ArtistMapLayout.force(graph: bigGraph)
+        let seconds = Date().timeIntervalSince(startedAt)
+        var bigClosest = Double.infinity
+        for i in bigLayout.indices { for j in (i + 1)..<bigLayout.count { bigClosest = min(bigClosest, distance(bigLayout[i], bigLayout[j])) } }
+        print("INFO  200 artists, \(bigGraph.edges.count) lines laid out in \(String(format: "%.2f", seconds)) s")
+        let bigInside = bigLayout.allSatisfy { $0.x >= 0 && $0.x <= 1 && $0.y >= 0 && $0.y <= 1 }
+        r.check("200 artists are laid out in under 3 seconds, inside the square, none on top of another", seconds < 3 && bigInside && bigClosest >= 0.04 - 1e-6, "\(seconds) s, closest \(bigClosest)")
+    }
+
+    // MARK: Lookups
+
+    @MainActor
+    private static func lookupChecks(_ r: Report) async {
+        let neverOffline: @Sendable () -> Bool = { false }
+        let savedList = [sim("Artist B", 0.8)]
+        let four = ["Artist A", "Artist B", "Artist C", "Artist D"]
+
+        let provider = StubProvider(saved: ["Artist A": savedList, "Artist B": savedList], answers: ["Artist C": [sim("Artist A", 0.5)], "Artist D": []])
+        let savedOnly = await ArtistMapLoader.load(artists: four, provider: provider, fetchMissing: false, isOffline: neverOffline, onUpdate: { _ in })
+        let expected = ArtistMapLoader.Summary(fromSaved: 2, fetched: 0, missing: 2, failed: 0, stopped: nil)
+        r.check("saved answers load with no lookups, and the artists still without one are counted", savedOnly.summary == expected && provider.calls.with { $0.isEmpty } && savedOnly.neighbors.count == 2, "\(savedOnly.summary)")
+        let full = await ArtistMapLoader.load(artists: four + ["artist c"], provider: provider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
+        let fetchedCalls = provider.calls.with { $0 }
+        r.check("the missing ones are fetched, once each, even if named twice", full.summary.fetched == 2 && full.summary.missing == 0 && fetchedCalls == ["Artist C", "Artist D"], "\(full.summary) \(fetchedCalls)")
+        r.check("a genuinely empty answer is kept as an answer, not as a gap", full.neighbors[key("Artist D")]?.isEmpty == true && full.neighbors.count == 4)
+
+        let progressProvider = StubProvider(saved: ["Artist A": savedList], answers: ["Artist B": savedList])
+        let seen = Box<[Int]>([])
+        let progressed = await ArtistMapLoader.load(artists: ["Artist A", "Artist B"], provider: progressProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { update in seen.with { $0.append(update.done) } })
+        r.check("progress counts up from the saved answers through the fetched ones", seen.with { $0 } == [1, 2] && progressed.summary.fetched == 1, "\(seen.with { $0 })")
+
+        let offlineProvider = StubProvider(saved: ["Artist A": savedList], answers: ["Artist B": savedList, "Artist C": savedList])
+        let offline = await ArtistMapLoader.load(artists: ["Artist A", "Artist B", "Artist C"], provider: offlineProvider, fetchMissing: true, isOffline: { true }, onUpdate: { _ in })
+        let noCalls = offlineProvider.calls.with { $0.isEmpty }
+        r.check("in Offline mode nothing is fetched and the rest are reported as missing", noCalls && offline.summary.stopped == .offline && offline.summary.missing == 2 && offline.summary.fromSaved == 1, "\(offline.summary)")
+        let nothingSaved = offlineProvider.saved.with { $0["Artist B"] == nil && $0["Artist C"] == nil }
+        r.check("…and nothing is saved for them, so a later online run asks", nothingSaved)
+
+        let failingProvider = StubProvider(answers: ["Artist D": savedList], failing: ["Artist C"])
+        let failed = await ArtistMapLoader.load(artists: ["Artist C", "Artist D"], provider: failingProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
+        let gapOnly = failed.neighbors[key("Artist C")] == nil && failed.neighbors[key("Artist D")] != nil
+        r.check("a failed lookup is a gap, never an empty answer, and the others carry on", gapOnly && failed.summary.failed == 1 && failed.summary.fetched == 1 && failed.summary.missing == 1, "\(failed.summary)")
+        r.check("…and it isn't saved", failingProvider.saved.with { $0["Artist C"] == nil })
+
+        let down = (1...9).map { "Down \($0)" }
+        let downProvider = StubProvider(failing: Set(down))
+        let stopped = await ArtistMapLoader.load(artists: down, provider: downProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in })
+        let attempts = downProvider.calls.with { $0.count }
+        r.check("after \(ArtistMapLoader.failureLimit) failures in a row the lookups stop", stopped.summary.stopped == .tooManyFailures && attempts == ArtistMapLoader.failureLimit && stopped.summary.missing == 9, "\(stopped.summary) \(attempts)")
+
+        let slow = (1...20).map { "Slow \($0)" }
+        let slowAnswers = Dictionary(uniqueKeysWithValues: slow.map { ($0, savedList) })
+        let slowProvider = StubProvider(answers: slowAnswers, delay: 30_000_000)
+        let task = Task { await ArtistMapLoader.load(artists: slow, provider: slowProvider, fetchMissing: true, isOffline: neverOffline, onUpdate: { _ in }) }
+        try? await Task.sleep(nanoseconds: 110_000_000)
+        task.cancel()
+        let cancelled = await task.value
+        let keptSome = cancelled.summary.fetched > 0 && cancelled.summary.fetched < 20 && cancelled.neighbors.count == cancelled.summary.fetched
+        r.check("stopping the lookups keeps what has arrived", cancelled.summary.stopped == .cancelled && keptSome, "\(cancelled.summary)")
+    }
+
+    // MARK: The local answer cache
+
+    @MainActor
+    private static func cacheChecks(_ r: Report, _ container: ModelContainer) async {
+        guard ProcessInfo.processInfo.environment["SCROBLYTICS_STORE_PATH"] != nil else {
+            print("SKIP  the answer cache checks need SCROBLYTICS_STORE_PATH on a scratch store")
+            return
+        }
+        let store = SimilarityCacheStore(modelContainer: container)
+        let client = LastfmAPIClient(apiKey: "0123456789abcdef0123456789abcdef", username: "nobody")
+        let provider = LastfmSimilarityProvider(client: client, store: store)
+        let list = (0..<100).map { sim("Neighbor \($0)", 1 - Double($0) / 100) }
+        await provider.saveNeighbors(list, of: "Artist Cache")
+        let back = await provider.savedNeighbors(of: "Artist Cache") ?? []
+        let sameAsSaved = back.count == 100 && zip(back, list).allSatisfy { $0.name == $1.name && $0.match == $1.match }
+        r.check("100 neighbors are saved and read back in order, with their scores", sameAsSaved)
+        let upperCase = await provider.savedNeighbors(of: "ARTIST CACHE")
+        r.check("the answer is found whatever the case of the name", upperCase != nil)
+        let nobody = await provider.savedNeighbors(of: "Artist Nobody")
+        r.check("an artist with no saved answer has none", nobody == nil)
+        let rabbitHoleKey = "artist\u{1F}artist cache"
+        let rabbitHole = await store.read(rabbitHoleKey, maxAge: LastfmSimilarityProvider.maxAge)
+        r.check("Rabbit Hole's own answers are separate and untouched", rabbitHole == nil && LastfmSimilarityProvider.mapCacheKey("Artist Cache") != rabbitHoleKey)
+        let stale = Data("[{\"name\":\"X\",\"match\":0.5}]".utf8)
+        await store.write(LastfmSimilarityProvider.mapCacheKey("Artist Old"), payload: stale, now: Date().addingTimeInterval(-40 * 86_400))
+        let old = await provider.savedNeighbors(of: "Artist Old")
+        r.check("an answer older than 30 days is not used", old == nil)
+    }
+}
+
+/// `SCROBLYTICS_ARTISTMAP_DUMP=1` (with `SCROBLYTICS_STORE_PATH` on a copy of a library, Offline): builds the map from the similarity
+/// answers already saved on that copy (Rabbit Hole's 30-neighbor lookups stand in for the map's own) and prints every line of it, so an
+/// independent reading of the same saved answers can be compared edge by edge. Reads only; asks Last.fm nothing.
+enum ArtistMapDump {
+    private struct Saved: Codable { let name: String; let match: Double }
+
+    @MainActor
+    static func runHeadlessIfRequested(container: ModelContainer) {
+        guard ProcessInfo.processInfo.environment["SCROBLYTICS_ARTISTMAP_DUMP"] != nil else { return }
+        Task { @MainActor in
+            do {
+                let snapshots = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
+                let everyone = ArtistMapScope.top(snapshots: snapshots, count: Int.max)
+                let plays = Dictionary(uniqueKeysWithValues: everyone.entries.map { (ArtistMapNames.key($0.name), $0) })
+                let entries = try container.mainContext.fetch(FetchDescriptor<SimilarityLookupCacheEntry>())
+                var answers: [String: [SimilarArtist]] = [:]
+                var scope: [ArtistMapEntry] = []
+                for entry in entries where entry.cacheKey.hasPrefix("artist\u{1F}") {
+                    let name = String(entry.cacheKey.dropFirst("artist\u{1F}".count))
+                    let key = ArtistMapNames.key(name)
+                    guard let known = plays[key], let saved = try? JSONDecoder().decode([Saved].self, from: entry.payload) else { continue }
+                    answers[key] = saved.map { SimilarArtist(name: $0.name, match: $0.match) }
+                    scope.append(known)
+                }
+                let graph = ArtistMapGraph.build(scope: scope, libraryKeys: everyone.libraryKeys, neighbors: answers)
+                print("MAP nodes=\(graph.nodes.filter { !$0.isGhost }.count) ghosts=\(graph.nodes.filter(\.isGhost).count) edges=\(graph.edges.count)")
+                for edge in graph.edges {
+                    let a = graph.nodes[edge.a], b = graph.nodes[edge.b]
+                    print("EDGE\t\(a.key)\t\(b.key)\t\(edge.aToB)\t\(edge.bToA)\t\(b.isGhost ? "ghost" : "artist")")
+                }
+                let groups = ArtistMapGroups.find(in: graph.filtered(minMatch: 0.4, showGhosts: false))
+                print("GROUPS \(groups.names) \(groups.sizes)")
+                exit(0)
+            } catch {
+                print("DUMP FAILED \(error)")
+                exit(1)
+            }
+        }
+    }
+}
+#endif

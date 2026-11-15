@@ -154,6 +154,8 @@ struct ScroblyticsApp: App {
         KeychainChecks.runHeadlessIfRequested()
         OverviewChecks.runHeadlessIfRequested()
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
+        ArtistMapChecks.runHeadlessIfRequested(container: modelContainer)
+        ArtistMapDump.runHeadlessIfRequested(container: modelContainer)
         EditionChecks.runHeadlessIfRequested(container: modelContainer)
         ShareChecks.runHeadlessIfRequested(container: modelContainer)
         ScrobbleQueryChecks.runHeadlessIfRequested(container: modelContainer)

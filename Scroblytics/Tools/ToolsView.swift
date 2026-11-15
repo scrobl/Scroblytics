@@ -224,6 +224,8 @@ struct ToolsView: View {
             DuplicateScrobblesView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
         case .rabbitHole:
             RabbitHoleView(modelContainer: modelContainer, navigation: navigation)
+        case .artistMap:
+            ArtistMapView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
         case .albumTurnovers:
             AlbumTurnoversView(modelContainer: modelContainer, navigation: navigation)
         case .collageGenerator:
@@ -248,7 +250,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, duplicateScrobbles, rabbitHole, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, duplicateScrobbles, rabbitHole, artistMap, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
     let id: Kind
     let name: String
     let summary: String
@@ -337,6 +339,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .rabbitHole, name: "Rabbit Hole",
             summary: "Start with one track and follow a branching path of recommendations through your library.",
             systemImage: "point.3.connected.trianglepath.dotted", category: "Discover"
+        ),
+        ToolDescriptor(
+            id: .artistMap, name: "Artist Map",
+            summary: "See how your artists relate to each other, joined by how similar Last.fm says they are.",
+            systemImage: "point.3.filled.connected.trianglepath.dotted", category: "Discover"
         ),
         ToolDescriptor(
             id: .albumTurnovers, name: "Album Turnovers",

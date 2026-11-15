@@ -17,6 +17,7 @@ extension HelpContent {
                     ["[Goals](help://tool-goals)", "A deadline to hear every loved track, with a burn-down chart and forecasts", "Loved tracks from a sync"],
                     ["[Similar Sounds](help://tool-similar-sounds)", "Music in your library like chosen seeds", "Last.fm credentials"],
                     ["[Rabbit Hole](help://tool-rabbit-hole)", "A path of recommendations from your library", "Last.fm credentials"],
+                    ["[Artist Map](help://tool-artist-map)", "How your artists relate, by Last.fm’s similarity scores", "Last.fm credentials (for the first lookups)"],
                     ["[Album Turnovers](help://tool-album-turnovers)", "Albums you cycle through, and how fast", "Last.fm credentials"],
                     ["[Chart Toppers](help://tool-chart-toppers)", "The #1 per release period", "Release dates"],
                     ["[Multi-Album Tracks](help://tool-multi-album)", "Songs appearing on several albums", "Nothing"],
@@ -120,6 +121,23 @@ extension HelpContent {
                 .heading("Include new music"),
                 .paragraph("Tick **Include new music**, then **Find Similar** (or **Refresh**), to also see tracks Last.fm calls similar that you have never played. They sit in the same table, marked **New**, placed by match score among your own tracks (under Shuffled they land at random places; under Play count and Last played, which they have no value for, they come after yours). For a track seed they are the similar tracks you haven’t played; for an artist or album seed they are the best-known tracks of its closest similar artists, which means a few more Last.fm lookups. The Plays and Last played columns show a dash for them, and clicking one opens its Last.fm page in your browser. A track you have played under a slightly different title is not counted as new."),
                 .paragraph("Conditions describe your own listening, so while any condition is set the new tracks are left out and the summary says how many were hidden. Songs and Per artist limits count them; Per album can’t, because a new track has no album here. **Create Apple Music Playlist** adds a new track only if it is already in your Music library."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-artist-map",
+            title: "Artist Map",
+            summary: "See how your artists relate to each other, from Last.fm’s similarity scores.",
+            blocks: [
+                .paragraph("Each dot is an artist and each line joins two artists Last.fm calls similar. **Dot size** is plays in the period, **line thickness** is how strong the match is, and **color** marks a group of artists that point at each other. The map shows your top **50, 100 or 200** artists for the **Period** you choose (all time, the last year, 90 days or 30 days)."),
+                .paragraph("Click a dot to select it: its links are highlighted, the rest fade, and the panel on the right lists its closest links with their match. **Open artist page** and **Open in Query** go from there, and right-clicking a dot gives the usual artist menu. Drag the map to move it, pinch or use + and − to zoom, and the magnifier button fits the whole map again."),
+                .heading("Match scores"),
+                .paragraph("Last.fm gives each artist a list of similar artists with a score from 0 to 100%. The scores are not symmetric (A may list B at 80% while B lists A at 60%), so a line uses the **higher of the two directions**; the panel shows both. **Minimum match** hides the weaker lines without asking Last.fm again. To keep a busy map readable, each artist shows its eight strongest links (plus any link another artist counts among its own eight); the panel’s six closest are always among them."),
+                .heading("Groups"),
+                .paragraph("Artists that point at each other strongly form a group, shown in one color and named after the busiest member in the panel (“R.E.M. and friends”). A group needs at least three artists, so a pair, or an artist with no strong links, is gray. Groups follow the links on screen, so they can change as you move **Minimum match**."),
+                .heading("Artists you haven’t played"),
+                .paragraph("**Show artists I haven’t played** adds dashed dots for the artists Last.fm says are most similar to yours that you have never played (up to 25, those several of your artists point at first). They have no group; right-click one, or select it, to open its Last.fm page. An artist who is in your library but outside the top list is simply left off."),
+                .heading("Where the scores come from"),
+                .paragraph("The first time, **Look up N artists** asks Last.fm for each artist’s 100 closest artists (about four a second; **Stop** keeps what has arrived and the map grows as answers come in). Answers are kept on your Mac for 30 days, separately from Rabbit Hole’s, so reopening the map costs no lookups. In [Offline mode](help://offline-mode), or with no Last.fm account connected, the map uses only the answers already saved and says how many artists have none. Artist names go to Last.fm and nothing else; see [What leaves your Mac](help://what-leaves-your-mac)."),
             ]
         ),
         HelpArticle(

@@ -370,6 +370,7 @@
 		F0292B23DD11F67B6F877E98 /* ReleaseDateEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 418E0D280B99E73693F0E80D /* ReleaseDateEngine.swift */; };
 		F05A64A86432CED3EA987932 /* RateLimitChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D771ACB943472A639CFBD0C2 /* RateLimitChecks.swift */; };
 		F07F38DDF09302893FE615EF /* FadingFavorites.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788F09D46F3720E307F5CB42 /* FadingFavorites.swift */; };
+		F0ED967473DAC1F79E875AE7 /* ArtistMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACD7957B87460E4E0FE92A8C /* ArtistMapView.swift */; };
 		F134F7E16B677C26E93A59AD /* TrackBPMEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8145C38DD7DA0D2AD747D5F1 /* TrackBPMEditView.swift */; };
 		F16EC9F824F945C292E628EC /* AskSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD96AFC245A7C42A3F31AE8 /* AskSuggestions.swift */; };
 		F19F3C1D6B09D78B05AB8BDD /* QueryOperator.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC5FBCD9EC7F522E9DE655C /* QueryOperator.swift */; };
@@ -644,6 +645,7 @@
 		AB059124443A555967BE5E53 /* ShareTreeCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareTreeCardView.swift; sourceTree = "<group>"; };
 		ABC3EA26E5EA1B6ABCE53D8F /* AskModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskModel.swift; sourceTree = "<group>"; };
 		ACB66BDBB2C1610EBD73CAA8 /* ShareCards.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareCards.swift; sourceTree = "<group>"; };
+		ACD7957B87460E4E0FE92A8C /* ArtistMapView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtistMapView.swift; sourceTree = "<group>"; };
 		AD41B107794A80F1F4783402 /* ReleaseYearAudit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReleaseYearAudit.swift; sourceTree = "<group>"; };
 		AD766E1015B595F2C849E708 /* FadingFavoritesEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FadingFavoritesEngine.swift; sourceTree = "<group>"; };
 		ADC64266F5CA1258C40B9594 /* TrendsShareCharts.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrendsShareCharts.swift; sourceTree = "<group>"; };
@@ -1121,6 +1123,7 @@
 				ED01C7D67AD743E9FD5DDBBD /* DuplicateScrobbles.swift */,
 				E84AD43795C0DC12DB6DC60C /* DuplicateScrobblesView.swift */,
 				CC8BEF7564A578D188FDD1D9 /* ArtistMap.swift */,
+				ACD7957B87460E4E0FE92A8C /* ArtistMapView.swift */,
 			);
 			path = Tools;
 			sourceTree = "<group>";
@@ -1912,6 +1915,7 @@
 				B698A8F5DC5BEE97624E57B7 /* DuplicateScrobblesChecks.swift in Sources */,
 				486A9BEE518CECCF11AC3DEB /* ArtistMap.swift in Sources */,
 				2B39FAC0F720BAB09CB38026 /* ArtistMapChecks.swift in Sources */,
+				F0ED967473DAC1F79E875AE7 /* ArtistMapView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

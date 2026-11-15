@@ -154,8 +154,24 @@ struct ArtistMapGraph: Sendable, Equatable {
 
     /// What the slider and the toggle leave on screen: lines at or above `minMatch`, and never-played dots only when asked for and
     /// still joined to something. Artists you play always stay, joined or not.
-    func filtered(minMatch: Double, showGhosts: Bool) -> ArtistMapGraph {
-        let keep = edges.filter { $0.weight >= minMatch - 1e-9 }
+    /// On screen every artist keeps its strongest links (and any link another artist counts among its strongest), so a crowded map
+    /// stays readable. The panel lists at most six closest links, so none of those is ever lost.
+    static let linksPerArtist = 8
+
+    func filtered(minMatch: Double, showGhosts: Bool, linksPerArtist limit: Int? = ArtistMapGraph.linksPerArtist) -> ArtistMapGraph {
+        var keep = edges.filter { $0.weight >= minMatch - 1e-9 }
+        if let limit {
+            var strongest = [[Int]](repeating: [], count: nodes.count)
+            for (i, edge) in keep.enumerated() where !nodes[edge.a].isGhost && !nodes[edge.b].isGhost {
+                strongest[edge.a].append(i)
+                strongest[edge.b].append(i)
+            }
+            var retained = Set<Int>()
+            for list in strongest {
+                for i in list.sorted(by: { keep[$0].weight != keep[$1].weight ? keep[$0].weight > keep[$1].weight : $0 < $1 }).prefix(limit) { retained.insert(i) }
+            }
+            keep = keep.enumerated().filter { retained.contains($0.offset) || nodes[$0.element.a].isGhost || nodes[$0.element.b].isGhost }.map(\.element)
+        }
         var linkedGhosts = Set<Int>()
         for edge in keep where nodes[edge.b].isGhost { linkedGhosts.insert(edge.b) }
         var remap: [Int: Int] = [:]
@@ -229,8 +245,14 @@ struct ArtistMapGroups: Sendable, Equatable {
 // MARK: - Layout
 
 enum ArtistMapLayout {
+    /// The drawing area, in points, a layout assumes when it isn't told one.
+    static let defaultCanvas = CGSize(width: 900, height: 600)
+    /// A dot's radius, in points, when it isn't told one, and the clear space kept between two dots.
+    static let defaultRadius = 8.0
+    static let defaultGap = 6.0
+
     /// Where the dots start when nothing says otherwise: a spread that depends only on the artist's name, so a map opens the same way
-    /// every time.
+    /// every time. In the unit square.
     private static func start(_ key: String) -> CGPoint {
         var h: UInt64 = 14_695_981_039_346_656_037
         for byte in key.utf8 { h ^= UInt64(byte); h = h &* 1_099_511_628_211 }
@@ -239,24 +261,34 @@ enum ArtistMapLayout {
         return CGPoint(x: 0.5 + cos(angle) * radius, y: 0.5 + sin(angle) * radius)
     }
 
-    /// Positions in the unit square, one per node, in order. Linked artists are pulled together in proportion to the match and every pair is
-    /// pushed apart. `previous` (by artist key) starts the dots where they were, so changing the slider nudges the picture instead of redrawing it.
-    static func force(graph: ArtistMapGraph, previous: [String: CGPoint] = [:], minimumGap: Double = 0.04) -> [CGPoint] {
+    /// Positions in the unit square, one per node, in order. The layout is worked out in points on a `canvas` of the real size, so
+    /// distances mean the same thing across and down, and `radii` (points, per node) keep every dot clear of the next. Linked artists are
+    /// pulled together in proportion to the match and every pair is pushed apart. `previous` (by artist key, unit square) starts the dots
+    /// where they were, so changing the slider nudges the picture instead of redrawing it.
+    static func force(
+        graph: ArtistMapGraph, previous: [String: CGPoint] = [:], canvas: CGSize = defaultCanvas, radii: [Double] = [], gap: Double = defaultGap
+    ) -> [CGPoint] {
         let n = graph.nodes.count
         if n == 0 { return [] }
+        let width = max(Double(canvas.width), 50), height = max(Double(canvas.height), 50)
         if n == 1 { return [CGPoint(x: 0.5, y: 0.5)] }
+        let radius: [Double] = (0..<n).map { $0 < radii.count ? radii[$0] : defaultRadius }
+        let margin = (radius.max() ?? defaultRadius) + gap
         var x = [Double](repeating: 0, count: n), y = [Double](repeating: 0, count: n)
         var warm = false
+        var isNew = [Bool](repeating: true, count: n)
         for (i, node) in graph.nodes.enumerated() {
             let p: CGPoint
-            if let old = previous[node.key] { p = old; warm = true } else { p = start(node.key) }
-            x[i] = p.x; y[i] = p.y
+            if let old = previous[node.key] { p = old; warm = true; isNew[i] = false } else { p = start(node.key) }
+            x[i] = Double(p.x) * width; y[i] = Double(p.y) * height
         }
-        let iterations = warm ? 60 : 320
-        let k = 0.7 / Double(n).squareRoot()
-        let hottest = warm ? 0.012 : 0.12
+        let scale = (width * height).squareRoot()
+        let iterations = warm ? 50 : 320
+        let k = 0.75 * (width * height / Double(n)).squareRoot()
         for step in 0..<iterations {
-            let temperature = hottest * (1 - Double(step) / Double(iterations)) + 0.002
+            let cooling = 1 - Double(step) / Double(iterations)
+            // A dot that was already on the map only settles a little; one that is new moves freely to find its place.
+            let settle = 0.003 * scale * cooling + 0.001 * scale, arrive = 0.08 * scale * cooling + 0.002 * scale, cold = 0.12 * scale * cooling + 0.002 * scale
             var dx = [Double](repeating: 0, count: n), dy = [Double](repeating: 0, count: n)
             for i in 0..<n {
                 for j in (i + 1)..<n {
@@ -277,47 +309,51 @@ enum ArtistMapLayout {
             }
             for i in 0..<n {
                 // A light pull to the middle keeps unlinked dots from being flung to the edge.
-                dx[i] += (0.5 - x[i]) * 0.25 * k; dy[i] += (0.5 - y[i]) * 0.25 * k
+                dx[i] += (width / 2 - x[i]) * 1.0 * k / scale; dy[i] += (height / 2 - y[i]) * 1.0 * k / scale
                 let d = max((dx[i] * dx[i] + dy[i] * dy[i]).squareRoot(), 1e-9)
-                let move = min(d, temperature)
+                let move = min(d, warm ? (isNew[i] ? arrive : settle) : cold)
                 x[i] += dx[i] / d * move; y[i] += dy[i] / d * move
             }
         }
-        // Fill the square (keeping the shape), then make sure no two dots sit on top of each other.
+        // Fill the canvas (keeping the shape), then make sure no two dots touch. A picture that grew out of an earlier one keeps its
+        // scale (so the slider nudges it); it is only refitted if it left the canvas.
         let minX = x.min()!, maxX = x.max()!, minY = y.min()!, maxY = y.max()!
-        let span = max(maxX - minX, maxY - minY)
-        // A picture that grew out of an earlier one keeps its scale (so the slider nudges it); it is only refitted if it left the square.
-        let outside = minX < 0.03 || minY < 0.03 || maxX > 0.97 || maxY > 0.97
-        if span > 1e-9, !warm || outside {
-            let scale = 0.9 / span
+        let wall = (radius.max() ?? defaultRadius) + gap / 2   // the closest `separate` lets a dot come to the edge
+        let outside = minX < wall - 0.5 || minY < wall - 0.5 || maxX > width - wall + 0.5 || maxY > height - wall + 0.5
+        if !warm || outside {
+            let spanX = maxX - minX, spanY = maxY - minY
+            let factorX = spanX > 1e-9 ? (width - 2 * margin) / spanX : 1
+            let factorY = spanY > 1e-9 ? (height - 2 * margin) / spanY : 1
             for i in 0..<n {
-                x[i] = 0.5 + (x[i] - (minX + maxX) / 2) * scale
-                y[i] = 0.5 + (y[i] - (minY + maxY) / 2) * scale
+                x[i] = width / 2 + (x[i] - (minX + maxX) / 2) * factorX
+                y[i] = height / 2 + (y[i] - (minY + maxY) / 2) * factorY
             }
         }
-        separate(&x, &y, gap: minimumGap)
-        return (0..<n).map { CGPoint(x: x[$0], y: y[$0]) }
+        separate(&x, &y, radii: radius, gap: gap, within: CGSize(width: width, height: height))
+        return (0..<n).map { CGPoint(x: x[$0] / width, y: y[$0] / height) }
     }
 
-    /// Pushes apart any two dots closer than `gap`, keeping every dot inside the square.
-    static func separate(_ x: inout [Double], _ y: inout [Double], gap: Double) {
+    /// Pushes apart any two dots closer than their radii plus `gap`, keeping every dot inside the canvas.
+    static func separate(_ x: inout [Double], _ y: inout [Double], radii: [Double], gap: Double, within canvas: CGSize) {
         let n = x.count
-        let lo = 0.03, hi = 0.97
-        for _ in 0..<80 {
+        let width = Double(canvas.width), height = Double(canvas.height)
+        let wall = (radii.max() ?? defaultRadius) + gap / 2
+        for _ in 0..<150 {
             var moved = false
             for i in 0..<n {
                 for j in (i + 1)..<n {
                     var vx = x[i] - x[j], vy = y[i] - y[j]
                     var d = (vx * vx + vy * vy).squareRoot()
-                    if d >= gap { continue }
+                    let wanted = radii[i] + radii[j] + gap
+                    if d >= wanted { continue }
                     if d < 1e-9 { vx = 1; vy = 0; d = 1 }
-                    let shift = (gap - (d < 1e-9 ? 0 : min(d, gap))) / 2 + 1e-4
+                    let shift = (wanted - d) / 2 + 0.05
                     x[i] += vx / d * shift; y[i] += vy / d * shift
                     x[j] -= vx / d * shift; y[j] -= vy / d * shift
                     moved = true
                 }
             }
-            for i in 0..<n { x[i] = min(hi, max(lo, x[i])); y[i] = min(hi, max(lo, y[i])) }
+            for i in 0..<n { x[i] = min(width - wall, max(wall, x[i])); y[i] = min(height - wall, max(wall, y[i])) }
             if !moved { break }
         }
     }
@@ -338,27 +374,66 @@ private struct ArtistMapStored: Codable {
     let match: Double
 }
 
-extension LastfmSimilarityProvider: ArtistMapNeighborProviding {
+/// The saved answers, read and written the same way whether or not an account is connected.
+enum ArtistMapAnswers {
     /// The map keeps Last.fm's 100 closest artists under its own cache key, apart from Rabbit Hole's 30.
-    static let mapNeighborLimit = 100
+    static let neighborLimit = 100
 
-    static func mapCacheKey(_ artist: String) -> String { "artistmap\u{1F}\(artist.lowercased())" }
+    static func cacheKey(_ artist: String) -> String { "artistmap\u{1F}\(artist.lowercased())" }
 
-    func savedNeighbors(of artist: String) async -> [SimilarArtist]? {
-        guard let data = await store.read(Self.mapCacheKey(artist), maxAge: Self.maxAge),
+    static func read(_ store: SimilarityCacheStore, artist: String) async -> [SimilarArtist]? {
+        guard let data = await store.read(cacheKey(artist), maxAge: LastfmSimilarityProvider.maxAge),
               let stored = try? JSONDecoder().decode([ArtistMapStored].self, from: data) else { return nil }
         return stored.map { SimilarArtist(name: $0.name, match: $0.match) }
     }
 
-    func saveNeighbors(_ list: [SimilarArtist], of artist: String) async {
+    static func write(_ store: SimilarityCacheStore, list: [SimilarArtist], artist: String) async {
         guard let data = try? JSONEncoder().encode(list.map { ArtistMapStored(name: $0.name, match: $0.match) }) else { return }
-        await store.write(Self.mapCacheKey(artist), payload: data)
+        await store.write(cacheKey(artist), payload: data)
     }
+}
+
+extension LastfmSimilarityProvider: ArtistMapNeighborProviding {
+    static let mapNeighborLimit = ArtistMapAnswers.neighborLimit
+    static func mapCacheKey(_ artist: String) -> String { ArtistMapAnswers.cacheKey(artist) }
+
+    func savedNeighbors(of artist: String) async -> [SimilarArtist]? { await ArtistMapAnswers.read(store, artist: artist) }
+
+    func saveNeighbors(_ list: [SimilarArtist], of artist: String) async { await ArtistMapAnswers.write(store, list: list, artist: artist) }
 
     func fetchNeighbors(of artist: String) async throws -> [SimilarArtist] {
         let fetched = try await client.fetchSimilarArtistsChecked(artist: artist, limit: Self.mapNeighborLimit)
         await saveNeighbors(fetched, of: artist)
         return fetched
+    }
+}
+
+/// What the map can use when no Last.fm account is connected: the saved answers, and no way to ask for more.
+struct ArtistMapSavedProvider: ArtistMapNeighborProviding {
+    struct NoAccount: Error {}
+    let store: SimilarityCacheStore
+
+    func savedNeighbors(of artist: String) async -> [SimilarArtist]? { await ArtistMapAnswers.read(store, artist: artist) }
+    func fetchNeighbors(of artist: String) async throws -> [SimilarArtist] { throw NoAccount() }
+}
+
+enum ArtistMapLinks {
+    /// What "Open in Query" shows for an artist: the tracks you have played by it, most played first.
+    static func querySpec(artist: String) -> QuerySpec {
+        var spec = QuerySpec(target: .track)
+        spec.groups = [[QueryCondition("artist", .textIs, [.text(artist)]), QueryCondition("plays", .greaterThan, [.number(0)])]]
+        spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+        spec.columns = AskInterpreter.baseColumns.map { QueryFieldRef($0) }
+        return spec
+    }
+
+    /// An artist's public page on Last.fm. Last.fm writes spaces as `+` and each part is encoded on its own.
+    static func lastfmURL(artist: String) -> URL? {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~ ")
+        let name = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let encoded = name.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+        return URL(string: "https://www.last.fm/music/" + encoded.replacingOccurrences(of: " ", with: "+").replacingOccurrences(of: "%20", with: "+"))
     }
 }
 

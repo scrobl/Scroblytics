@@ -1,5 +1,7 @@
 import Foundation
+import AppKit
 import SwiftData
+import SwiftUI
 import CoreGraphics
 
 #if DEBUG
@@ -55,6 +57,12 @@ enum ArtistMapChecks {
     private static func sim(_ name: String, _ match: Double) -> SimilarArtist { SimilarArtist(name: name, match: match) }
     private static func key(_ name: String) -> String { ArtistMapNames.key(name) }
     private static func distance(_ p: CGPoint, _ q: CGPoint) -> Double { hypot(Double(p.x - q.x), Double(p.y - q.y)) }
+    /// The distance between two positions in points on the layout's default canvas (the unit square is stretched to it).
+    private static func points(_ p: CGPoint, _ q: CGPoint) -> Double {
+        let canvas = ArtistMapLayout.defaultCanvas
+        return hypot(Double(p.x - q.x) * Double(canvas.width), Double(p.y - q.y) * Double(canvas.height))
+    }
+    private static let clearance = 2 * ArtistMapLayout.defaultRadius + ArtistMapLayout.defaultGap
 
     /// Every name pointing at all the others at 70%.
     private static func clique(_ names: [String]) -> [String: [SimilarArtist]] {
@@ -72,7 +80,7 @@ enum ArtistMapChecks {
             let graph = graphChecks(report)
             sliderChecks(report, graph)
             groupChecks(report)
-            layoutChecks(report)
+            layoutChecks(report, container)
             await lookupChecks(report)
             await cacheChecks(report, container)
             print(report.failures == 0 ? "ALL CHECKS PASSED" : "\(report.failures) CHECK(S) FAILED")
@@ -218,7 +226,7 @@ enum ArtistMapChecks {
     // MARK: Layout
 
     @MainActor
-    private static func layoutChecks(_ r: Report) {
+    private static func layoutChecks(_ r: Report, _ container: ModelContainer) {
         var answers: [String: [SimilarArtist]] = [:]
         var scope: [ArtistMapEntry] = []
         for c in 0..<3 {
@@ -236,9 +244,61 @@ enum ArtistMapChecks {
         r.check("the same map is laid out the same way every time", layout == ArtistMapLayout.force(graph: graph))
 
         var closest = Double.infinity
-        for i in layout.indices { for j in (i + 1)..<layout.count { closest = min(closest, distance(layout[i], layout[j])) } }
-        r.check("no two dots sit on top of each other", closest >= 0.04 - 1e-6, "closest \(closest)")
+        for i in layout.indices { for j in (i + 1)..<layout.count { closest = min(closest, points(layout[i], layout[j])) } }
+        r.check("no two dots touch: each is clear of the next by the gap, across and down alike", closest >= clearance - 0.01, "closest \(closest) pt, need \(clearance)")
 
+
+
+        // A crowded map: 30 artists all pointing at each other, with scores that differ.
+        let crowdNames = (1...30).map { "Crowd \($0)" }
+        var crowd: [String: [SimilarArtist]] = [:]
+        for (i, name) in crowdNames.enumerated() {
+            crowd[key(name)] = crowdNames.enumerated().filter { $0.offset != i }.map { sim($0.element, 0.4 + Double(($0.offset * 7 + i * 3) % 50) / 100) }
+        }
+        let crowdScope = crowdNames.enumerated().map { ArtistMapEntry(name: $0.element, plays: 1000 - $0.offset) }
+        let crowdGraph = ArtistMapGraph.build(scope: crowdScope, libraryKeys: Set(crowdNames.map(key)), neighbors: crowd)
+        let thinned = crowdGraph.filtered(minMatch: 0.4, showGhosts: false)
+        let everything = crowdGraph.filtered(minMatch: 0.4, showGhosts: false, linksPerArtist: nil)
+        var keepsOwnStrongest = true
+        for node in crowdGraph.nodes.indices {
+            let own = crowdGraph.edges.filter { $0.a == node || $0.b == node }.sorted { $0.weight != $1.weight ? $0.weight > $1.weight : ($0.a, $0.b) < ($1.a, $1.b) }.prefix(ArtistMapGraph.linksPerArtist)
+            for edge in own where !thinned.edges.contains(where: { thinned.nodes[$0.a].key == crowdGraph.nodes[edge.a].key && thinned.nodes[$0.b].key == crowdGraph.nodes[edge.b].key }) { keepsOwnStrongest = false }
+        }
+        r.check("a crowded map keeps far fewer lines than all of them, and every artist still has its \(ArtistMapGraph.linksPerArtist) strongest", thinned.edges.count < everything.edges.count / 2 && keepsOwnStrongest && everything.edges.count == 30 * 29 / 2, "\(thinned.edges.count) of \(everything.edges.count)")
+        let weakest = thinned.edges.map(\.weight).min() ?? 0
+        let panelSafe = crowdGraph.nodes.indices.allSatisfy { node in
+            let strongestSix = crowdGraph.edges.filter { $0.a == node || $0.b == node }.sorted { $0.weight > $1.weight }.prefix(6)
+            return strongestSix.allSatisfy { e in thinned.edges.contains { thinned.nodes[$0.a].key == crowdGraph.nodes[e.a].key && thinned.nodes[$0.b].key == crowdGraph.nodes[e.b].key } }
+        }
+        r.check("the six closest links the panel lists are never thinned away", panelSafe && weakest > 0)
+        // Dots of different sizes on a wide canvas: still clear of each other by their own radii, and the picture uses the width.
+        let sizes = graph.nodes.indices.map { 6.0 + Double($0 % 5) * 3 }
+        let wide = CGSize(width: 1000, height: 400)
+        let wideLayout = ArtistMapLayout.force(graph: graph, canvas: wide, radii: sizes)
+        var wideClear = true
+        for i in wideLayout.indices {
+            for j in (i + 1)..<wideLayout.count {
+                let d = hypot(Double(wideLayout[i].x - wideLayout[j].x) * 1000, Double(wideLayout[i].y - wideLayout[j].y) * 400)
+                if d < sizes[i] + sizes[j] + ArtistMapLayout.defaultGap - 0.01 { wideClear = false }
+            }
+        }
+        let xs = wideLayout.map { Double($0.x) }, ys = wideLayout.map { Double($0.y) }
+        let spreadX = (xs.max() ?? 0) - (xs.min() ?? 0), spreadY = (ys.max() ?? 0) - (ys.min() ?? 0)
+        r.check("on a wide canvas each dot is clear of the next by its own size, and the map spreads across the width", wideClear && spreadX * 1000 > spreadY * 400, "spread \(spreadX * 1000) x \(spreadY * 400)")
+
+        // The size the Top artists mode really draws: 60 artists with very different dot sizes, in a 700 x 450 drawing area.
+        let sample = ArtistMapModel.sample(container: container, artists: 60, showGhosts: true)
+        let sampleRadii = sample.shown.nodes.map { Double(sample.radius(of: $0)) }
+        let drawing = CGSize(width: 700, height: 450)
+        let sampleLayout = ArtistMapLayout.force(graph: sample.shown, canvas: drawing, radii: sampleRadii)
+        var worstOverlap = 0.0
+        for i in sampleLayout.indices {
+            for j in (i + 1)..<sampleLayout.count {
+                let d = hypot(Double(sampleLayout[i].x - sampleLayout[j].x) * 700, Double(sampleLayout[i].y - sampleLayout[j].y) * 450)
+                worstOverlap = max(worstOverlap, sampleRadii[i] + sampleRadii[j] - d)
+            }
+        }
+        r.check("on the real drawing area, with real dot sizes, no two dots overlap at all", worstOverlap <= 0, "worst overlap \(worstOverlap) pt across \(sample.shown.nodes.count) dots")
         var linked: [Double] = [], others: [Double] = []
         let linkedPairs = Set(graph.edges.filter { $0.weight >= 0.5 }.map { "\($0.a),\($0.b)" })
         for i in layout.indices {
@@ -275,10 +335,10 @@ enum ArtistMapChecks {
         let bigLayout = ArtistMapLayout.force(graph: bigGraph)
         let seconds = Date().timeIntervalSince(startedAt)
         var bigClosest = Double.infinity
-        for i in bigLayout.indices { for j in (i + 1)..<bigLayout.count { bigClosest = min(bigClosest, distance(bigLayout[i], bigLayout[j])) } }
+        for i in bigLayout.indices { for j in (i + 1)..<bigLayout.count { bigClosest = min(bigClosest, points(bigLayout[i], bigLayout[j])) } }
         print("INFO  200 artists, \(bigGraph.edges.count) lines laid out in \(String(format: "%.2f", seconds)) s")
         let bigInside = bigLayout.allSatisfy { $0.x >= 0 && $0.x <= 1 && $0.y >= 0 && $0.y <= 1 }
-        r.check("200 artists are laid out in under 3 seconds, inside the square, none on top of another", seconds < 3 && bigInside && bigClosest >= 0.04 - 1e-6, "\(seconds) s, closest \(bigClosest)")
+        r.check("200 artists are laid out in under 3 seconds, inside the square, none on top of another", seconds < 3 && bigInside && bigClosest >= clearance - 0.01, "\(seconds) s, closest \(bigClosest)")
     }
 
     // MARK: Lookups
@@ -400,6 +460,49 @@ enum ArtistMapDump {
                 print("DUMP FAILED \(error)")
                 exit(1)
             }
+        }
+    }
+}
+
+/// `SCROBLYTICS_LAYOUT_SNAPSHOT_ARTISTMAP=<folder>`: the Artist Map screen on made-up data, dark and light, wide and narrow, with the
+/// never-played dots on and off and at 200 artists, so the layout can be looked at without driving the app.
+enum ArtistMapSnapshots {
+    @MainActor
+    static func runHeadlessIfRequested(container: ModelContainer) {
+        guard let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_ARTISTMAP"] else { return }
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            // The drawing area (points) each window width gives the map, as measured from the first renders.
+            let wideArea = CGSize(width: 735, height: 449), narrowArea = CGSize(width: 393, height: 447)
+            let variants: [(name: String, artists: Int, ghosts: Bool, scheme: String, width: CGFloat, area: CGSize)] = [
+                ("dark-wide", 60, true, "dark", 1100, wideArea), ("light-wide", 60, true, "light", 1100, wideArea),
+                ("dark-narrow", 60, false, "dark", 760, narrowArea), ("light-large", 200, false, "light", 1100, wideArea),
+            ]
+            for variant in variants {
+                let model = ArtistMapModel.sample(container: container, artists: variant.artists, showGhosts: variant.ghosts, canvas: variant.area)
+                let view = NavigationStack {
+                    ArtistMapView(modelContainer: container, navigation: DetailNavigationCoordinator(origin: .tools), openQuery: { _, _, _ in }, sample: model)
+                }
+                .environment(LovedTracksStore())
+                .environment(FlaggedTracksStore())
+                .environment(PopularityStore())
+                .environment(TagStore())
+                .environment(LibraryGapBadgeStore())
+                .modelContainer(container)
+                .environment(\.colorScheme, variant.scheme == "dark" ? .dark : .light)
+                let height: CGFloat = 900
+                let host = NSHostingView(rootView: view.frame(width: variant.width, height: height))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: variant.width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: variant.scheme == "dark" ? .darkAqua : .aqua)
+                window.contentView = host
+                window.setContentSize(NSSize(width: variant.width, height: height))
+                for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded() }
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "artistmap-\(variant.name).png"))
+                }
+            }
+            exit(0)
         }
     }
 }

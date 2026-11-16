@@ -669,6 +669,22 @@ struct ContentView: View {
             albums[key] = (current.artist, current.album, current.track, current.count + 1)
         }
         guard let top = albums.values.max(by: { $0.count < $1.count }) else { Tour.log("TOUR no albums in the copy"); exit(3) }
+        // SCROBLYTICS_TEST_TOUR_ONLY=artistMap: only the Artist Map, for the length of the tour (it drives itself).
+        if ProcessInfo.processInfo.environment["SCROBLYTICS_TEST_TOUR_ONLY"] == "artistMap" {
+            Tour.log("TOUR plays \(history.count), Artist Map only")
+            monitor.phase = "artist map"
+            overviewToolRequest = .artistMap
+            selectedTab = .tools
+            await pause(minutes * 60)
+            monitor.stop()
+            let only = monitor.snapshot
+            for (phase, ms) in only.worst.sorted(by: { $0.value > $1.value }).prefix(5) {
+                Tour.log("TOUR worst main-thread delay \(String(format: "%.0f", ms)) ms in \(phase)")
+            }
+            Tour.log("TOUR stalls of 500 ms or more: \(only.stalls.count)" + (only.stalls.isEmpty ? "" : "; longest \(String(format: "%.0f", only.stalls.map(\.ms).max() ?? 0)) ms"))
+            Tour.log("TOUR done after 1 round(s)")
+            exit(0)
+        }
         Tour.log("TOUR plays \(history.count), opening the busiest album's artist, album and track")
         let deadline = Date().addingTimeInterval(minutes * 60)
         var round = 0
@@ -703,13 +719,14 @@ struct ContentView: View {
                 selectedTab = .library; await pause(5)
             }
             libraryNavigation.path = NavigationPath()
-            for kind in [ToolDescriptor.Kind.rabbitHole, .missingData, .albumTurnovers, .multiAlbumTracks, .similarSounds] {
+            for kind in [ToolDescriptor.Kind.rabbitHole, .missingData, .albumTurnovers, .multiAlbumTracks, .similarSounds, .artistMap] {
                 monitor.phase = "round \(round): open tool \(kind)"
                 overviewToolRequest = nil
                 await pause(0.5)
                 overviewToolRequest = kind
                 selectedTab = .tools
-                await pause(10)
+                // The Artist Map drives itself for about three minutes (lookups against the stand-in server, the slider, the count, a seed).
+                await pause(kind == .artistMap ? 240 : 10)
                 monitor.phase = "round \(round): leave tool \(kind)"
                 selectedTab = .overview; await pause(3)
                 monitor.phase = "round \(round): return to tool \(kind)"

@@ -10,6 +10,8 @@
 #   scripts/first-run-profile.sh <name> --fake <scenario> --env KEY=VALUE   pass an environment variable to the app, e.g.
 #                                                            SCROBLYTICS_PROFILE_AUTOCONNECT=name:key (types the account in for you)
 #   scripts/first-run-profile.sh <name> --fake <scenario> --port 8800
+#   scripts/first-run-profile.sh <name> --fake <scenario> --artists-file names.txt [--similar-latency-ms 300]   let the stand-in answer
+#                                                            artist.getSimilar (the Artist Map) with these artist names
 #   scripts/first-run-profile.sh --selftest                   prove the app refuses to run a profile that isn't isolated
 #
 # What is separate for a profile named "t1":
@@ -66,7 +68,7 @@ fi
 name="${1:?usage: first-run-profile.sh <name> [--reset] [--fake <scenario>] [--port N] | --selftest}"
 shift
 [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || { echo "Profile names are lowercase letters, digits and hyphens." >&2; exit 1; }
-reset=0; scenario=""; port=8765; seed=0; user_env=(); latency_ms=0; release_version=9.9.9
+reset=0; scenario=""; port=8765; seed=0; user_env=(); latency_ms=0; release_version=9.9.9; artists_file=""; similar_latency_ms=250
 while [ $# -gt 0 ]; do
   case "$1" in
     --reset) reset=1 ;;
@@ -74,6 +76,8 @@ while [ $# -gt 0 ]; do
     --port) port="${2:?port}"; shift ;;
     --seed) seed=1 ;;
     --latency-ms) latency_ms="${2:?milliseconds}"; shift ;;
+    --artists-file) artists_file="${2:?file}"; shift ;;
+    --similar-latency-ms) similar_latency_ms="${2:?milliseconds}"; shift ;;
     --release-version) release_version="${2:?version or down}"; shift ;;
     --env) user_env+=("${2:?KEY=VALUE}"); shift ;;
     *) echo "Unknown option $1" >&2; exit 1 ;;
@@ -118,7 +122,9 @@ trap cleanup EXIT
 
 extra_env=()
 if [ -n "$scenario" ]; then
-  python3 -I "$root/scripts/fake-lastfm.py" --scenario "$scenario" --port "$port" --latency-ms "$latency_ms" --release-version "$release_version" &
+  fake_args=(--scenario "$scenario" --port "$port" --latency-ms "$latency_ms" --release-version "$release_version" --similar-latency-ms "$similar_latency_ms")
+  [ -z "$artists_file" ] || fake_args+=(--artists-file "$artists_file")
+  python3 -I "$root/scripts/fake-lastfm.py" "${fake_args[@]}" &
   fake_pid=$!
   for _ in $(seq 1 30); do curl -s "http://127.0.0.1:$port/__stats" >/dev/null 2>&1 && break; sleep 0.2; done
   extra_env+=("SCROBLYTICS_LASTFM_BASE_URL=http://127.0.0.1:$port/2.0/")

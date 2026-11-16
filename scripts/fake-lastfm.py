@@ -75,6 +75,9 @@ STRICT_PER_SECOND = 5
 SECRET = "scrobblesecret"   # the shared secret track.scrobble requests are signed with (--secret)
 LONG_WINDOW_SECONDS = 90.0
 LATENCY_SECONDS = 0.0
+# artist.getSimilar: names the stand-in may answer with (one per line, from --artists-file), and how long each answer takes.
+SIMILAR_NAMES = []
+SIMILAR_LATENCY_SECONDS = 0.25
 RELEASE_VERSION = "9.9.9"   # newest version the stand-in GitHub release list announces; "down" makes it answer HTTP 500
 ERRORS = {
     "bad-key": (10, "Invalid API key - You must be granted a valid key by last.fm", 403),
@@ -328,9 +331,38 @@ def build_handler(state):
                 tracks = [{"name": l["track"], "artist": {"name": l["artist"]}, "date": {"uts": str(l["uts"]), "#text": ""}} for l in chunk]
                 self._send(200, {"lovedtracks": {"track": tracks, "@attr": {
                     "user": q.get("user", ""), "totalPages": str(pages), "page": str(page), "perPage": str(limit), "total": str(len(loves))}}})
+            elif method == "artist.getSimilar":
+                self._similar(q)
             else:
-                # Tags, popularity, similar music, tracklists: this stand-in has none of it.
+                # Tags, popularity, tracklists, similar tracks: this stand-in has none of it.
                 self._error(6, "not found", 404)
+
+        def _similar(self, q):
+            """Up to `limit` made-up similar artists, always the same ones for the same artist, strongest first. Only names given with
+            --artists-file are used, so a map built from them has links between real artists of a copied library (an artist with no names
+            file gets Last.fm's "artist not found")."""
+            artist = q.get("artist", "")
+            if SIMILAR_LATENCY_SECONDS:
+                time.sleep(SIMILAR_LATENCY_SECONDS)
+            names = [n for n in SIMILAR_NAMES if n.lower() != artist.lower()]
+            if not names:
+                self._error(6, "The artist you supplied could not be found", 404)
+                return
+            seed = sum(ord(c) * (i + 1) for i, c in enumerate(artist.lower())) or 1
+            order = list(range(len(names)))
+            # A fixed shuffle that depends on the artist: each artist gets its own neighbors.
+            for i in range(len(order) - 1, 0, -1):
+                seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
+                j = seed % (i + 1)
+                order[i], order[j] = order[j], order[i]
+            limit = min(int(q.get("limit", 30)), 100, len(names))
+            chosen = order[:limit]
+            items = []
+            for rank, index in enumerate(chosen):
+                seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
+                match = max(0.02, 0.97 - rank * (0.9 / max(limit, 1)) + (seed % 40) / 1000.0 - 0.02)
+                items.append({"name": names[index], "mbid": "", "match": "%.6f" % min(match, 1.0), "url": "", "streamable": "0"})
+            self._send(200, {"similarartists": {"artist": items, "@attr": {"artist": artist}}})
 
         def _recent(self, q):
             limit = int(q.get("limit", PAGE_SIZE))
@@ -383,17 +415,23 @@ def main():
     ap.add_argument("--latency-ms", type=float, default=0.0, help="delay every history page by this long")
     ap.add_argument("--release-version", default="9.9.9", help='newest version the stand-in release list announces ("down": answer HTTP 500)')
     ap.add_argument("--secret", default="scrobblesecret", help="shared secret track.scrobble requests must be signed with")
+    ap.add_argument("--artists-file", help="artist names (one per line) artist.getSimilar may answer with")
+    ap.add_argument("--similar-latency-ms", type=float, default=250.0, help="delay every artist.getSimilar answer by this long")
     ap.add_argument("--list", action="store_true", help="print the scenarios, one 'name<TAB>description' per line, and exit")
     args = ap.parse_args()
     if args.list:
         for name, detail in SCENARIOS.items():
             print(f"{name}\t{detail}")
         return
-    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION, SECRET
+    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION, SECRET, SIMILAR_NAMES, SIMILAR_LATENCY_SECONDS
     SECRET = args.secret
     RELEASE_VERSION = args.release_version
     LONG_WINDOW_SECONDS = args.window
     LATENCY_SECONDS = args.latency_ms / 1000.0
+    SIMILAR_LATENCY_SECONDS = args.similar_latency_ms / 1000.0
+    if args.artists_file:
+        with open(args.artists_file, encoding="utf-8") as handle:
+            SIMILAR_NAMES = [line.strip() for line in handle if line.strip()]
     state = State(args.scenario)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), build_handler(state))
     print(f"fake Last.fm: scenario={args.scenario} scrobbles={len(state.rows)} http://127.0.0.1:{args.port}/2.0/", flush=True)

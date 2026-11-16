@@ -107,7 +107,16 @@ machine on this Mac is enough:
    report. Last time the crash appeared within about 2 minutes. A task group (`withTaskGroup`) started from the Overview's refresh was
    the trigger; don't reintroduce one there without this test.
 
-4. When the test is finished, clear the test data from the VM (the imported database and the Keychain item) and shut it down: `ssh … 'sudo shutdown -h now'`, then check `tart list` shows it as `stopped`. Leave it stopped until the next release needs it.
+4. Screens that run several lookups at once need the same test: the Artist Map asks Last.fm six at a time (`withTaskGroup`). A test
+   build can drive itself: `SCROBLYTICS_TEST_TOUR=<minutes>` (with `SCROBLYTICS_TEST_TOUR_LOG=<file>`) walks every tab and tool, the Artist
+   Map included, and logs the worst main-thread delays; add `SCROBLYTICS_TEST_TOUR_ONLY=artistMap` to run just that screen, which looks up
+   a 100-artist map, stops and restarts a 200-artist lookup, drags the slider, and draws a seed map. It needs no Last.fm account: run
+   `scripts/fake-lastfm.py --scenario empty-account --artists-file <names> --similar-latency-ms 300` on this Mac (the names file is one
+   artist per line, from the library copy), forward it into the VM with `ssh -R 8793:127.0.0.1:8793`, and launch the profile copy with
+   `SCROBLYTICS_LASTFM_BASE_URL=http://127.0.0.1:8793/2.0/`, `SCROBLYTICS_PROFILE_SEED_ACCOUNT=1` and `SCROBLYTICS_OFFLINE=1`, its database
+   at `<home>/Library/Application Support/default.store`. Pass: the log ends with "TOUR done", no stall of 500 ms or more, and no
+   Scroblytics report in `~/Library/Logs/DiagnosticReports`.
+5. When the test is finished, clear the test data from the VM (the imported database and the Keychain item) and shut it down: `ssh … 'sudo shutdown -h now'`, then check `tart list` shows it as `stopped`. Leave it stopped until the next release needs it.
 
 Crash reports from users are read with `scripts/symbolicate-crash.py` (see above).
 

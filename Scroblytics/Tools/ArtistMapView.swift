@@ -544,6 +544,9 @@ struct ArtistMapView: View {
             guard !model.isSnapshotSample else { return }
             model.options = ToolFilterSettingsStore.load(ArtistMapModel.Options.self, toolId: Self.toolId, context: modelContext, default: ArtistMapModel.Options())
             await model.start()
+            #if DEBUG
+            if Tour.minutes != nil { await model.runTourScript() }
+            #endif
         }
         .onChange(of: model.options) { old, new in
             guard !model.isSnapshotSample else { return }
@@ -1064,6 +1067,83 @@ extension ArtistMapModel {
         model.installSampleArtwork()
         model.selectedKey = ArtistMapNames.key(seed)
         return model
+    }
+}
+#endif
+
+#if DEBUG
+extension ArtistMapModel {
+    /// Removes the map's saved answers (in the copy of a library the test runs on), so a run starts with real lookups to make.
+    func clearSavedAnswers() async {
+        let container = self.container
+        await Task.detached(priority: .utility) {
+            let context = ModelContext(container)
+            let entries = (try? context.fetch(FetchDescriptor<SimilarityLookupCacheEntry>())) ?? []
+            for entry in entries where entry.cacheKey.hasPrefix("artistmap") { context.delete(entry) }
+            try? context.save()
+        }.value
+    }
+
+    /// What the self-driving tour (`Tour`) does on this screen, the way a person would use it, against a stand-in Last.fm server: look up
+    /// a whole map, drag the slider, select artists, change the count (stopping and restarting lookups on the way), switch to a seed and
+    /// back. Logs what it did, so a crash or a stall shows up in the tour's log.
+    func runTourScript() async {
+        func log(_ line: String) { Tour.log("ARTISTMAP \(line)") }
+        func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
+        func waitForLookups(_ limit: Double) async {
+            let end = Date().addingTimeInterval(limit)
+            while isLookingUp, Date() < end { await pause(0.4) }
+        }
+        log("script start")
+        await clearSavedAnswers()
+        options.mode = .top
+        options.periodId = "alltime"
+        options.count = 100
+        options.minMatchPercent = 40
+        // Read the (now empty) saved answers again even if no setting changed, so there are real lookups to make.
+        await rescope()
+        await pause(2)
+        log("top \(scopeCount) artists, \(lookupTargets.count) to look up")
+        lookUpMissing()
+        await waitForLookups(120)
+        log("lookups done: \(answeredCount) answered, \(shown.edges.count) links, lookingUp=\(isLookingUp)")
+        for percent in [30, 50, 70, 90, 60, 40] {
+            options.minMatchPercent = percent
+            await pause(0.7)
+        }
+        for node in shown.nodes.prefix(6) { selectedKey = node.key; await pause(0.3) }
+        options.showGhosts = true; await pause(1.5)
+        options.showArtwork = false; await pause(1)
+        options.showArtwork = true; await pause(1)
+        options.showGhosts = false; await pause(1)
+        // A bigger map: stop its lookups part-way, then carry on.
+        options.count = 200
+        await pause(2.5)
+        lookUpMissing()
+        await pause(4)
+        stopLookup()
+        await pause(1.5)
+        log("stopped part-way: \(answeredCount) answered, lookingUp=\(isLookingUp)")
+        lookUpMissing()
+        await waitForLookups(180)
+        log("200 map: \(answeredCount) answered, \(shown.edges.count) links")
+        for count in [25, 10, 100] { options.count = count; await pause(2) }
+        // From a seed.
+        let artists = shown.nodes.filter { !$0.isGhost }.map(\.name)
+        if let first = artists.first {
+            chooseSeed(first)
+            await pause(3)
+            await waitForLookups(90)
+            log("seed \(first): \(shown.nodes.count) artists, \(shown.edges.count) links")
+            options.reach = 2; await pause(3)
+            for percent in [30, 60, 45] { options.minMatchPercent = percent; await pause(0.7) }
+            options.showGhosts = true; await pause(1.5)
+            if artists.count > 1 { chooseSeed(artists[1]); await pause(3); await waitForLookups(90) }
+            options.reach = 1; await pause(2)
+        }
+        options.mode = .top
+        await pause(3)
+        log("script done")
     }
 }
 #endif

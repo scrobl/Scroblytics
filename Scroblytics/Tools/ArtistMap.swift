@@ -40,8 +40,14 @@ enum ArtistMapScope {
     ) -> (entries: [ArtistMapEntry], libraryKeys: Set<String>) {
         var inPeriod: [String: (name: String, plays: Int)] = [:]
         var library = Set<String>()
+        // A history has many plays but few artists, and joining a name is the slow part: do it once per spelling.
+        var keyOfName: [String: String] = [:]
         for play in snapshots {
-            let key = ArtistMapNames.key(play.artistName)
+            let key: String
+            if let known = keyOfName[play.artistName] { key = known } else {
+                key = ArtistMapNames.key(play.artistName)
+                keyOfName[play.artistName] = key
+            }
             guard !key.isEmpty else { continue }
             library.insert(key)
             if let from, play.playedAt < from { continue }

@@ -119,6 +119,15 @@ enum ArtistMapChecks {
         r.check("a period counts only its plays but keeps the whole library", late.entries.map(\.name) == ["Artist C", "Artist B"] && late.libraryKeys.count == 4, "\(late.entries)")
         let none = ArtistMapScope.top(snapshots: history, count: 0).entries.isEmpty && ArtistMapScope.top(snapshots: history, count: -3).entries.isEmpty
         r.check("a count of zero or below gives an empty map", none)
+        // A big history: 367,000 plays by 4,000 artists, in a few spellings each.
+        var big: [ScrobbleSnapshot] = []
+        big.reserveCapacity(367_000)
+        for i in 0..<367_000 { big.append(play(i % 7 == 0 ? "the band \(i % 4_000)" : "Band \(i % 4_000)", i % 900)) }
+        let started = Date()
+        let bigTop = ArtistMapScope.top(snapshots: big, count: 200)
+        let seconds = Date().timeIntervalSince(started)
+        print("INFO  top 200 of 4,000 artists over 367,000 plays took \(String(format: "%.2f", seconds)) s")
+        r.check("choosing the top 200 of a 367,000-play history takes well under 3 seconds", bigTop.entries.count == 200 && bigTop.libraryKeys.count == 4_000 && seconds < 3, "\(seconds) s")
     }
 
     // MARK: Graph

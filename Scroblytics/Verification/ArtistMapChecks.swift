@@ -473,6 +473,31 @@ enum ArtistMapChecks {
         let shownGhost = withGhost.filtered(minMatch: 0.3, showGhosts: true, alwaysKeep: key("Seed"), dropUnlinked: true).nodes.map(\.name)
         r.check("an artist linked only to a never-played dot is left off while those are hidden, and kept once they are shown", hiddenGhost.contains("Weak") && shownGhost.contains("Ghost Only"), "\(hiddenGhost) \(shownGhost)")
 
+        // What the panel says about a group, and which links sit in another group.
+        let describe = ArtistMapModel.groupDescription
+        r.check("the group label names who is in the group, not the artist", describe("Wilco", "R.E.M.", 12) == "In a group with R.E.M. and 10 others" && describe("Wilco", "R.E.M.", 4) == "In a group with R.E.M. and 2 others", "\(describe("Wilco", "R.E.M.", 12))")
+        r.check("…with the singular for one other, and nobody else when there are three", describe("Wilco", "R.E.M.", 3) == "In a group with R.E.M. and 1 other" && describe("Wilco", "R.E.M.", 2) == "In a group with R.E.M.")
+        r.check("the group's busiest member is told it leads, and an artist with no group says so", describe("R.E.M.", "R.E.M.", 12) == "The busiest of a group of 12" && describe("Alone", nil, 0) == "Not in a group")
+        let shownMap = ArtistMapModel.sample(container: container, artists: 60, showGhosts: true)
+        var linkGroupsMatch = true, anyOtherGroup = false, membersOK = true
+        for node in shownMap.shown.nodes where !node.isGhost {
+            shownMap.selectedKey = node.key
+            guard let selection = shownMap.selection else { linkGroupsMatch = false; continue }
+            for link in selection.links {
+                let index = shownMap.shown.nodes.firstIndex { $0.key == link.key } ?? -1
+                let expected = (index >= 0 && !shownMap.shown.nodes[index].isGhost) ? shownMap.groups.groupOfNode[index] : -1
+                if link.group != expected { linkGroupsMatch = false }
+                if !link.isGhost, link.group != selection.group { anyOtherGroup = true }
+            }
+            if selection.group >= 0 {
+                let leaderIsFirst = selection.groupMembers.first.map { $0 != node.name } ?? true
+                if selection.groupMembers.count > min(6, selection.groupSize - 1) || !leaderIsFirst { membersOK = false }
+            } else if !selection.groupMembers.isEmpty { membersOK = false }
+        }
+        r.check("every link in the panel carries its own artist's group", linkGroupsMatch)
+        r.check("the sample map does have links into other groups, so the panel's colored dot has something to mark", anyOtherGroup)
+        r.check("a group's member list leaves out the artist itself and never runs past six", membersOK)
+
         // Artwork thumbnails.
         let wide = NSImage(size: NSSize(width: 200, height: 100))
         wide.lockFocus()

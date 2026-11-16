@@ -55,6 +55,8 @@ final class ArtistMapModel {
         /// How strongly the selected artist's answer lists this one, and this one's answer lists the selected artist (0 = not listed).
         let outgoing: Double
         let incoming: Double
+        /// The group of this artist (-1 for none, and for a never-played artist).
+        let group: Int
         var id: String { key }
         var weight: Double { max(outgoing, incoming) }
     }
@@ -62,8 +64,25 @@ final class ArtistMapModel {
     struct Selection {
         let node: ArtistMapGraph.Node
         let group: Int
+        /// The group's busiest member, which gives it its name.
         let groupName: String?
+        let groupSize: Int
+        /// The group's biggest members other than this artist, busiest first.
+        let groupMembers: [String]
         let links: [Link]
+    }
+
+    /// What the panel says about an artist's group. The group is named after its busiest member, so this says who is in it rather than
+    /// reading as the artist's own name.
+    static func groupDescription(selected: String, leader: String?, size: Int) -> String {
+        guard let leader, size > 0 else { return "Not in a group" }
+        if leader == selected { return "The busiest of a group of \(size)" }
+        let others = max(size - 2, 0)
+        switch others {
+        case 0: return "In a group with \(leader)"
+        case 1: return "In a group with \(leader) and 1 other"
+        default: return "In a group with \(leader) and \(others) others"
+        }
     }
 
     var options = Options()
@@ -442,19 +461,28 @@ final class ArtistMapModel {
 
     var selection: Selection? {
         guard let i = index(ofKey: selectedKey) else { return nil }
+        func group(of node: Int) -> Int {
+            guard node < groups.groupOfNode.count, !shown.nodes[node].isGhost else { return -1 }
+            return groups.groupOfNode[node]
+        }
         var links: [Link] = []
         for edge in shown.edges {
             if edge.a == i {
                 let other = shown.nodes[edge.b]
-                links.append(Link(key: other.key, name: other.name, isGhost: other.isGhost, outgoing: edge.aToB, incoming: edge.bToA))
+                links.append(Link(key: other.key, name: other.name, isGhost: other.isGhost, outgoing: edge.aToB, incoming: edge.bToA, group: group(of: edge.b)))
             } else if edge.b == i {
                 let other = shown.nodes[edge.a]
-                links.append(Link(key: other.key, name: other.name, isGhost: other.isGhost, outgoing: edge.bToA, incoming: edge.aToB))
+                links.append(Link(key: other.key, name: other.name, isGhost: other.isGhost, outgoing: edge.bToA, incoming: edge.aToB, group: group(of: edge.a)))
             }
         }
         links.sort { $0.weight != $1.weight ? $0.weight > $1.weight : $0.name < $1.name }
-        let group = i < groups.groupOfNode.count ? groups.groupOfNode[i] : -1
-        return Selection(node: shown.nodes[i], group: group, groupName: group >= 0 ? groups.names[group] : nil, links: links)
+        let mine = group(of: i)
+        // Nodes are in play order, so the members come out busiest first.
+        let members = mine >= 0 ? shown.nodes.indices.filter { $0 != i && group(of: $0) == mine }.map { shown.nodes[$0].name } : []
+        return Selection(
+            node: shown.nodes[i], group: mine, groupName: mine >= 0 ? groups.names[mine] : nil,
+            groupSize: mine >= 0 ? groups.sizes[mine] : 0, groupMembers: Array(members.prefix(6)), links: links
+        )
     }
 }
 
@@ -808,6 +836,11 @@ private struct ArtistMapCanvas: View {
                     layer.opacity = dim ? 0.35 : 1
                     layer.draw(Image(nsImage: image), in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
                     context.stroke(circle, with: .color(ring.opacity(dim ? 0.5 : 1)), lineWidth: isSelected ? 3 : (node.key == model.seedKey ? 3.5 : 2.2))
+                    // The outer ring marks the selection (or the seed), so the group's color goes just inside it.
+                    if (isSelected || node.key == model.seedKey), r > 7 {
+                        let inset = r - 3.6
+                        context.stroke(Path(ellipseIn: CGRect(x: p.x - inset, y: p.y - inset, width: inset * 2, height: inset * 2)), with: .color(color), lineWidth: 2.4)
+                    }
                 } else {
                     context.fill(circle, with: .color(color.opacity(dim ? 0.3 : 0.85)))
                     context.stroke(circle, with: .color(ring), lineWidth: isSelected ? 2.5 : (node.key == model.seedKey ? 3 : 1))
@@ -905,8 +938,10 @@ private struct ArtistMapPanel: View {
             } else {
                 HStack(spacing: 6) {
                     Circle().fill(ArtistMapPalette.color(group: s.group)).frame(width: 10, height: 10)
-                    Text(s.groupName.map { "\($0) and friends" } ?? "Not in a group").font(AppTypography.compactMetadata)
+                    Text(ArtistMapModel.groupDescription(selected: s.node.name, leader: s.groupName, size: s.groupSize)).font(AppTypography.compactMetadata)
                 }
+                .help(s.groupMembers.isEmpty ? "Not in a group of at least three artists that point at each other."
+                      : "Its group's other biggest members: " + s.groupMembers.joined(separator: ", ") + (s.groupSize - 1 > s.groupMembers.count ? ", and more." : "."))
                 Text(s.node.key == model.seedKey ? "The seed · \(s.node.plays.formatted()) plays" : "\(s.node.plays.formatted()) plays in this period")
                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             }
@@ -922,7 +957,10 @@ private struct ArtistMapPanel: View {
             ForEach(s.links.prefix(6)) { link in
                 Button { model.selectedKey = link.key } label: {
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack {
+                        HStack(spacing: 6) {
+                            if !link.isGhost, link.group != s.group {
+                                Circle().fill(ArtistMapPalette.color(group: link.group)).frame(width: 8, height: 8)
+                            }
                             Text(link.name).font(AppTypography.supporting).lineLimit(1)
                             Spacer(minLength: 4)
                             Text("\(Int((link.weight * 100).rounded()))%").font(AppTypography.compactMetadata).monospacedDigit().foregroundStyle(.secondary)
@@ -931,7 +969,12 @@ private struct ArtistMapPanel: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help(Self.directionText(selected: s.node.name, link: link))
+                .help(Self.directionText(selected: s.node.name, link: link) + (!link.isGhost && link.group != s.group
+                      ? (link.group >= 0 ? " It is in another group (the colored dot)." : " It is not in a group (the gray dot).") : ""))
+            }
+            if s.links.prefix(6).contains(where: { !$0.isGhost && $0.group != s.group }) {
+                Text("A colored dot marks a link that is in a different group from \(s.node.name).")
+                    .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             }
             if let top = s.links.first, top.outgoing > 0, top.incoming > 0, abs(top.outgoing - top.incoming) >= 0.05 {
                 Text("The line uses the higher of the two directions. \(Self.directionText(selected: s.node.name, link: top))")
@@ -1051,7 +1094,8 @@ extension ArtistMapModel {
         let positions = ArtistMapLayout.force(graph: graph, canvas: canvas, radii: graph.nodes.map { Double(radius(of: $0, maxPlays: top, scale: dotScale(for: canvas))) })
         model.install(scope: data.scope, answers: data.answers, graph: graph, positions: positions)
         model.installSampleArtwork()
-        model.selectedKey = graph.nodes.first { $0.name.hasPrefix("Bravo 2") }?.key ?? graph.nodes.first?.key
+        // An artist that has a picture, so a snapshot shows the selection ring over artwork.
+        model.selectedKey = graph.nodes.first { $0.name.hasPrefix("Bravo") && model.artwork[$0.key] != nil }?.key ?? graph.nodes.first?.key
         return model
     }
 

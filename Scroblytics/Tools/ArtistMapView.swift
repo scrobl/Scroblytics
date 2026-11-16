@@ -296,7 +296,8 @@ final class ArtistMapModel {
         let previous = positionsByKey
         let canvas = canvasSize
         let top = filtered.nodes.map(\.plays).max() ?? 1
-        let radii = filtered.nodes.map { Double(Self.radius(of: $0, maxPlays: top)) }
+        let dotScale = Self.dotScale(for: canvas)
+        let radii = filtered.nodes.map { Double(Self.radius(of: $0, maxPlays: top, scale: dotScale)) }
         let laidOut = await Task.detached(priority: .userInitiated) {
             if let seed { return ArtistMapLayout.radial(graph: filtered, seedKey: seed, canvas: canvas, radii: radii, order: ringOrder) }
             return ArtistMapLayout.force(graph: filtered, previous: previous, canvas: canvas, radii: radii)
@@ -408,12 +409,20 @@ final class ArtistMapModel {
 
     // MARK: Selection
 
-    func radius(of node: ArtistMapGraph.Node) -> CGFloat { Self.radius(of: node, maxPlays: maxPlays) }
+    func radius(of node: ArtistMapGraph.Node) -> CGFloat { Self.radius(of: node, maxPlays: maxPlays, scale: dotScale) }
 
-    static func radius(of node: ArtistMapGraph.Node, maxPlays: Int) -> CGFloat {
-        if node.isGhost { return 8 }
+    /// A bigger window gets bigger dots (up to half as big again), so a map on a large display isn't a few specks on a wide field.
+    var dotScale: CGFloat { Self.dotScale(for: canvasSize) }
+
+    static func dotScale(for canvas: CGSize) -> CGFloat {
+        let area = max(canvas.width * canvas.height, 1)
+        return min(1.5, max(1, (area / (700 * 450)).squareRoot()))
+    }
+
+    static func radius(of node: ArtistMapGraph.Node, maxPlays: Int, scale: CGFloat = 1) -> CGFloat {
+        if node.isGhost { return 8 * scale }
         let share = (Double(node.plays) / Double(max(maxPlays, 1))).squareRoot()
-        return 6 + 14 * CGFloat(share)
+        return (6 + 14 * CGFloat(share)) * scale
     }
 
     func index(ofKey key: String?) -> Int? {
@@ -487,6 +496,14 @@ struct ArtistMapView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var model: ArtistMapModel
     @State private var showingSeedSearch = false
+    /// The heights of what sits above and below the map, measured, so the map can take all the rest of the window.
+    @State private var headerHeight: CGFloat = 120
+    @State private var stripHeight: CGFloat = 30
+    @State private var legendHeight: CGFloat = 20
+    /// The map is never shorter than this; a window shorter than the page scrolls.
+    private static let mapMinHeight: CGFloat = 520
+    private static let pageSpacing: CGFloat = 14
+    private static let pagePadding: CGFloat = 16
 
     init(
         modelContainer: ModelContainer, navigation: DetailNavigationCoordinator, openQuery: @escaping (QuerySpec, String, String?) -> Void,
@@ -500,8 +517,9 @@ struct ArtistMapView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Self.pageSpacing) {
                 PageSettingsHeader("Artist Map") { controls }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
                 if model.isLoadingHistory {
                     ProgressView("Reading your history…").frame(maxWidth: .infinity, minHeight: 240)
                 } else if !model.hasHistory {
@@ -519,16 +537,24 @@ struct ArtistMapView: View {
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
                     statusStrip
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
                     HStack(alignment: .top, spacing: 12) {
                         ArtistMapCanvas(model: model, onOpen: openArtist, onQuery: query)
-                            .frame(minWidth: 360, minHeight: 520)
+                            .frame(minWidth: 360, maxHeight: .infinity)
                         ArtistMapPanel(model: model, onOpen: openArtist, onQuery: query, onSeed: { model.chooseSeed($0) })
                             .frame(width: 250)
+                            .frame(maxHeight: .infinity)
+                    }
+                    // The map and its panel take whatever height the window has left, down to a minimum.
+                    .containerRelativeFrame(.vertical, alignment: .top) { length, _ in
+                        let chrome = headerHeight + stripHeight + legendHeight + Self.pageSpacing * 3 + Self.pagePadding * 2
+                        return max(Self.mapMinHeight, length - chrome)
                     }
                     legend
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { legendHeight = $0 }
                 }
             }
-            .padding(16)
+            .padding(Self.pagePadding)
         }
         .navigationTitle("Artist Map")
         .overlay {
@@ -867,7 +893,7 @@ private struct ArtistMapPanel: View {
             }
         }
         .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 360, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -1022,7 +1048,7 @@ extension ArtistMapModel {
         let keys = Set(data.scope.map { ArtistMapNames.key($0.name) })
         let graph = ArtistMapGraph.build(scope: data.scope, libraryKeys: keys, neighbors: data.answers).filtered(minMatch: Double(minMatch) / 100, showGhosts: showGhosts)
         let top = graph.nodes.map(\.plays).max() ?? 1
-        let positions = ArtistMapLayout.force(graph: graph, canvas: canvas, radii: graph.nodes.map { Double(radius(of: $0, maxPlays: top)) })
+        let positions = ArtistMapLayout.force(graph: graph, canvas: canvas, radii: graph.nodes.map { Double(radius(of: $0, maxPlays: top, scale: dotScale(for: canvas))) })
         model.install(scope: data.scope, answers: data.answers, graph: graph, positions: positions)
         model.installSampleArtwork()
         model.selectedKey = graph.nodes.first { $0.name.hasPrefix("Bravo 2") }?.key ?? graph.nodes.first?.key

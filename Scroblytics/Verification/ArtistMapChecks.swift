@@ -668,6 +668,7 @@ enum ArtistMapSnapshots {
                 ("seed-one-light", 90, true, "light", 1100, wideArea), ("seed-two-dark", 90, true, "dark", 1100, wideArea),
                 ("seed-two-narrow", 90, false, "light", 760, narrowArea),
                 ("waiting-light", 60, false, "light", 1100, wideArea), ("refresh-dark", 60, false, "dark", 1100, wideArea),
+                ("tall-light", 100, true, "light", 1700, CGSize(width: 1300, height: 900)),
             ]
             for variant in variants {
                 let model = variant.name.hasPrefix("seed")
@@ -685,7 +686,7 @@ enum ArtistMapSnapshots {
                 .environment(\.colorScheme, variant.scheme == "dark" ? .dark : .light)
                 if variant.name.hasPrefix("waiting") { model.installSampleWaiting(count: 14, stale: false) }
                 if variant.name.hasPrefix("refresh") { model.installSampleWaiting(count: 14, stale: true) }
-                let height: CGFloat = 900
+                let height: CGFloat = variant.name.hasPrefix("tall") ? 1500 : 900
                 let host = NSHostingView(rootView: view.frame(width: variant.width, height: height))
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: variant.width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
                 window.appearance = NSAppearance(named: variant.scheme == "dark" ? .darkAqua : .aqua)

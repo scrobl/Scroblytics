@@ -367,7 +367,7 @@ enum ArtistMapLayout {
         }
         let scale = (width * height).squareRoot()
         let iterations = warm ? 50 : 320
-        let k = 0.75 * (width * height / Double(n)).squareRoot()
+        let k = 1.05 * (width * height / Double(n)).squareRoot()
         for step in 0..<iterations {
             let cooling = 1 - Double(step) / Double(iterations)
             // A dot that was already on the map only settles a little; one that is new moves freely to find its place.

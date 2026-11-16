@@ -234,14 +234,15 @@ struct AlbumTrackTable: View {
     /// Every row opens its track's page, played in the period or not: the page shows that track's plays for whatever period is chosen.
     private func rowView(_ row: AlbumTrackRow, maxValue: Int) -> some View {
         let who = AlbumTrackRows.identity(for: row, albumArtist: artist, playedNames: playedNames)
-        let destination = row.entry.map { TrackIdentity(from: $0) } ?? TrackIdentity(artist: who.artist, name: who.name, album: album)
+        // Opened from this album's list, the song's page starts with this album's plays (it has a switch to every album).
+        let destination = (row.entry.map { TrackIdentity(from: $0) } ?? TrackIdentity(artist: who.artist, name: who.name, album: album)).scoped(to: album)
         return NavigationLink(value: destination) { rowContent(row, maxValue: maxValue) }
             .drillDownHighlight()
             .entityContextMenu(
                 target: ImageTarget(kind: .track, artist: who.artist, album: row.entry?.album ?? album, track: who.name),
                 currentImageURL: row.entry?.imageURL
             )
-            .help(row.entry == nil ? "Not played in this period. Click to open the track." : "")
+            .help(row.entry == nil ? "Not played in this period. Click to open the track (it shows this album's plays first)." : "")
     }
 
     private func rowContent(_ row: AlbumTrackRow, maxValue: Int) -> some View {

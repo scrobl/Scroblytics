@@ -53,13 +53,22 @@ struct TrackIdentity: Hashable, Identifiable, Sendable {
     /// every album it appears under, matching `EntityStatsEngine.fetchTrackStats`).
     let album: String?
     let imageURL: String?
+    /// Set only when the track was opened from an album's own track list: the Track page then starts with that album's plays (with a switch
+    /// to every album). Everywhere else it is nil and the page covers the song across every album, so its numbers match the list it came from.
+    let scopedAlbum: String?
     var id: String { "\(artist)\u{0}\(name)" }
 
-    init(artist: String, name: String, album: String? = nil, imageURL: String? = nil) {
+    init(artist: String, name: String, album: String? = nil, imageURL: String? = nil, scopedAlbum: String? = nil) {
         self.artist = artist
         self.name = name
         self.album = album
         self.imageURL = imageURL
+        self.scopedAlbum = scopedAlbum
+    }
+
+    /// The same track, opened from `album`'s track list.
+    func scoped(to album: String) -> TrackIdentity {
+        TrackIdentity(artist: artist, name: name, album: self.album ?? album, imageURL: imageURL, scopedAlbum: album)
     }
 
     /// Only valid for a `.track`-entity `TopChartEntry`, whose `artist` field

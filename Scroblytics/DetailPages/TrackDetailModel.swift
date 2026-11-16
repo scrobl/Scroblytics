@@ -14,6 +14,13 @@ final class TrackDetailModel {
     func isLoaded(for id: String) -> Bool { loadMemo.isFresh(for: id) }
     func markLoaded(_ id: String) { loadMemo.record(id) }
 
+    /// Opened from an album's track list: show only that album's plays (the page's switch turns this off for every album).
+    var onlyThisAlbum = false
+    /// The album the page is limited to while `onlyThisAlbum` is on.
+    var activeAlbum: String? { onlyThisAlbum ? identity.scopedAlbum : nil }
+    /// In the chosen period, the plays of this song on each of the other albums (busiest first), so the page can say where they are.
+    var otherAlbumPlays: [(album: String, plays: Int)] = []
+
     var oldestScrobbleDate: Date?
     var stats: EntityStats?
     var errorMessage: String?
@@ -51,6 +58,8 @@ final class TrackDetailModel {
     func bind(identity: TrackIdentity, context: ModelContext) {
         self.identity = identity
         self.context = context
+        onlyThisAlbum = identity.scopedAlbum != nil
+        otherAlbumPlays = []
         stats = nil
         weatherLean = .unavailable
         errorMessage = nil
@@ -83,15 +92,33 @@ final class TrackDetailModel {
     func loadStats(range: DateRange) {
         guard let context else { return }
         do {
-            stats = try EntityStatsEngine.fetchTrackStats(context: context, artist: identity.artist, track: identity.name, range: range)
+            stats = try EntityStatsEngine.fetchTrackStats(context: context, artist: identity.artist, track: identity.name, range: range, album: activeAlbum)
         } catch {
             errorMessage = "Failed to load stats: \(error)"
         }
+        loadOtherAlbumPlays(range: range)
     }
 
     func loadScrobbleHistory(range: DateRange) {
         guard let context else { return }
-        scrobbleHistory = (try? EntityStatsEngine.fetchTrackScrobbleHistory(context: context, artist: identity.artist, track: identity.name, range: range)) ?? []
+        scrobbleHistory = (try? EntityStatsEngine.fetchTrackScrobbleHistory(context: context, artist: identity.artist, track: identity.name, range: range, album: activeAlbum)) ?? []
+    }
+
+    /// Where the plays that are not on the album this page was opened from are, for the line under the switch.
+    private func loadOtherAlbumPlays(range: DateRange) {
+        guard let context, let scoped = identity.scopedAlbum else { otherAlbumPlays = []; return }
+        let all = (try? EntityStatsEngine.fetchTrackScrobbleHistory(context: context, artist: identity.artist, track: identity.name, range: range)) ?? []
+        otherAlbumPlays = Self.otherAlbums(of: all, besides: scoped)
+    }
+
+    /// The albums (other than `scoped`) a song's plays are on, busiest first; plays with no album are left out.
+    static func otherAlbums(of history: [ScrobbleHistoryEntry], besides scoped: String) -> [(album: String, plays: Int)] {
+        var counts: [String: Int] = [:]
+        for play in history {
+            guard let album = play.album, album != scoped else { continue }
+            counts[album, default: 0] += 1
+        }
+        return counts.map { (album: $0.key, plays: $0.value) }.sorted { $0.plays != $1.plays ? $0.plays > $1.plays : $0.album < $1.album }
     }
 
     /// Reads the saved weather off the main thread. Cheap while weather is off.

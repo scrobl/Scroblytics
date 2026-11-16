@@ -91,7 +91,7 @@ enum EntityStatsEngine {
     }
 
     @MainActor
-    static func fetchTrackStats(context: ModelContext, artist: String, track: String, range: DateRange) throws -> EntityStats {
+    static func fetchTrackStats(context: ModelContext, artist: String, track: String, range: DateRange, album: String? = nil) throws -> EntityStats {
         let artistKey = TextNormalization.artistIdentityKey(artist)
         let descriptor = FetchDescriptor<Scrobble>(
             predicate: #Predicate<Scrobble> {
@@ -99,7 +99,11 @@ enum EntityStatsEngine {
             }
         )
         let loved = LovedTracksEngine.isLoved(context: context, artist: artist, track: track)
-        return try summarize(context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) }, loved: loved, range: range)
+        // With an `album`, only the plays under that exact album name, the way an album page counts its own plays.
+        return try summarize(
+            context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && (album == nil || $0.albumName == album) },
+            loved: loved, range: range
+        )
     }
 
     /// Every individual play of this track —
@@ -107,7 +111,7 @@ enum EntityStatsEngine {
     /// `fetchTrackStats` — newest first. Reached only at the deepest, track
     /// level of the drill chain (Phase 6): a flat scrobble list has no
     /// meaning for an artist or album, which each span many tracks.
-    static func fetchTrackScrobbleHistory(context: ModelContext, artist: String, track: String, range: DateRange) throws -> [ScrobbleHistoryEntry] {
+    static func fetchTrackScrobbleHistory(context: ModelContext, artist: String, track: String, range: DateRange, album: String? = nil) throws -> [ScrobbleHistoryEntry] {
         let from = range.from
         let to = range.to
         let artistKey = TextNormalization.artistIdentityKey(artist)
@@ -117,7 +121,8 @@ enum EntityStatsEngine {
             },
             sortBy: [SortDescriptor(\.playedAt, order: .reverse)]
         )
-        return try context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) }.map { ScrobbleHistoryEntry(playedAt: $0.playedAt, album: $0.albumName.isEmpty ? nil : $0.albumName) }
+        return try context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && (album == nil || $0.albumName == album) }
+            .map { ScrobbleHistoryEntry(playedAt: $0.playedAt, album: $0.albumName.isEmpty ? nil : $0.albumName) }
     }
 
     /// Time Listened for one artist — same fetch scope as `fetchArtistStats`.

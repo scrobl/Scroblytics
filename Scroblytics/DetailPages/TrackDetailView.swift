@@ -38,12 +38,21 @@ struct TrackDetailView: View {
 
                 ChartFilterBarSection(settings: settings, rangeOptions: rangeOptions, currentRange: range)
 
+                // Opened from an album's track list: that album's plays, with a way to every album's.
+                if let album = identity.scopedAlbum {
+                    TrackAlbumScopeBar(
+                        album: album, song: identity.name, onlyThisAlbum: $model.onlyThisAlbum,
+                        plays: model.stats?.plays ?? 0, otherAlbums: model.otherAlbumPlays
+                    )
+                }
+
                 DetailHeaderCard(
                     entity: .track, name: identity.name, subtitle: identity.artist, tertiary: identity.album,
                     imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     // A single track's time listened is its length times its plays; no separate lookup is needed.
                     timeListenedSeconds: model.resolvedDuration.map { $0 * (model.stats?.plays ?? 0) },
-                    yearlyTopRanks: model.yearlyTopRanks,
+                    // The yearly ranks are the song's across every album, so they step aside while one album is shown.
+                    yearlyTopRanks: model.activeAlbum == nil ? model.yearlyTopRanks : [],
                     onToggleLoved: { Task { await model.toggleLoved(range: range) } },
                     isTogglingLoved: model.isTogglingLoved,
                     facts: model.facts(
@@ -51,7 +60,7 @@ struct TrackDetailView: View {
                         onEditDuration: { showingDurationEdit = true },
                         onEditTempo: { showingBPMEdit = true }
                     ),
-                    shareWeather: EntityWeatherLean.fact(for: model.weatherLean),
+                    shareWeather: model.activeAlbum == nil ? EntityWeatherLean.fact(for: model.weatherLean) : nil,
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -98,6 +107,7 @@ struct TrackDetailView: View {
         .onChange(of: settings.compareMode) { reloadForRange() }
         .onChange(of: settings.compareCustomDate) { reloadForRange() }
         .onChange(of: settings.metric) { reloadForRange() }
+        .onChange(of: model.onlyThisAlbum) { reloadForRange() }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             Task { await refreshAfterSync() }
         }
@@ -148,5 +158,47 @@ struct TrackDetailView: View {
         reloadForRange()
         await model.loadYearlyTopRanks()
         await model.loadReleaseDate()
+    }
+}
+
+/// The switch and the line under it on a Track page opened from an album's track list.
+struct TrackAlbumScopeBar: View {
+    let album: String
+    let song: String
+    @Binding var onlyThisAlbum: Bool
+    /// The plays shown (on this album, or every album, as the switch says) and where the song's other plays are.
+    let plays: Int
+    let otherAlbums: [(album: String, plays: Int)]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Picker("Plays", selection: $onlyThisAlbum) {
+                Text("This album").tag(true)
+                Text("All albums").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Show only the plays of this song on \(album), or every play of it on every album it is on.")
+            Text(Self.caption(album: album, song: song, onlyThisAlbum: onlyThisAlbum, plays: plays, otherAlbums: otherAlbums))
+                .font(AppTypography.compactMetadata)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// What the line says. With one album shown it says where the rest are, so a song you have never played on this album isn't a mystery.
+    static func caption(album: String, song: String, onlyThisAlbum: Bool, plays: Int, otherAlbums: [(album: String, plays: Int)]) -> String {
+        let others = otherAlbums.reduce(0) { $0 + $1.plays }
+        let named = otherAlbums.prefix(3).map { "\($0.album) (\($0.plays.formatted()))" }.joined(separator: ", ")
+        let more = otherAlbums.count > 3 ? ", and \(otherAlbums.count - 3) more" : ""
+        guard onlyThisAlbum else {
+            return others == 0 ? "Every play of this song, on every album: all of them are on \(album)."
+                : "Every play of this song, on every album. The plays on other albums: \(named)\(more)."
+        }
+        if plays == 0, others > 0 { return "No plays of “\(song)” on \(album) in this period. It is played on \(named)\(more)." }
+        if plays == 0 { return "No plays of “\(song)” on \(album) in this period." }
+        return others > 0 ? "Only plays on \(album). \(others.formatted()) more on \(named)\(more)." : "Only plays on \(album)."
     }
 }

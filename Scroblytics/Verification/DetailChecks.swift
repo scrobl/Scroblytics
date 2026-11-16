@@ -342,6 +342,43 @@ enum DetailChecks {
             check("a new model has loaded nothing", !memoModel.isLoaded(for: "x"))
             memoModel.markLoaded("x")
             check("and remembers what it loaded", memoModel.isLoaded(for: "x") && !memoModel.isLoaded(for: "y"))
+            // A song that is on two albums: the page opened from one album's list shows that album's plays; every album's when asked.
+            if let songContainer = try? ModelContainer(for: Schema([Scrobble.self, LovedTrackEntry.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true)) {
+                let songContext = ModelContext(songContainer)
+                func play(_ album: String, _ day: Double, artist: String = "Artist A") {
+                    songContext.insert(Scrobble(artistName: artist, albumName: album, trackName: "Song", imageURL: nil, playedAt: Date(timeIntervalSince1970: day * 86_400), lastConfirmedAt: .now))
+                }
+                for day in 1...3 { play("Album One", Double(day)) }
+                for day in 10...11 { play("Album Two", Double(day)) }
+                play("", 20)
+                play("Album One", 30, artist: "Artist B")
+                try? songContext.save()
+                let everyDay = DateRange(from: Date(timeIntervalSince1970: 0), to: Date(timeIntervalSince1970: 100 * 86_400))
+                @MainActor func plays(_ album: String?) -> Int? { (try? EntityStatsEngine.fetchTrackStats(context: songContext, artist: "Artist A", track: "Song", range: everyDay, album: album))?.plays }
+                check("a song's page counts every album's plays by default", plays(nil) == 6, "\(String(describing: plays(nil)))")
+                check("opened from an album it counts only that album's plays, however many the other has", plays("Album One") == 3 && plays("Album Two") == 2, "\(String(describing: plays("Album One"))) \(String(describing: plays("Album Two")))")
+                check("an album the song was never played on has none (and another artist's plays never count)", plays("Album Three") == 0)
+                @MainActor func history(_ album: String?) -> [ScrobbleHistoryEntry] { (try? EntityStatsEngine.fetchTrackScrobbleHistory(context: songContext, artist: "Artist A", track: "Song", range: everyDay, album: album)) ?? [] }
+                check("the list of plays follows the same scope", history(nil).count == 6 && history("Album One").count == 3 && history("Album Two").count == 2 && history("Album Three").isEmpty)
+                check("each play in an album's list is on that album", history("Album Two").allSatisfy { $0.album == "Album Two" })
+                let elsewhere = TrackDetailModel.otherAlbums(of: history(nil), besides: "Album One")
+                check("where the other plays are: the other albums, busiest first, plays with no album left out", elsewhere.count == 1 && elsewhere[0].album == "Album Two" && elsewhere[0].plays == 2, "\(elsewhere)")
+                let plain = TrackIdentity(artist: "Artist A", name: "Song", album: nil, imageURL: nil)
+                let fromAlbum = plain.scoped(to: "Album One")
+                check("a track opened from an album remembers it, and is still the same track", fromAlbum.scopedAlbum == "Album One" && fromAlbum.id == plain.id && fromAlbum.album == "Album One")
+                check("a track opened any other way is not limited to an album, and the two are different stack entries", plain.scopedAlbum == nil && plain != fromAlbum && Set([plain, fromAlbum]).count == 2)
+                check("an album the track already knew from the list is kept", TrackIdentity(artist: "A", name: "S", album: "Shown").scoped(to: "Album One").album == "Shown")
+                let say = TrackAlbumScopeBar.caption
+                let none = say("Album Three", "Song", true, 0, elsewhere)
+                check("with no plays on the album the page says so and where they are", none.contains("No plays of “Song” on Album Three") && none.contains("Album Two (2)"), none)
+                let some = say("Album One", "Song", true, 3, elsewhere)
+                check("with plays on the album it says how many more are elsewhere", some.contains("Only plays on Album One") && some.contains("2 more on Album Two (2)"), some)
+                let wholeSong = say("Album One", "Song", false, 6, elsewhere)
+                check("with every album shown it says so and names the other albums", wholeSong.contains("every album") && wholeSong.contains("Album Two (2)"), wholeSong)
+                check("with nothing elsewhere it does not invent other albums", say("Album One", "Song", true, 3, []) == "Only plays on Album One." && say("Album Three", "Song", true, 0, []) == "No plays of “Song” on Album Three in this period.")
+                let many = (1...5).map { (album: "Other \($0)", plays: 6 - $0) }
+                check("a long list of other albums is cut to three with a count of the rest", say("Album One", "Song", true, 3, many).contains("and 2 more"), say("Album One", "Song", true, 3, many))
+            }
             // One header picture is resolved from a few rows, the same answer as the whole-library index.
             let container = try? ModelContainer(for: Schema([Artist.self, Album.self, Track.self, AlbumImageOverride.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
             if let container {

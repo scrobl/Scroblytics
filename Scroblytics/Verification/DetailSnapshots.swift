@@ -531,6 +531,18 @@ enum DetailSnapshots {
                     await render(albumCard(stats: nil, turnover: .loading), width: width, dark: dark, container: container, to: base.appending(path: "album-loading-\(Int(width))-\(mode).png"))
                 }
             }
+            // The switch and line on a song's page opened from an album's track list, in the three states it says something different in.
+            let elsewhere: [(album: String, plays: Int)] = [("RendezVous", 61), ("A Compilation With A Rather Long Title", 4), ("Live", 2), ("Demos", 1)]
+            for width in [900, 440] as [CGFloat] {
+                for dark in [true, false] {
+                    let bar = VStack(alignment: .leading, spacing: 18) {
+                        ScopeBarSample(album: "Close Cover Before Striking", plays: 0, elsewhere: Array(elsewhere.prefix(1)), onlyThisAlbum: true)
+                        ScopeBarSample(album: "RendezVous", plays: 61, elsewhere: Array(elsewhere.dropFirst()), onlyThisAlbum: true)
+                        ScopeBarSample(album: "RendezVous", plays: 68, elsewhere: Array(elsewhere.dropFirst()), onlyThisAlbum: false)
+                    }
+                    await render(bar, width: width, dark: dark, container: container, to: base.appending(path: "track-scope-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+            }
             let weatherTile = EntityWeatherLean.fact(for: .leans(EntityWeatherLean.Lean(name: "Rain", lift: 1.34, count: 41, total: 120, isTemperature: false)))
             let coldTile = EntityWeatherLean.fact(for: .leans(EntityWeatherLean.Lean(name: "Cold", lift: 1.21, count: 66, total: 150, isTemperature: true)))
             for width in [900, 440] as [CGFloat] {
@@ -717,6 +729,25 @@ enum DetailSnapshots {
             }
             exit(0)
         }
+    }
+}
+
+/// A scope bar with its own state, for the snapshots.
+private struct ScopeBarSample: View {
+    let album: String
+    let plays: Int
+    let elsewhere: [(album: String, plays: Int)]
+    @State var onlyThisAlbum: Bool
+
+    init(album: String, plays: Int, elsewhere: [(album: String, plays: Int)], onlyThisAlbum: Bool) {
+        self.album = album
+        self.plays = plays
+        self.elsewhere = elsewhere
+        _onlyThisAlbum = State(initialValue: onlyThisAlbum)
+    }
+
+    var body: some View {
+        TrackAlbumScopeBar(album: album, song: "Astronaut", onlyThisAlbum: $onlyThisAlbum, plays: plays, otherAlbums: elsewhere)
     }
 }
 #endif

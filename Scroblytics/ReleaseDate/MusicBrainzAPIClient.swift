@@ -31,13 +31,16 @@ actor MusicBrainzAPIClient {
     /// MusicBrainz asks for an application name/version plus a contact (email or URL) so it can reach
     /// the operator instead of blocking; anonymous-looking traffic is throttled harder. Replace the
     /// email with the project's URL if the app is ever released.
-    private static let userAgent = "Scroblytics/1.0 ( scroblytics@tutamail.com )"
+    static let userAgent = "Scroblytics/1.0 ( scroblytics@tutamail.com )"
 
-    private let session: URLSession
+    let session: URLSession
     private let decoder = JSONDecoder()
+    /// Root of MusicBrainz's web service. Only a test stand-in ever changes it (the artist origin lookups use it; release dates always ask the real service).
+    let baseURL: URL
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, baseURL: URL = URL(string: "https://musicbrainz.org/ws/2/")!) {
         self.session = session
+        self.baseURL = baseURL
     }
 
     private struct ReleaseGroup: Decodable {
@@ -81,6 +84,8 @@ actor MusicBrainzAPIClient {
         var request = URLRequest(url: components.url!)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         try ConnectivityGate.check(host: request.url?.host)
+        // One shared pace for every MusicBrainz request in the app (see `MusicBrainzGate`); release dates already run about once per 1.1 s.
+        await MusicBrainzGate.shared.wait(minimum: 1.1)
 
         let data: Data
         let response: URLResponse
@@ -92,6 +97,7 @@ actor MusicBrainzAPIClient {
             throw MusicBrainzAPIError.network(error)
         }
         guard let http = response as? HTTPURLResponse else { throw MusicBrainzAPIError.invalidResponse }
+        if http.statusCode == 503 || http.statusCode == 429 { await MusicBrainzGate.shared.noteThrottled() }
         guard (200..<300).contains(http.statusCode) else { throw MusicBrainzAPIError.http(http.statusCode) }
         let decoded: SearchResponse
         do {

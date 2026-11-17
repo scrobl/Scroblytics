@@ -91,7 +91,7 @@ enum AppSchema {
         SimilarityLookupCacheEntry.self, LovedTrackEntry.self, EntityCommunityTagCacheEntry.self, UserEntityTagCacheEntry.self, PersonalTagSyncState.self,
         TrackReleaseDateCacheEntry.self, PopularityCacheEntry.self, SavedConditionSet.self, AlbumImageOverride.self, LibraryPresenceEntry.self,
         LibraryPresenceCheck.self, LibraryGapDismissal.self, LovedAuditDecision.self, ReleaseYearDecision.self, AlbumEditionMatch.self,
-        TagPlaylistRule.self, AutoPlaylist.self,
+        TagPlaylistRule.self, AutoPlaylist.self, ArtistOriginEntry.self, ArtistOriginEdit.self, OriginAreaCacheEntry.self,
     ]
 }
 
@@ -124,6 +124,9 @@ enum NativeBackupFormat {
         var tagRules: [TagRuleRecord]?
         /// Editions counted on their own, with their match decisions. Optional for the same reason as above.
         var albumEditionMatches: [AlbumEditionMatchRecord]?
+        /// Your own corrections to where artists are from (and the MusicBrainz artists you picked). Not the looked-up places, which can be fetched again.
+        /// Optional for the same reason as above.
+        var artistOrigins: [ArtistOriginRecord]?
         /// The Apple Music playlists kept up to date (what each is made from, not its tracks). Optional for the same reason as above.
         var autoPlaylists: [AutoPlaylistRecord]?
         /// The weather home place and the trips (where you were, for the weather). Optional for the same reason as above: restoring an
@@ -190,6 +193,12 @@ enum NativeBackupFormat {
         /// False = reviewed and kept merged. Absent in archives written before it existed, which means true.
         var countsSeparately: Bool? = nil
     }
+    struct ArtistOriginRecord: Codable {
+        let artist: String
+        let city: String?; let region: String?; let country: String?; let countryCode: String?
+        let chosenMBID: String?
+        let confirmed: Bool
+    }
     struct ToolFilterRecord: Codable { let toolId: String; let optionsJSON: Data; let advancedGroupsJSON: Data }
 }
 
@@ -222,6 +231,7 @@ enum NativeBackupEngine {
         var albumEditionMatches = 0
         var weatherTrips = 0
         var autoPlaylists = 0
+        var artistOrigins = 0
 
         var description: String {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
@@ -232,6 +242,7 @@ enum NativeBackupEngine {
             if albumEditionMatches > 0 { text += " · \(albumEditionMatches) editions counted separately" }
             if weatherTrips > 0 { text += " · \(weatherTrips) weather trips" }
             if autoPlaylists > 0 { text += " · \(autoPlaylists) automatic playlists" }
+            if artistOrigins > 0 { text += " · \(artistOrigins) artist origin edits" }
             return text
         }
     }
@@ -321,6 +332,7 @@ enum NativeBackupEngine {
         try restoreTagRules(archive.tagRules, context: context, save: false)
         try restoreAlbumEditionMatches(archive.albumEditionMatches, context: context, save: false)
         try restoreAutoPlaylists(archive.autoPlaylists, context: context, save: false)
+        try restoreArtistOrigins(archive.artistOrigins, context: context, save: false)
         restoreWeatherLocations(archive.weatherLocations)
 
         UserDefaults.standard.set(archive.theme, forKey: AppearancePreference.storageKey)
@@ -432,6 +444,26 @@ enum NativeBackupEngine {
         if save { try context.save() }
     }
 
+    /// Replaces the origin corrections with the archive's; `nil` (an older archive) leaves the current ones alone.
+    static func restoreArtistOrigins(_ records: [NativeBackupFormat.ArtistOriginRecord]?, context: ModelContext, save: Bool = true) throws {
+        guard let records else { return }
+        for item in try context.fetch(FetchDescriptor<ArtistOriginEdit>()) { context.delete(item) }
+        var seen = Set<String>()
+        for record in records {
+            let key = TextNormalization.artistIdentityKey(record.artist)
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            let edit = ArtistOriginEdit(normalizedName: key, artist: record.artist)
+            edit.overrideCity = record.city
+            edit.overrideRegion = record.region
+            edit.overrideCountry = record.country
+            edit.overrideCountryCode = record.countryCode
+            edit.chosenMBID = record.chosenMBID
+            edit.confirmed = record.confirmed
+            context.insert(edit)
+        }
+        if save { try context.save() }
+    }
+
     /// Replaces the Tag Management rules with the archive's; `nil` (an older archive) leaves the current ones alone.
     static func restoreTagRules(_ records: [NativeBackupFormat.TagRuleRecord]?, context: ModelContext, save: Bool = true) throws {
         guard let records else { return }
@@ -478,12 +510,15 @@ enum NativeBackupEngine {
             NativeBackupFormat.AlbumEditionMatchRecord(artist: $0.artist, title: $0.title, matchMode: $0.matchResolutionMode?.rawValue, canonicalArtist: $0.canonicalArtist, canonicalAlbum: $0.canonicalAlbum, manualTracklist: $0.manualTracklist, countsSeparately: $0.countsSeparately)
         }
         let autoPlaylists = try autoPlaylistRecords(context: context)
+        let originEdits = try context.fetch(FetchDescriptor<ArtistOriginEdit>()).map {
+            NativeBackupFormat.ArtistOriginRecord(artist: $0.artist, city: $0.overrideCity, region: $0.overrideRegion, country: $0.overrideCountry, countryCode: $0.overrideCountryCode, chosenMBID: $0.chosenMBID, confirmed: $0.confirmed)
+        }
         let trips = WeatherTripStore.load()
         let weatherBook: WeatherLocationBook? = WeatherSettings.place() == nil && trips.isEmpty ? nil : WeatherLocationBook(home: WeatherSettings.place(), trips: trips)
         let username = try context.fetch(FetchDescriptor<SyncState>()).first?.username
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         let theme = UserDefaults.standard.string(forKey: AppearancePreference.storageKey) ?? AppearancePreference.dark.rawValue
-        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, releaseYearDecisions: yearDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
+        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, releaseYearDecisions: yearDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, artistOrigins: originEdits, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
     }
 
     private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
@@ -500,7 +535,7 @@ enum NativeBackupEngine {
     }
 
     private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
-        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, releaseYearDecisions: archive.releaseYearDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0)
+        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, releaseYearDecisions: archive.releaseYearDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0, artistOrigins: archive.artistOrigins?.count ?? 0)
     }
 
     private static func findOrCreateArtist(named name: String, context: ModelContext) throws -> Artist {

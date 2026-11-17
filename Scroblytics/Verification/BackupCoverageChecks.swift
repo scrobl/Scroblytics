@@ -32,6 +32,7 @@ enum BackupCoverageChecks {
         "AlbumEditionMatch": .backedUp(["albumEditionMatches"]),
         "TagPlaylistRule": .backedUp(["tagRules"]),
         "AutoPlaylist": .backedUp(["autoPlaylists"]),
+        "ArtistOriginEdit": .backedUp(["artistOrigins"]),
         // What comes back by syncing or looking it up again
         "Scrobble": .rebuildable("the listening history is imported again from Last.fm"),
         "SyncState": .rebuildable("where the import stands on this Mac"),
@@ -49,6 +50,8 @@ enum BackupCoverageChecks {
         "PopularityCacheEntry": .rebuildable("looked up again"),
         "LibraryPresenceEntry": .rebuildable("read again from Music"),
         "LibraryPresenceCheck": .rebuildable("read again from Music"),
+        "ArtistOriginEntry": .rebuildable("looked up again; your own corrections are backed up apart"),
+        "OriginAreaCacheEntry": .rebuildable("looked up again"),
     ]
 
     /// Parts of the archive that are not a model's records: its header, the image files, and the weather places (a file, not a model).
@@ -87,7 +90,7 @@ enum BackupCoverageChecks {
             let unaccounted = fields.subtracting(claimed)
             check("every field of the archive belongs to a model or is part of the header", unaccounted.isEmpty, "no model claims: \(unaccounted.sorted().joined(separator: ", "))")
             let encoded = try JSONSerialization.jsonObject(with: document.data) as? [String: Any] ?? [:]
-            let kept = ["albums", "tracks", "flaggedTracks", "toolFilters", "autoPlaylists", "releaseYearDecisions", "albumEditionMatches", "lovedAuditDecisions", "tagRules"]
+            let kept = ["albums", "tracks", "flaggedTracks", "toolFilters", "autoPlaylists", "releaseYearDecisions", "albumEditionMatches", "lovedAuditDecisions", "tagRules", "artistOrigins"]
             check("a backup of an empty database still writes the lists the restore replaces", kept.allSatisfy { encoded[$0] != nil }, kept.filter { encoded[$0] == nil }.joined(separator: ", "))
         } catch {
             check("an empty database can be backed up", false, "\(error)")

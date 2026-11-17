@@ -896,3 +896,85 @@ final class PopularityCacheEntry {
         self.resolvedAt = resolvedAt
     }
 }
+
+/// Where one artist is from, as MusicBrainz says (looked up by `ArtistOriginEngine`). A row's existence means "already looked up":
+/// `status == "none"` is a genuine miss (MusicBrainz has no such artist, rechecked after a while); a failed or offline lookup is never
+/// stored, so no row exists and the next sweep tries again. Re-fetchable, so not in backups; the person's own corrections live apart in
+/// `ArtistOriginEdit` and always win at read time.
+@Model
+final class ArtistOriginEntry {
+    /// `TextNormalization.artistIdentityKey(name)`, the same identity `Artist.normalizedName` uses.
+    @Attribute(.unique) var normalizedName: String
+    /// `ArtistOriginStatus.rawValue`: found, guess (several artists share the name, the best was used) or none.
+    var status: String
+    var mbid: String?
+    var matchedName: String?
+    /// `ArtistOriginKind.rawValue`: a person is born somewhere, a group formed somewhere.
+    var kind: String?
+    var cityName: String?
+    var regionName: String?
+    var countryName: String?
+    /// ISO 3166-1 alpha-2, upper case.
+    var countryCode: String?
+    /// The other artists that shared the name, as JSON (`[ArtistOriginCandidate]`), kept only for a `guess` so it can be reviewed.
+    var candidatesJSON: Data?
+    var resolvedAt: Date
+
+    init(normalizedName: String, status: String, resolvedAt: Date) {
+        self.normalizedName = normalizedName
+        self.status = status
+        self.resolvedAt = resolvedAt
+    }
+}
+
+/// What the person decided about one artist's origin: their own place (any of the three fields set means it is theirs), the MusicBrainz
+/// artist they picked when the automatic match was a namesake, and whether they reviewed a best guess. Part of backups.
+@Model
+final class ArtistOriginEdit {
+    @Attribute(.unique) var normalizedName: String
+    /// The artist's name as shown, kept so a backup is readable and restores to the right artist.
+    var artist: String
+    var overrideCity: String?
+    var overrideRegion: String?
+    var overrideCountry: String?
+    var overrideCountryCode: String?
+    /// The MusicBrainz artist the person picked; the next lookup asks for exactly this one instead of searching by name.
+    var chosenMBID: String?
+    /// "Looks right": a best guess the person reviewed, so it stops being flagged.
+    var confirmed: Bool
+
+    init(normalizedName: String, artist: String) {
+        self.normalizedName = normalizedName
+        self.artist = artist
+        self.confirmed = false
+    }
+
+    /// True when any of the person's own place fields is set.
+    var hasPlaceOverride: Bool {
+        [overrideCity, overrideRegion, overrideCountry, overrideCountryCode].contains { ($0?.isEmpty == false) }
+    }
+}
+
+/// One MusicBrainz area (a city, county, state, country…) and the area it is part of, so each place is walked up only once across all
+/// artists. Re-fetchable, so not in backups.
+@Model
+final class OriginAreaCacheEntry {
+    @Attribute(.unique) var areaMBID: String
+    var name: String
+    /// MusicBrainz's area type: "City", "County", "Subdivision", "Country"…
+    var type: String?
+    var iso31661: String?
+    var iso31662: String?
+    var parentMBID: String?
+    var cachedAt: Date
+
+    init(areaMBID: String, name: String, type: String?, iso31661: String?, iso31662: String?, parentMBID: String?, cachedAt: Date) {
+        self.areaMBID = areaMBID
+        self.name = name
+        self.type = type
+        self.iso31661 = iso31661
+        self.iso31662 = iso31662
+        self.parentMBID = parentMBID
+        self.cachedAt = cachedAt
+    }
+}

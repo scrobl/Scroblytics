@@ -78,3 +78,5 @@ problems, not for reuse.
 Scroblytics is an independent project. It is not affiliated with or endorsed by Last.fm, Apple, Deezer, GetSongBPM, MusicBrainz,
 Anthropic, OpenAI or Google. Listening data comes from your own Last.fm account; supplementary data comes from Deezer, MusicBrainz and
 [GetSongBPM.com](https://getsongbpm.com) (tempo data).
+
+Map data that ships inside the app: country outlines from [Natural Earth](https://www.naturalearthdata.com) (public domain), and a list of cities from [GeoNames](https://www.geonames.org), licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/). The cities are trimmed to name, region, country, coordinates and population; the list is otherwise as GeoNames published it.

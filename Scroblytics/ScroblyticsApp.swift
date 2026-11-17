@@ -168,6 +168,7 @@ struct ScroblyticsApp: App {
         ArtistMapSnapshots.runHeadlessIfRequested(container: modelContainer)
         EditionChecks.runHeadlessIfRequested(container: modelContainer)
         OriginChecks.runHeadlessIfRequested(container: modelContainer)
+        OriginMapChecks.runHeadlessIfRequested(container: modelContainer)
         ShareChecks.runHeadlessIfRequested(container: modelContainer)
         ScrobbleQueryChecks.runHeadlessIfRequested(container: modelContainer)
         WeatherGapDump.runHeadlessIfRequested(container: modelContainer)

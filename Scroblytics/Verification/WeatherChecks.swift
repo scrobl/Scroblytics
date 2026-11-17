@@ -30,13 +30,13 @@ enum WeatherChecks {
         }
     }
 
-    private static let utc: Calendar = WeatherClientCalendar.utc
+    static let utc: Calendar = WeatherClientCalendar.utc
 
     private static func hour(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0) -> Int {
         WeatherSeries.hour(of: utc.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!)
     }
 
-    private static func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0) -> Date {
+    static func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0) -> Date {
         utc.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
     }
 
@@ -912,14 +912,14 @@ enum WeatherChecks {
     // MARK: - What an artist or album leans into
 
     /// A snapshot over March and April 2025 with the stand-in weather (rain at 06–08 UTC, snow at 20–21, clear otherwise).
-    private static func marchApril() -> WeatherSnapshot {
+    static func marchApril() -> WeatherSnapshot {
         let startHour = WeatherSeries.hour(of: date(2025, 3, 1))
         var series = WeatherSeries(startHour: startHour, count: 24 * 61)
         for h in startHour..<(startHour + 24 * 61) { series.set(hour: h, weather(atHour: h)) }
         return WeatherSnapshot(series: series, placeName: "Oslo, Norway", percentiles: (20, 80))
     }
 
-    private static func playAt(_ artist: String, _ album: String = "", _ track: String = "", day: Int, month: Int = 3, hour h: Int, minute: Int = 0) -> ScrobbleSnapshot {
+    static func playAt(_ artist: String, _ album: String = "", _ track: String = "", day: Int, month: Int = 3, hour h: Int, minute: Int = 0) -> ScrobbleSnapshot {
         ScrobbleSnapshot(artistName: artist, albumName: album, trackName: track.isEmpty ? "Track \(artist)" : track, imageURL: nil, playedAt: date(2025, month, day, h, minute))
     }
 

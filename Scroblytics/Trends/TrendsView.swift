@@ -32,6 +32,9 @@ struct TrendsView: View {
     @State private var longTailInputs: TrendsLongTailChart.Inputs?
     @State private var rankBumpInputs: TrendsRankBumpChart.Inputs?
     @State private var decadeInputs: TrendsDecadeRiverChart.Inputs?
+    @State private var originMapInputs: TrendsOriginMapChart.Inputs?
+    @State private var localSceneInputs: TrendsLocalSceneChart.Inputs?
+    @State private var passportInputs: TrendsPassportChart.Inputs?
     @State private var loyaltyInputs: TrendsLoyaltyChart.Inputs?
     @State private var flowInputs: TrendsFlowChart.Inputs?
     @State private var navigation = DetailNavigationCoordinator(origin: .trends)
@@ -156,6 +159,21 @@ struct TrendsView: View {
                                 TrendsLoyaltyChart(inputs: loyaltyInputs, openQuery: openQuery, openEntity: openEntity)
                             }
                         }
+                        if group == .taste, let originMapInputs {
+                            TrendsSection(title: "Where your music is from", subtitle: "Where the artists you play were born or formed") {
+                                TrendsOriginMapChart(inputs: originMapInputs, openQuery: openQuery)
+                            }
+                        }
+                        if group == .taste, let localSceneInputs {
+                            TrendsSection(title: "Close to home", subtitle: "How much of what you play is by artists from your own city, region and country") {
+                                TrendsLocalSceneChart(inputs: localSceneInputs, openQuery: openQuery)
+                            }
+                        }
+                        if group == .taste, let passportInputs {
+                            TrendsSection(title: "Countries you’ve heard", subtitle: "Every country you have heard an artist from, and when you first did") {
+                                TrendsPassportChart(inputs: passportInputs, openQuery: openQuery)
+                            }
+                        }
                         if group == .taste, let decadeInputs {
                             TrendsSection(title: "Eras", subtitle: "Which decades your listening comes from", comparison: true) {
                                 TrendsDecadeRiverChart(inputs: decadeInputs, openQuery: openQuery)
@@ -205,6 +223,11 @@ struct TrendsView: View {
             requestReload()
         }
         .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in backgroundDataMoved() }
+        .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in
+            // Origins were looked up, forgotten or corrected: the map reads them with the rest of the page's data.
+            querySnapshots = nil
+            backgroundDataMoved()
+        }
         .onReceive(NotificationCenter.default.publisher(for: ReleaseDateEngine.progressNotification)) { _ in backgroundDataMoved() }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in backgroundDataMoved() }
     }
@@ -313,6 +336,9 @@ struct TrendsView: View {
             tagsInputs = TrendsTagsChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             flowInputs = TrendsFlowChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             loyaltyInputs = TrendsLoyaltyChart.Inputs(scrobbles: canonical, durations: snapshots.durations, range: range, compareRange: compareRange, version: dataVersion)
+            originMapInputs = TrendsOriginMapChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, version: dataVersion)
+            localSceneInputs = TrendsLocalSceneChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, version: dataVersion)
+            passportInputs = TrendsPassportChart.Inputs(scrobbles: canonical, snapshots: snapshots, version: dataVersion)
             decadeInputs = TrendsDecadeRiverChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, compareRange: compareRange, version: dataVersion)
             rankBumpInputs = TrendsRankBumpChart.Inputs(scrobbles: canonical, durations: snapshots.durations, imageLookup: snapshots.images.lookup, range: range, version: dataVersion)
             longTailInputs = TrendsLongTailChart.Inputs(scrobbles: canonical, snapshots: snapshots, range: range, version: dataVersion)

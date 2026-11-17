@@ -46,6 +46,15 @@ enum CountryNames {
         return Locale(identifier: "en_US").localizedString(forRegionCode: upper)
     }
 
+    /// Names that read with "the" in front ("from the United Kingdom").
+    private static let withThe: Set<String> = ["United States", "United Kingdom", "Netherlands", "Philippines", "Bahamas", "Gambia", "United Arab Emirates", "Czech Republic", "Dominican Republic", "Central African Republic", "Maldives", "Comoros", "Seychelles", "Marshall Islands", "Solomon Islands", "Cayman Islands", "Faroe Islands"]
+
+    /// A country as it reads after "from": "the United Kingdom", "Canada".
+    static func phrase(forCode code: String) -> String {
+        let name = name(forCode: code) ?? code
+        return withThe.contains(name) ? "the \(name)" : name
+    }
+
     /// The flag for a country, drawn from its code: two regional-indicator letters ("US" is the American flag).
     static func flag(forCode code: String) -> String {
         let upper = code.uppercased()

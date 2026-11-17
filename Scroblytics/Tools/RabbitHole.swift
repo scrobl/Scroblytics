@@ -127,15 +127,20 @@ enum RabbitHoleEngine {
 
         var items: [RabbitHoleSelector.Item] = []
         var byKey: [String: RabbitHoleScoredCandidate] = [:]
+        var sceneReasons: [String: RabbitHoleReason] = [:]
+        let seedOrigin = snapshots.origins.display(artist: seed.artist)
         for candidate in scored {
             let track = library.tracks[candidate.trackIndex]
             guard allowed.contains(QueryEntityID(target: .track, artist: track.artist, name: track.name)) else { continue }
+            let otherOrigin = snapshots.origins.display(artist: track.artist)
+            let scene = RabbitHoleScene.relation(seed: seedOrigin, other: otherOrigin)
             items.append(RabbitHoleSelector.Item(
                 key: track.key, artistKey: normalized(track.artist), albumKey: albumKey(artist: track.artist, album: track.album),
                 topTag: snapshots.entityTags.tags(forArtist: track.artist)?.first?.lowercased(),
-                score: candidate.score, plays: track.plays, lastPlayed: track.lastPlayed, loved: snapshots.lovedKeys.contains(track.key)
+                score: candidate.score, plays: track.plays, lastPlayed: track.lastPlayed, loved: snapshots.lovedKeys.contains(track.key), scene: scene
             ))
             byKey[track.key] = candidate
+            if let reason = Self.sceneReason(scene, seed: seedOrigin, other: otherOrigin, places: knobs.places) { sceneReasons[track.key] = reason }
         }
 
         let pathArtistCounts = Dictionary(grouping: path, by: { normalized($0.track.artist) }).mapValues(\.count)
@@ -180,7 +185,7 @@ enum RabbitHoleEngine {
             return RabbitHoleTrack(
                 artist: track.artist, track: track.name, album: track.album, imageURL: track.imageURL, playCount: track.plays,
                 lastPlayed: track.lastPlayed, matchScore: Int(candidate.score.rounded()), source: candidate.topSource,
-                reasons: Self.topReasons(candidate.reasons)
+                reasons: Self.topReasons(candidate.reasons + (sceneReasons[item.key].map { [$0] } ?? []))
             )
         }
         return RabbitHoleGeneration(candidates: candidates, totalBeforeConditions: scored.count + newByKey.count, poolSize: items.count)
@@ -188,7 +193,7 @@ enum RabbitHoleEngine {
 
     /// The reasons worth showing, most telling first, at most three.
     static func topReasons(_ reasons: [RabbitHoleReason]) -> [RabbitHoleReason] {
-        let order: [RabbitHoleReason.Kind] = [.playedNext, .similar, .viaStep, .similarArtist, .sharedTags, .forgotten, .loved, .tempo, .newToYou]
+        let order: [RabbitHoleReason.Kind] = [.playedNext, .similar, .viaStep, .similarArtist, .sameScene, .crossBorder, .sharedTags, .forgotten, .loved, .tempo, .newToYou]
         let ranked = reasons.sorted { (order.firstIndex(of: $0.kind) ?? 99) < (order.firstIndex(of: $1.kind) ?? 99) }
         return Array(ranked.prefix(3))
     }
@@ -204,6 +209,27 @@ enum RabbitHoleEngine {
         case .loved: "Loved"
         case .forgotten: "Forgotten favourite"
         case .newToYou: "New to you"
+        case .sameScene: "Same scene"
+        case .crossBorder: "Another country"
+        }
+    }
+
+    /// The reason chip for a candidate's place against the step's: always for the same city or region, for the same country when you asked
+    /// to stay in the scene, and for another country when you asked to cross borders.
+    static func sceneReason(_ scene: RabbitHoleScene, seed: ArtistOriginDisplay, other: ArtistOriginDisplay, places: Int) -> RabbitHoleReason? {
+        switch scene {
+        case .city:
+            return other.place.city.map { RabbitHoleReason(kind: .sameScene, text: "Also from \($0)") }
+        case .region:
+            return (other.place.region ?? seed.place.region).map { RabbitHoleReason(kind: .sameScene, text: "Also from \($0)") }
+        case .country:
+            guard places == 1, let code = OriginHome.countryCode(of: other.place) else { return nil }
+            return RabbitHoleReason(kind: .sameScene, text: "Also from \(CountryNames.phrase(forCode: code))")
+        case .abroad:
+            guard places == 2, let code = OriginHome.countryCode(of: other.place), let home = OriginHome.countryCode(of: seed.place) else { return nil }
+            return RabbitHoleReason(kind: .crossBorder, text: "From \(CountryNames.phrase(forCode: code)), not \(CountryNames.phrase(forCode: home))")
+        case .unknown:
+            return nil
         }
     }
 

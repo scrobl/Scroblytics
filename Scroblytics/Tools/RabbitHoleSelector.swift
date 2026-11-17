@@ -11,6 +11,9 @@ struct RabbitHoleKnobs: Codable, Equatable, Sendable {
     var avoidRepeats = true
     /// How much new music (tracks you haven't played) is mixed in: 0 none, 1 a little, 2 about half.
     var newMusic = 0
+    /// Where artists are from, compared with the track the step starts from: 0 no lean, 1 stay in the scene (the same city, then region,
+    /// then country), 2 cross borders (artists from other countries).
+    var places = 0
 
     /// The share of the picks that new tracks should make up, as a chance of any one pick being new.
     var newShare: Double { [0, 0.25, 0.5][min(2, max(0, newMusic))] }
@@ -23,6 +26,46 @@ struct RabbitHoleKnobs: Codable, Equatable, Sendable {
         wander = min(2, max(0, try c.decodeIfPresent(Int.self, forKey: .wander) ?? 1))
         avoidRepeats = try c.decodeIfPresent(Bool.self, forKey: .avoidRepeats) ?? true
         newMusic = min(2, max(0, try c.decodeIfPresent(Int.self, forKey: .newMusic) ?? 0))
+        places = min(2, max(0, try c.decodeIfPresent(Int.self, forKey: .places) ?? 0))
+    }
+}
+
+/// How the artist of a candidate sits against the artist of the track a step starts from, by where each is from.
+enum RabbitHoleScene: Int, Sendable {
+    /// Either artist's origin is not known (or has no country), so there is nothing to compare.
+    case unknown
+    case city
+    case region
+    case country
+    /// From another country.
+    case abroad
+
+    static func relation(seed: ArtistOriginDisplay, other: ArtistOriginDisplay) -> RabbitHoleScene {
+        guard seed.state == .known, other.state == .known,
+              OriginHome.countryCode(of: seed.place) != nil, OriginHome.countryCode(of: other.place) != nil else { return .unknown }
+        switch LocalScene.of(place: other.place, home: seed.place) {
+        case .city: return .city
+        case .region: return .region
+        case .country: return .country
+        case .elsewhere: return .abroad
+        case .unknown: return .unknown
+        }
+    }
+
+    /// How much the Places option scales the chance of a candidate in this scene. Always above zero: it leans, it never filters, so a pool
+    /// with nothing in the preferred scene still offers what it has.
+    func factor(places: Int) -> Double {
+        switch (places, self) {
+        case (1, .city): 3.0
+        case (1, .region): 2.2
+        case (1, .country): 1.5
+        case (1, .abroad): 0.7
+        case (2, .abroad): 2.5
+        case (2, .country): 0.6
+        case (2, .region): 0.4
+        case (2, .city): 0.3
+        default: 1.0
+        }
     }
 }
 
@@ -92,6 +135,8 @@ enum RabbitHoleSelector {
         let loved: Bool
         /// A track from outside your library.
         var isOutside = false
+        /// Where its artist is from against the step's artist.
+        var scene = RabbitHoleScene.unknown
     }
 
     /// How likely this item is to be picked, before spreading the three picks apart.
@@ -106,6 +151,7 @@ enum RabbitHoleSelector {
             let forgotten = min(1, max(0, now.timeIntervalSince(item.lastPlayed) / (365 * 86400)))
             weight *= 1 + abs(lean) * forgotten * 1.5
         }
+        weight *= item.scene.factor(places: knobs.places)
         if knobs.avoidRepeats { weight *= memory.penalty(for: item.key, now: now) }
         return weight
     }

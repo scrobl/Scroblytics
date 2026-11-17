@@ -153,7 +153,7 @@ extension HelpContent {
                 .table(headers: ["Group", "Charts"], rows: [
                     ["**Listening**", "Volume over time; When you listen (weekday × hour heatmap); Discovery (new vs repeat plays) — [Discovery](help://metrics-distribution)"],
                     ["**Weather & places**", "Weather and listening; Leaning into the weather; Artist weather map; Temperature and time of day; Listening against the weather; Where you listened — six cards, once [weather is turned on](help://screen-weather)"],
-                    ["**Taste & eras**", "Eras (share by release decade); Taste (top tags) — [Eras and Taste](help://metrics-trends-other)"],
+                    ["**Taste & eras**", "Where your music is from (a world map of where your artists were born or formed); Close to home (how much of what you play is by artists from your own city, region and country); Countries you’ve heard (a passport of every country, with the day you first heard one); Eras (share by release decade); Taste (top tags) — [Origins, Eras and Taste](help://metrics-trends-other)"],
                     ["**Habits**", "Long tail; Loyalty — [Long tail and Loyalty](help://metrics-distribution)"],
                     ["**Rankings & flow**", "Rankings (bump chart); Listening flow — [Rankings and Flow](help://metrics-trends-other)"],
                 ]),

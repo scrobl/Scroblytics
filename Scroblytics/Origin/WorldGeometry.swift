@@ -10,8 +10,17 @@ enum RobinsonProjection {
     /// The map's scale factors: full width is 0.8487·π, full height 1.3523 (both for a unit sphere).
     private static let xScale = 0.8487 * Double.pi
     private static let yScale = 1.3523
-    /// Width divided by height of the whole map.
-    static let aspect = (2 * xScale) / (2 * yScale)
+    /// Width divided by height of the whole globe, pole to pole.
+    static let fullAspect = (2 * xScale) / (2 * yScale)
+    /// The map shows only the latitudes where there is land people are from: from 84°N (the top of Greenland) to 58°S (below Tierra del Fuego),
+    /// so the frame is not wasted on Antarctica and the empty Arctic.
+    static let topLatitude = 84.0
+    static let bottomLatitude = -58.0
+    /// The projected y of those two latitudes, which are the top and bottom of the frame.
+    static let top = Double(project(longitude: 0, latitude: topLatitude).y)
+    static let bottom = Double(project(longitude: 0, latitude: bottomLatitude).y)
+    /// Width divided by height of the frame the map is drawn in.
+    static let aspect = (2 * xScale) / (yScale * (top - bottom))
 
     private static func interpolate(_ table: [Double], _ absoluteLatitude: Double) -> Double {
         let position = min(max(absoluteLatitude, 0), 90) / 5
@@ -127,7 +136,7 @@ struct WorldGeometry: Sendable {
         return sum / 2
     }
 
-    /// A country's outline as a path in `rect`, which should have the map's aspect ratio (see `RobinsonProjection.aspect`).
+    /// A country's outline as a path in `rect`, which should have the frame's aspect ratio (see `RobinsonProjection.aspect`).
     func path(for country: WorldCountry, in rect: CGRect) -> Path {
         var path = Path()
         for ring in country.projected where ring.count > 2 {
@@ -137,8 +146,16 @@ struct WorldGeometry: Sendable {
         return path
     }
 
-    /// A projected point (x and y between -1 and 1, y up) placed in `rect`.
+    /// A projected point (x and y between -1 and 1, y up) placed in `rect`, which shows the latitudes from `RobinsonProjection.topLatitude`
+    /// down to `bottomLatitude`.
     static func point(_ projected: CGPoint, in rect: CGRect) -> CGPoint {
-        CGPoint(x: rect.minX + (projected.x + 1) / 2 * rect.width, y: rect.minY + (1 - projected.y) / 2 * rect.height)
+        let span = RobinsonProjection.top - RobinsonProjection.bottom
+        return CGPoint(x: rect.minX + (projected.x + 1) / 2 * rect.width, y: rect.minY + CGFloat((RobinsonProjection.top - Double(projected.y)) / span) * rect.height)
+    }
+
+    /// The projected point at a spot of the frame: the opposite of `point(_:in:)`.
+    static func projected(_ point: CGPoint, in rect: CGRect) -> CGPoint {
+        let span = RobinsonProjection.top - RobinsonProjection.bottom
+        return CGPoint(x: (point.x - rect.minX) / rect.width * 2 - 1, y: CGFloat(RobinsonProjection.top - Double((point.y - rect.minY) / rect.height) * span))
     }
 }

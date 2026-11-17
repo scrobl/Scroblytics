@@ -22,13 +22,20 @@ final class ArtistMapModel {
         var minMatchPercent = 40
         var showGhosts = false
         var showArtwork = true
+        /// What the dots' colors mean: the group an artist is in, or the country it is from.
+        enum ColorBy: String, Codable, CaseIterable, Identifiable {
+            case group, country
+            var id: String { rawValue }
+            var title: String { self == .group ? "Group" : "Country" }
+        }
+        var colorBy = ColorBy.group
         /// From a seed: the artist the map is drawn from, and how many steps out it reaches (1 or 2).
         var seedArtist: String?
         var reach = 1
 
         init() {}
 
-        private enum CodingKeys: String, CodingKey { case mode, count, periodId, minMatchPercent, showGhosts, showArtwork, seedArtist, reach }
+        private enum CodingKeys: String, CodingKey { case mode, count, periodId, minMatchPercent, showGhosts, showArtwork, colorBy, seedArtist, reach }
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -39,6 +46,7 @@ final class ArtistMapModel {
             minMatchPercent = try values.decodeIfPresent(Int.self, forKey: .minMatchPercent) ?? 40
             showGhosts = try values.decodeIfPresent(Bool.self, forKey: .showGhosts) ?? false
             showArtwork = try values.decodeIfPresent(Bool.self, forKey: .showArtwork) ?? true
+            colorBy = try values.decodeIfPresent(ColorBy.self, forKey: .colorBy) ?? .group
             seedArtist = try values.decodeIfPresent(String.self, forKey: .seedArtist)
             reach = min(2, max(1, try values.decodeIfPresent(Int.self, forKey: .reach) ?? 1))
         }
@@ -70,6 +78,29 @@ final class ArtistMapModel {
         /// The group's biggest members other than this artist, busiest first.
         let groupMembers: [String]
         let links: [Link]
+        /// Where this artist is from, when that is known.
+        let origin: ArtistOriginDisplay?
+        /// What the group's known origins say ("Mostly from the United Kingdom: 7 of 9 with a known origin"), when they say anything.
+        let groupOrigin: String?
+    }
+
+    /// What a group's members' countries say about it: nothing unless two or more are known and more than half share one country.
+    static func originSummary(countries: [String?]) -> String? {
+        let known = countries.compactMap { $0 }
+        guard known.count >= 2 else { return nil }
+        let counts = Dictionary(grouping: known, by: { $0 }).mapValues(\.count)
+        guard let top = counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }), top.value * 2 > known.count else { return nil }
+        let name = CountryNames.phrase(forCode: top.key)
+        return top.value == known.count ? "All \(known.count) with a known origin are from \(name)" : "Mostly from \(name): \(top.value) of \(known.count) with a known origin"
+    }
+
+    /// One of the commonest countries on the map, as the legend lists it.
+    struct CountryLegend: Identifiable {
+        let code: String
+        let name: String
+        let artists: Int
+        let color: Color
+        var id: String { code }
     }
 
     /// What the panel says about an artist's group. The group is named after its busiest member, so this says who is in it rather than
@@ -90,6 +121,12 @@ final class ArtistMapModel {
     var hoveredKey: String?
 
     private(set) var shown = ArtistMapGraph()
+    /// Where each artist is from (the saved lookups and your corrections), read when the map opens and whenever they change.
+    private(set) var origins = QueryOriginSnapshot.empty
+    /// The country (ISO code) of each artist on the map whose origin is known, by node key.
+    private(set) var countryOfNode: [String: String] = [:]
+    /// The commonest countries on the map, each with its own color; the rest share one.
+    private(set) var countryLegend: [CountryLegend] = []
     private(set) var groups = ArtistMapGroups()
     private(set) var positions: [CGPoint] = []
     private(set) var isLoadingHistory = true
@@ -182,6 +219,7 @@ final class ArtistMapModel {
         snapshots = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
         rangeOptions = DateRangePresets.build(oldestScrobbleDate: snapshots.first?.playedAt)
         hasHistory = !snapshots.isEmpty
+        origins = QueryOriginSnapshot.load(context: container.mainContext)
         isLoadingHistory = false
         await rescope()
     }
@@ -250,6 +288,10 @@ final class ArtistMapModel {
             || old.seedArtist != options.seedArtist || old.reach != options.reach {
             Task { await rescope() }
         } else {
+            // Only the colors changed: the layout stays as it is and the canvas just draws again.
+            var recoloured = old
+            recoloured.colorBy = options.colorBy
+            if recoloured == options { return }
             scheduleRebuild()
         }
     }
@@ -327,7 +369,40 @@ final class ArtistMapModel {
         positions = laidOut
         for (index, node) in filtered.nodes.enumerated() { positionsByKey[node.key] = laidOut[index] }
         if let key = selectedKey, !filtered.nodes.contains(where: { $0.key == key }) { selectedKey = nil }
+        refreshCountries()
         refreshArtwork()
+    }
+
+    /// Reads the origins again (they were looked up, forgotten or corrected) and recolors the map.
+    func reloadOrigins() {
+        origins = QueryOriginSnapshot.load(context: container.mainContext)
+        refreshCountries()
+    }
+
+    /// Which country each artist on the map is from, and a color for each of the eight commonest.
+    private func refreshCountries() {
+        var codes: [String: String] = [:]
+        var counts: [String: Int] = [:]
+        for node in shown.nodes where !node.isGhost {
+            let display = origins.display(artist: node.name)
+            guard display.state == .known,
+                  let code = display.place.countryCode.flatMap({ CountryNames.code(for: $0) }) ?? display.place.country.flatMap({ CountryNames.code(for: $0) }) else { continue }
+            codes[node.key] = code
+            counts[code, default: 0] += 1
+        }
+        countryOfNode = codes
+        let ranked = counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(ArtistMapPalette.countryColors.count)
+        countryLegend = ranked.enumerated().map { index, entry in
+            CountryLegend(code: entry.key, name: CountryNames.name(forCode: entry.key) ?? entry.key, artists: entry.value, color: ArtistMapPalette.countryColors[index])
+        }
+    }
+
+    /// The color of an artist's dot, by what the map is colored by: its group, or its country (gray when it is not among the commonest
+    /// countries, lighter gray when its country is not known).
+    func color(forKey key: String, group: Int) -> Color {
+        guard options.colorBy == .country else { return ArtistMapPalette.color(group: group) }
+        guard let code = countryOfNode[key] else { return ArtistMapPalette.unknownCountry }
+        return countryLegend.first { $0.code == code }?.color ?? ArtistMapPalette.otherCountry
     }
 
     // MARK: Artwork
@@ -479,9 +554,12 @@ final class ArtistMapModel {
         let mine = group(of: i)
         // Nodes are in play order, so the members come out busiest first.
         let members = mine >= 0 ? shown.nodes.indices.filter { $0 != i && group(of: $0) == mine }.map { shown.nodes[$0].name } : []
+        let node = shown.nodes[i]
+        let groupCountries: [String?] = mine >= 0 ? shown.nodes.indices.filter { group(of: $0) == mine }.map { countryOfNode[shown.nodes[$0].key] } : []
         return Selection(
-            node: shown.nodes[i], group: mine, groupName: mine >= 0 ? groups.names[mine] : nil,
-            groupSize: mine >= 0 ? groups.sizes[mine] : 0, groupMembers: Array(members.prefix(6)), links: links
+            node: node, group: mine, groupName: mine >= 0 ? groups.names[mine] : nil,
+            groupSize: mine >= 0 ? groups.sizes[mine] : 0, groupMembers: Array(members.prefix(6)), links: links,
+            origin: node.isGhost ? nil : origins.display(artist: node.name), groupOrigin: Self.originSummary(countries: groupCountries)
         )
     }
 }
@@ -510,6 +588,11 @@ enum ArtistMapPalette {
     private static let colors: [Color] = [.purple, .teal, .orange, .pink, .indigo, .mint, .brown, .cyan]
 
     static func color(group: Int) -> Color { group < 0 ? .gray : colors[group % colors.count] }
+
+    /// One color for each of the eight commonest countries on the map; every other country shares `otherCountry`.
+    static let countryColors: [Color] = [.blue, .orange, .green, .pink, .purple, .yellow, .red, .teal]
+    static let otherCountry = Color.gray
+    static let unknownCountry = Color.gray.opacity(0.35)
 }
 
 // MARK: - View
@@ -602,6 +685,10 @@ struct ArtistMapView: View {
             if Tour.minutes != nil { await model.runTourScript() }
             #endif
         }
+        .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in
+            guard !model.isSnapshotSample else { return }
+            model.reloadOrigins()
+        }
         .onChange(of: model.options) { old, new in
             guard !model.isSnapshotSample else { return }
             ToolFilterSettingsStore.save(new, toolId: Self.toolId, context: modelContext)
@@ -648,9 +735,15 @@ struct ArtistMapView: View {
                 Text("\(model.options.minMatchPercent)%").font(AppTypography.metadata).monospacedDigit().frame(width: 36, alignment: .leading)
             }
             .help("Show only links at least this strong. Last.fm scores similarity from 0 to 100%.")
+            Picker("Color by", selection: $model.options.colorBy) {
+                ForEach(ArtistMapModel.Options.ColorBy.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help("Color each dot by the group of artists it belongs to, or by the country the artist is from (the eight commonest get a color each; where artists are from comes from Settings › Sync › Artist origins).")
             Toggle("Artwork", isOn: $model.options.showArtwork)
                 .toggleStyle(.checkbox)
-                .help("Draw each artist's picture on its dot. The colored ring still shows its group.")
+                .help("Draw each artist's picture on its dot. The colored ring still shows its group, or its country.")
             Toggle("Show artists I haven't played", isOn: $model.options.showGhosts)
                 .toggleStyle(.checkbox)
                 .help("Also draw the artists Last.fm says are most similar to yours that you've never played, as dashed dots.")
@@ -696,13 +789,35 @@ struct ArtistMapView: View {
     }
 
     private var legend: some View {
-        HStack(spacing: 16) {
+        AskFlowLayout(spacing: 16) {
             Text("Dot size = plays").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             Text("Line thickness = match").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             if model.options.mode == .seed {
                 Text("Closer to the seed = stronger match").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             }
-            Text("Color = a group of artists that point at each other").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            if model.options.colorBy == .country {
+                if model.countryLegend.isEmpty {
+                    Text("Color = the artist's country (none known yet)").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                } else {
+                    Text("Color = country:").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    ForEach(model.countryLegend) { item in
+                        HStack(spacing: 4) {
+                            Circle().fill(item.color).frame(width: 8, height: 8)
+                            Text("\(item.name) (\(item.artists))").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        Circle().fill(ArtistMapPalette.otherCountry).frame(width: 8, height: 8)
+                        Text("others").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 4) {
+                        Circle().fill(ArtistMapPalette.unknownCountry).frame(width: 8, height: 8)
+                        Text("not known").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Text("Color = a group of artists that point at each other").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+            }
             if model.options.showGhosts {
                 Text("Dashed = not played").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             }
@@ -823,7 +938,7 @@ private struct ArtistMapCanvas: View {
             let r = displayRadius(node)
             let isSelected = node.key == selected
             let dim = selected != nil && !isSelected && !linked.contains(node.key)
-            let color = ArtistMapPalette.color(group: index < model.groups.groupOfNode.count ? model.groups.groupOfNode[index] : -1)
+            let color = model.color(forKey: node.key, group: index < model.groups.groupOfNode.count ? model.groups.groupOfNode[index] : -1)
             let circle = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
             if node.isGhost {
                 context.fill(circle, with: .color(Color(nsColor: .windowBackgroundColor)))
@@ -936,12 +1051,24 @@ private struct ArtistMapPanel: View {
             if s.node.isGhost {
                 Text("You haven't played this artist.").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             } else {
+                if let origin = s.origin, origin.state == .known {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin.and.ellipse").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                        Text("\(origin.label) \(origin.text)").font(AppTypography.compactMetadata).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 HStack(spacing: 6) {
                     Circle().fill(ArtistMapPalette.color(group: s.group)).frame(width: 10, height: 10)
                     Text(ArtistMapModel.groupDescription(selected: s.node.name, leader: s.groupName, size: s.groupSize)).font(AppTypography.compactMetadata)
                 }
                 .help(s.groupMembers.isEmpty ? "Not in a group of at least three artists that point at each other."
                       : "Its group's other biggest members: " + s.groupMembers.joined(separator: ", ") + (s.groupSize - 1 > s.groupMembers.count ? ", and more." : "."))
+                if let groupOrigin = s.groupOrigin {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "globe").font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+                        Text(groupOrigin).font(AppTypography.compactMetadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Text(s.node.key == model.seedKey ? "The seed · \(s.node.plays.formatted()) plays" : "\(s.node.plays.formatted()) plays in this period")
                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             }
@@ -959,7 +1086,7 @@ private struct ArtistMapPanel: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             if !link.isGhost, link.group != s.group {
-                                Circle().fill(ArtistMapPalette.color(group: link.group)).frame(width: 8, height: 8)
+                                Circle().fill(model.color(forKey: link.key, group: link.group)).frame(width: 8, height: 8)
                             }
                             Text(link.name).font(AppTypography.supporting).lineLimit(1)
                             Spacer(minLength: 4)
@@ -1097,6 +1224,28 @@ extension ArtistMapModel {
         // An artist that has a picture, so a snapshot shows the selection ring over artwork.
         model.selectedKey = graph.nodes.first { $0.name.hasPrefix("Bravo") && model.artwork[$0.key] != nil }?.key ?? graph.nodes.first?.key
         return model
+    }
+
+    /// Gives the artists of a made-up map origins (three clusters, each mostly from one country, some artists with none) and colors it by country.
+    func installSampleOrigins() {
+        var snapshot = QueryOriginSnapshot(lookupsOn: true)
+        func place(_ city: String, _ country: String, _ code: String) -> OriginPlace { OriginPlace(city: city, region: nil, country: country, countryCode: code) }
+        let pools: [[OriginPlace]] = [
+            [place("City A", "United Kingdom", "GB"), place("City A", "United Kingdom", "GB"), place("City B", "United Kingdom", "GB"), place("City C", "Ireland", "IE")],
+            [place("City D", "United States", "US"), place("City E", "United States", "US"), place("City F", "United States", "US"), place("City G", "Canada", "CA")],
+            [place("City H", "Sweden", "SE"), place("City I", "Germany", "DE"), place("City J", "Japan", "JP"), place("City K", "Sweden", "SE")],
+        ]
+        for node in shown.nodes where !node.isGhost {
+            let cluster = node.name.contains("Alpha") ? 0 : node.name.contains("Bravo") ? 1 : 2
+            let spread = node.name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+            if spread % 9 == 0 { continue }
+            snapshot.entries[TextNormalization.artistIdentityKey(node.name)] = OriginEntrySnapshot(
+                status: .found, mbid: "m", matchedName: nil, kind: .group, place: pools[cluster][spread % pools[cluster].count], candidates: [], resolvedAt: Date()
+            )
+        }
+        origins = snapshot
+        options.colorBy = .country
+        refreshCountries()
     }
 
     /// A made-up map drawn from a seed, for the offscreen snapshots.

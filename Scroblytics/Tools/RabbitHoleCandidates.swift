@@ -4,7 +4,7 @@ import SwiftData
 /// Why a track is being offered at a Rabbit Hole step, in words a person can read ("you often play it after …").
 struct RabbitHoleReason: Codable, Hashable, Sendable {
     enum Kind: String, Codable, Sendable {
-        case similar, similarArtist, viaStep, sharedTags, playedNext, tempo, loved, forgotten, newToYou
+        case similar, similarArtist, viaStep, sharedTags, playedNext, tempo, loved, forgotten, newToYou, sameScene, crossBorder
     }
     let kind: Kind
     let text: String

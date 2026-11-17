@@ -301,6 +301,7 @@ struct RabbitHoleView: View {
         }
         if !options.knobs.avoidRepeats { parts.append("repeats allowed") }
         if options.knobs.newMusic > 0 { parts.append(options.knobs.newMusic == 1 ? "a little new music" : "half new music") }
+        if options.knobs.places == 1 { parts.append("in the scene") } else if options.knobs.places == 2 { parts.append("across borders") }
         return parts.joined(separator: " · ")
     }
 
@@ -341,6 +342,13 @@ struct RabbitHoleView: View {
         }
         .fixedSize()
         .help("Stay close favours the best matches; wander gives weaker matches a real chance. Steps taken for you follow it too.")
+        Picker("Places", selection: $options.knobs.places) {
+            Text("Anywhere").tag(0)
+            Text("Stay in the scene").tag(1)
+            Text("Cross borders").tag(2)
+        }
+        .fixedSize()
+        .help("Compares where artists are from with the artist of the track you are on (Settings › Sync › Artist origins). Stay in the scene favours the same city, then region, then country; cross borders favours other countries. It only leans: artists with no known origin are never ruled out.")
         Toggle("Avoid recent repeats", isOn: $options.knobs.avoidRepeats)
             .help("Makes tracks you were shown or chose in the last week less likely to come up again.")
         Picker("New music", selection: $options.knobs.newMusic) {

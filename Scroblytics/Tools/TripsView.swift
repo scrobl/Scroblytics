@@ -211,6 +211,9 @@ struct TripsView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(stay.newArtists == 1 ? "1 new artist" : "\(stay.newArtists.formatted()) new artists").font(AppTypography.metadata)
                 if weatherEnabled { Text(weatherText(stay, trip: trip)).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1) }
+                if let local = localText(stay) {
+                    Text(local.line).font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1).help(local.help)
+                }
             }
             .frame(width: 130, alignment: .leading)
             Text(stay.topArtists.map(\.name).joined(separator: " · "))
@@ -230,6 +233,22 @@ struct TripsView: View {
         return "\(perDay) a day · \(Int((relative * 100).rounded()))% of home"
     }
 
+    /// "12% from Portugal": what share of the trip's plays were by artists from where the trip was, with the detail in a tooltip.
+    private func localText(_ stay: TrendsStay) -> (line: String, help: String)? {
+        guard let share = stay.localShare, let code = stay.countryCode else { return nil }
+        let place = CountryNames.phrase(forCode: code)
+        let percent = share > 0 && share < 0.005 ? "<1%" : (share * 100).formatted(.number.precision(.fractionLength(0))) + "%"
+        var help = "\(percent) of the plays on this trip were by artists from \(place)."
+        if !stay.topLocalArtists.isEmpty { help += " Most played: " + stay.topLocalArtists.map(\.name).joined(separator: ", ") + "." }
+        if let home = result?.home, let homeShare = home.localShare, let homeCode = home.countryCode {
+            let homePercent = (homeShare * 100).formatted(.number.precision(.fractionLength(0)))
+            help += " At home it is \(homePercent)% from \(CountryNames.phrase(forCode: homeCode))."
+        }
+        let coverage = (stay.originCoverage * 100).formatted(.number.precision(.fractionLength(0)))
+        help += " Where the artist is from is known for \(coverage)% of the plays here."
+        return ("\(percent) from \(place)", help)
+    }
+
     private func weatherText(_ stay: TrendsStay, trip: WeatherTrip) -> String {
         var parts: [String] = []
         if let temperature = stay.averageTemperature { parts.append(unit.text(celsius: temperature)) }
@@ -246,9 +265,10 @@ struct TripsView: View {
         let container = modelContainer
         let scrobbles = (try? await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)) ?? []
         let weather = await offMain { WeatherSnapshot.load() }
+        let origins = await QueryOriginSnapshot.load(container: container)
         let range = DateRange(from: scrobbles.first?.playedAt ?? model.trips.map(\.from).min() ?? Date(), to: Date())
         let computed = await Task.detached(priority: .userInitiated) {
-            TrendsPlacesEngine.compute(scrobbles: scrobbles, weather: weather, range: range, level: .city)
+            TrendsPlacesEngine.compute(scrobbles: scrobbles, weather: weather, range: range, level: .city, origins: origins)
         }.value
         guard !Task.isCancelled else { return }
         result = computed

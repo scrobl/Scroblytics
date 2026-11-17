@@ -694,6 +694,7 @@ enum ArtistMapSnapshots {
                 ("seed-two-narrow", 90, false, "light", 760, narrowArea),
                 ("waiting-light", 60, false, "light", 1100, wideArea), ("refresh-dark", 60, false, "dark", 1100, wideArea),
                 ("tall-light", 100, true, "light", 1700, CGSize(width: 1300, height: 900)),
+                ("country-light", 60, true, "light", 1100, wideArea), ("country-dark", 60, true, "dark", 1100, wideArea),
             ]
             for variant in variants {
                 let model = variant.name.hasPrefix("seed")
@@ -709,6 +710,7 @@ enum ArtistMapSnapshots {
                 .environment(LibraryGapBadgeStore())
                 .modelContainer(container)
                 .environment(\.colorScheme, variant.scheme == "dark" ? .dark : .light)
+                if variant.name.hasPrefix("country") { model.installSampleOrigins() }
                 if variant.name.hasPrefix("waiting") { model.installSampleWaiting(count: 14, stale: false) }
                 if variant.name.hasPrefix("refresh") { model.installSampleWaiting(count: 14, stale: true) }
                 let height: CGFloat = variant.name.hasPrefix("tall") ? 1500 : 900

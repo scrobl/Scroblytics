@@ -35,7 +35,7 @@ enum ArtistOriginKind: String, Sendable {
 }
 
 /// A place at three levels. Any of them can be missing (a country-only origin, a city with no state).
-struct OriginPlace: Sendable, Equatable {
+struct OriginPlace: Sendable, Equatable, Codable {
     var city: String?
     var region: String?
     var country: String?

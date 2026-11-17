@@ -25,6 +25,18 @@ struct TrendsStay: Identifiable, Equatable, Sendable {
     var tripCount = 1
     /// The cities of those trips (just one for a single trip), which are what a click opens in Query.
     var cities: [String] = []
+    /// The country of the stay as an ISO code (a trip's own, or home's), when it is known, so the music from there can be told.
+    var countryCode: String?
+    /// Plays by artists whose origin is known, and how many of those are from the stay's country.
+    var knownOriginPlays = 0
+    var localPlays = 0
+    /// The artists from the stay's country played most during it.
+    var topLocalArtists: [Artist] = []
+
+    /// What share of the stay's plays were by artists from its country (nil when there is no country or no origin known for any play).
+    var localShare: Double? { countryCode != nil && knownOriginPlays > 0 && plays > 0 ? Double(localPlays) / Double(plays) : nil }
+    /// What share of the stay's plays were by artists whose origin is known.
+    var originCoverage: Double { plays > 0 ? Double(knownOriginPlays) / Double(plays) : 0 }
 
     var perDay: Double { days > 0 ? Double(plays) / Double(days) : 0 }
 
@@ -80,7 +92,8 @@ enum TrendsPlacesEngine {
     /// A period longer than this many days is drawn a week at a time.
     static let dailyBucketLimit = 200
 
-    static func compute(scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, range: DateRange, level: PlaceLevel = .city, now: Date = Date(), calendar: Calendar = AppCalendars.listening) -> TrendsPlacesResult {
+    static func compute(scrobbles: [ScrobbleSnapshot], weather: WeatherSnapshot, range: DateRange, level: PlaceLevel = .city, origins: QueryOriginSnapshot = .empty,
+        homeCountry: String? = OriginHome.fromWeather().flatMap { OriginHome.countryCode(of: $0) }, now: Date = Date(), calendar: Calendar = AppCalendars.listening) -> TrendsPlacesResult {
         let trips = weather.trips.map(\.trip)
         guard weather.hasPlaces, let homeCity = weather.cities.first else { return .empty }
         let firstPlay = scrobbles.first?.playedAt ?? range.from
@@ -101,6 +114,22 @@ enum TrendsPlacesEngine {
             }
         }
         func groupID(_ trip: WeatherTrip?) -> String { trip.flatMap { groupOf[$0.id]?.id } ?? "home" }
+
+        // Each stay's country, so what was played from there can be told: home's from the weather home place, a trip's from its own place.
+        var countryOfStay: [String: String] = [:]
+        if let homeCountry { countryOfStay["home"] = homeCountry }
+        for trip in trips {
+            guard let info = groupOf[trip.id], countryOfStay[info.id] == nil, let code = trip.place.country.flatMap({ CountryNames.code(for: $0) }) else { continue }
+            countryOfStay[info.id] = code
+        }
+        var countryOfArtist: [String: String?] = [:]
+        func originCountry(of artist: String) -> String? {
+            if let known = countryOfArtist[artist] { return known }
+            let display = origins.display(artist: artist)
+            let code = display.state == .known ? OriginHome.countryCode(of: display.place) : nil
+            countryOfArtist[artist] = code
+            return code
+        }
 
         // Each day goes to the trip that covers its middle, or to home.
         var dayCount: [String: Int] = [:]
@@ -127,6 +156,9 @@ enum TrendsPlacesEngine {
             var rain = 0
             var newArtists = 0
             var artists: [String: Int] = [:]
+            var knownOrigin = 0
+            var local = 0
+            var localArtists: [String: Int] = [:]
         }
         var tallies: [String: Tally] = [:]
         var tripPlays: [UUID: Int] = [:]
@@ -142,6 +174,13 @@ enum TrendsPlacesEngine {
             tallies[stay, default: Tally()].plays += 1
             if first { tallies[stay, default: Tally()].newArtists += 1 }
             tallies[stay, default: Tally()].artists[play.artistName, default: 0] += 1
+            if let code = originCountry(of: play.artistName) {
+                tallies[stay, default: Tally()].knownOrigin += 1
+                if let stayCountry = countryOfStay[stay], stayCountry == code {
+                    tallies[stay, default: Tally()].local += 1
+                    tallies[stay, default: Tally()].localArtists[play.artistName, default: 0] += 1
+                }
+            }
             if let sample = weather.sample(at: play.playedAt) {
                 if let temperature = sample.temperature { tallies[stay, default: Tally()].temperatureSum += temperature; tallies[stay, default: Tally()].temperatureCount += 1 }
                 if let condition = sample.condition {
@@ -159,6 +198,10 @@ enum TrendsPlacesEngine {
             result.plays = tally.plays
             result.newArtists = tally.newArtists
             result.topArtists = tally.artists.sorted { ($1.value, $0.key) < ($0.value, $1.key) }.prefix(topArtistCount).map { TrendsStay.Artist(name: $0.key, plays: $0.value) }
+            result.countryCode = countryOfStay[id]
+            result.knownOriginPlays = tally.knownOrigin
+            result.localPlays = tally.local
+            result.topLocalArtists = tally.localArtists.sorted { ($1.value, $0.key) < ($0.value, $1.key) }.prefix(topArtistCount).map { TrendsStay.Artist(name: $0.key, plays: $0.value) }
             result.averageTemperature = tally.temperatureCount > 0 ? tally.temperatureSum / Double(tally.temperatureCount) : nil
             result.rainShare = tally.conditionKnown > 0 ? Double(tally.rain) / Double(tally.conditionKnown) : nil
             return result

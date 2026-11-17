@@ -20,6 +20,11 @@ struct QueryOriginSnapshot: Sendable {
         return snapshot
     }
 
+    /// The same, read on a background thread from a container (for a screen that has no context of its own to read on).
+    static func load(container: ModelContainer) async -> QueryOriginSnapshot {
+        await offMain { QueryOriginSnapshot.load(context: ModelContext(container)) }
+    }
+
     func display(artist: String) -> ArtistOriginDisplay {
         let key = TextNormalization.artistIdentityKey(artist)
         return ArtistOriginResolver.display(entry: entries[key], edit: edits[key])

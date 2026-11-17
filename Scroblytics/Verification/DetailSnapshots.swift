@@ -574,6 +574,29 @@ enum DetailSnapshots {
                     }
                 }
             }
+            // The origin map card: a spread of dots and countries, in light and dark, wide and narrow.
+            let mapInputs = TrendsOriginMapChart.Inputs(scrobbles: [], snapshots: QuerySnapshots(), range: DateRange(from: Date(timeIntervalSince1970: 1_700_000_000), to: Date(timeIntervalSince1970: 1_800_000_000)), version: 0)
+            for width in [1100, 760, 480] as [CGFloat] {
+                for dark in [true, false] {
+                    await render(TrendsOriginMapChart(inputs: mapInputs, openQuery: { _, _ in }, preset: OriginMapChecks.samplePlaces()).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-map-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+            }
+            // The close-to-home chart and its home editor.
+            let scene = OriginMapChecks.sampleLocalScene()
+            for width in [900, 480] as [CGFloat] {
+                for dark in [true, false] {
+                    await render(TrendsLocalSceneChart(inputs: TrendsLocalSceneChart.Inputs(scrobbles: [], snapshots: QuerySnapshots(), range: mapInputs.range, version: 0), openQuery: { _, _ in }, preset: scene.result, home: scene.home).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-home-chart-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+            }
+            for dark in [true, false] {
+                await render(OriginHomeEditView(current: scene.home, onSave: { _ in }), width: 440, dark: dark, container: container, to: base.appending(path: "origin-home-sheet-\(dark ? "dark" : "light").png"))
+            }
+            // The passport card.
+            for width in [1000, 480] as [CGFloat] {
+                for dark in [true, false] {
+                    await render(TrendsPassportChart(inputs: TrendsPassportChart.Inputs(scrobbles: [], snapshots: QuerySnapshots(), version: 0), openQuery: { _, _ in }, preset: OriginMapChecks.samplePassport()).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-passport-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+            }
             let namesakes = [
                 ArtistOriginCandidate(id: "id-1", name: "Artist A", score: 100, type: "Group", disambiguation: nil, areaID: nil, areaName: "United States", beginAreaID: nil, beginAreaName: "City A"),
                 ArtistOriginCandidate(id: "id-2", name: "Artist A", score: 97, type: "Person", disambiguation: "singer-songwriter, born 1971", areaID: nil, areaName: "United Kingdom", beginAreaID: nil, beginAreaName: "City B"),

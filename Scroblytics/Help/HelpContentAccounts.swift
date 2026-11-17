@@ -156,6 +156,11 @@ extension HelpContent {
                 .bullets([
                     "**Artist pages** show the place in a tile, with a pencil to correct it. An artist waiting for its turn says “Checking…”, and opening an artist's page moves it to the front of the queue.",
                     "**Query** has [Origin fields](help://fields-origin): the artist's city, state or region, country, the whole place in one piece, and whether a best guess is waiting to be checked. An album or track takes its artist's place, and **Resolve** asks for the artists your results are waiting on.",
+                    "**Trends › Taste & eras** has a world map of where the artists you played in a period are from: countries shaded by their share, cities as dots, hover for the details, click to open those artists in Query ([how it is worked out](help://metrics-trends-other)).",
+                    "**Trends › Taste & eras › Close to home** shows, week by week, month by month or year by year, how much of what you play is by artists from your own city, region and country ([how it is worked out](help://metrics-trends-other)).",
+                    "**Trends › Taste & eras › Countries you’ve heard** is a passport: every country you have heard an artist from, with the day you first did and who it was ([how it is worked out](help://metrics-trends-other)).",
+                    "**[Trips](help://tool-trips)** says what share of the plays on each trip were by artists from the country you were in, and **[Rabbit Hole](help://tool-rabbit-hole)** has a Places option that favours the same scene or crosses borders.",
+                    "**[Artist Map](help://tool-artist-map)** can color its dots by country, and its panel says where the selected artist is from and what country a group mostly comes from.",
                     "**[Missing Data](help://tool-missing-data)** lists the artists with no origin, and the best guesses still to check.",
                     "**Ask** understands a request like “artists I play from the United Kingdom”.",
                 ]),

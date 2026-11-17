@@ -305,6 +305,7 @@ struct ContentView: View {
             AppleMusicDetailsStore.shared.start(container: modelContainer)
             await popularityStore.start(container: modelContainer, work: backgroundWork, warm: !DebugFlags.offline && !ConnectivityGate.isOffline)
             await tagStore.start(container: modelContainer, work: backgroundWork, warm: (!DebugFlags.offline || DebugFlags.tagSweep) && !ConnectivityGate.isOffline)
+            await ArtistOriginStore.shared.start(container: modelContainer, work: backgroundWork, warm: (!DebugFlags.offline || DebugFlags.originSweep) && !ConnectivityGate.isOffline)
             await seedReleaseDates()
             await seedTempos()
             if DebugFlags.offline || ConnectivityGate.isOffline { return }
@@ -562,6 +563,7 @@ struct ContentView: View {
             try? await Task.sleep(for: .seconds(3))
             await popularityStore.start(container: modelContainer, work: backgroundWork)
             await tagStore.start(container: modelContainer, work: backgroundWork)
+            await ArtistOriginStore.shared.start(container: modelContainer, work: backgroundWork)
             await seedReleaseDates()
             await seedTempos()
             await resolveMissingImages()

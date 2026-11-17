@@ -66,6 +66,15 @@ enum DebugFlags {
         #endif
     }
 
+    /// Lets the artist origin sweep run in an otherwise-offline verification run.
+    static var originSweep: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["SCROBLYTICS_ORIGIN_SWEEP"] != nil
+        #else
+        false
+        #endif
+    }
+
     /// Lets the release-date sweep run in an otherwise-offline verification run.
     static var releaseSweep: Bool {
         #if DEBUG

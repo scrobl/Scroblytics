@@ -78,6 +78,12 @@ LATENCY_SECONDS = 0.0
 # artist.getSimilar: names the stand-in may answer with (one per line, from --artists-file), and how long each answer takes.
 SIMILAR_NAMES = []
 SIMILAR_LATENCY_SECONDS = 0.25
+# MusicBrainz stand-in (/ws/2/artist, /ws/2/area): made-up places for any artist name, how long each answer takes, and an optional 503 on every Nth request.
+ORIGIN_LATENCY_SECONDS = 0.05
+ORIGIN_503_EVERY = 0
+ORIGIN_STATS = {"requests": 0, "throttled": 0, "searches": 0, "areas": 0, "artist_lookups": 0, "max_requests_in_one_second": 0}
+ORIGIN_RECENT = []
+ORIGIN_CANDIDATES = {}   # artist id -> candidate, remembered from searches so a lookup by id can answer
 RELEASE_VERSION = "9.9.9"   # newest version the stand-in GitHub release list announces; "down" makes it answer HTTP 500
 ERRORS = {
     "bad-key": (10, "Invalid API key - You must be granted a valid key by last.fm", 403),
@@ -85,6 +91,70 @@ ERRORS = {
     "unknown-user": (6, "User not found", 404),
     "private": (17, "Login: User required to be logged in", 403),
 }
+
+
+import uuid
+
+
+def _uid(name):
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, "fake-origin/" + name))
+
+
+# City -> county -> state -> country, a city directly under its country, and a city under a nation under a country.
+_AREAS = {}
+
+
+def _area(key, name, kind, parent=None, iso1=None, iso2=None):
+    _AREAS[_uid(key)] = {"id": _uid(key), "name": name, "type": kind, "parent": _uid(parent) if parent else None,
+                         "iso1": iso1, "iso2": iso2}
+
+
+_area("country-us", "United States", "Country", iso1="US")
+_area("country-gb", "United Kingdom", "Country", iso1="GB")
+_area("country-nz", "New Zealand", "Country", iso1="NZ")
+_area("state-1", "State One", "Subdivision", "country-us", iso2="US-S1")
+_area("state-2", "State Two", "Subdivision", "country-us", iso2="US-S2")
+_area("nation-1", "Nation One", "Subdivision", "country-gb", iso2="GB-N1")
+_area("county-1", "County One", "County", "state-1")
+_area("county-2", "County Two", "County", "state-2")
+_area("county-3", "County Three", "County", "nation-1")
+_area("city-1", "City One", "City", "county-1")
+_area("city-2", "City Two", "City", "county-2")
+_area("city-3", "City Three", "City", "county-3", iso2="GB-C3")
+_area("city-4", "City Four", "City", "country-nz", iso2="NZ-C4")
+_area("city-5", "City Five", "City", "county-1")
+_PLACES = ["city-1", "city-2", "city-3", "city-4", "city-5"]
+
+
+def origin_candidates(name):
+    """The made-up artists the stand-in offers for a name. "Nobody ..." has none; "Namesake ..." has two near-equal ones; anything else one."""
+    low = name.lower()
+    if low.startswith("nobody"):
+        return []
+    h = sum(ord(c) * (i + 1) for i, c in enumerate(low))
+    def one(suffix, score, place, kind):
+        cid = _uid("artist/" + low + suffix)
+        item = {"id": cid, "name": name, "score": score, "type": kind,
+                "area": {"id": _uid("country-us"), "name": "United States"}, "begin-area": {"id": _uid(place), "name": _AREAS[_uid(place)]["name"]}}
+        ORIGIN_CANDIDATES[cid] = item
+        return item
+    kind = "Person" if h % 2 == 0 else "Group"
+    first = one("", 100, _PLACES[h % len(_PLACES)], kind)
+    if low.startswith("namesake"):
+        return [first, one("-2", 97, _PLACES[(h + 1) % len(_PLACES)], "Person")]
+    return [first]
+
+
+def area_json(area):
+    out = {"id": area["id"], "name": area["name"], "type": area["type"], "relations": []}
+    if area["iso1"]:
+        out["iso-3166-1-codes"] = [area["iso1"]]
+    if area["iso2"]:
+        out["iso-3166-2-codes"] = [area["iso2"]]
+    if area["parent"]:
+        parent = _AREAS[area["parent"]]
+        out["relations"].append({"type": "part of", "direction": "backward", "area": {"id": parent["id"], "name": parent["name"]}})
+    return out
 
 
 def make_scrobbles(total, spacing=240):
@@ -270,6 +340,12 @@ def build_handler(state):
                     state.change_loves(add=q.get("add", 0), remove=q.get("remove", 0))
                 self._send(200, state.stats())
                 return
+            if url.path.startswith("/ws/2/"):
+                self._musicbrainz(url)
+                return
+            if url.path == "/__origins":
+                self._send(200, ORIGIN_STATS)
+                return
             if url.path.startswith("/repos/scrobl/Scroblytics/releases"):
                 # A stand-in for GitHub's release list, for testing the "update available" notice.
                 if RELEASE_VERSION == "down":
@@ -336,6 +412,41 @@ def build_handler(state):
             else:
                 # Tags, popularity, tracklists, similar tracks: this stand-in has none of it.
                 self._error(6, "not found", 404)
+
+        def _musicbrainz(self, url):
+            """MusicBrainz as far as the origin lookups use it: artist search, artist by id, area by id (with its "part of" parent)."""
+            now = time.time()
+            ORIGIN_STATS["requests"] += 1
+            ORIGIN_RECENT.append(now)
+            while ORIGIN_RECENT and now - ORIGIN_RECENT[0] > 1.0:
+                ORIGIN_RECENT.pop(0)
+            ORIGIN_STATS["max_requests_in_one_second"] = max(ORIGIN_STATS["max_requests_in_one_second"], len(ORIGIN_RECENT))
+            if ORIGIN_LATENCY_SECONDS:
+                time.sleep(ORIGIN_LATENCY_SECONDS)
+            if ORIGIN_503_EVERY and ORIGIN_STATS["requests"] % ORIGIN_503_EVERY == 0:
+                ORIGIN_STATS["throttled"] += 1
+                self._send(503, {"error": "Your requests are exceeding the allowable rate limit."})
+                return
+            parts = [p for p in url.path.split("/") if p]   # ws 2 artist [id]
+            kind = parts[2] if len(parts) > 2 else ""
+            ident = parts[3] if len(parts) > 3 else None
+            q = parse_qs(url.query)
+            if kind == "artist" and ident is None:
+                ORIGIN_STATS["searches"] += 1
+                text = q.get("query", [""])[0]
+                name = text.split('"')[1] if text.count('"') >= 2 else text
+                name = name.replace("\\\"", '"').replace("\\\\", "\\")
+                self._send(200, {"count": len(origin_candidates(name)), "artists": origin_candidates(name)})
+            elif kind == "artist":
+                ORIGIN_STATS["artist_lookups"] += 1
+                found = ORIGIN_CANDIDATES.get(ident)
+                self._send(200, found) if found else self._send(404, {"error": "Not Found"})
+            elif kind == "area":
+                ORIGIN_STATS["areas"] += 1
+                area = _AREAS.get(ident)
+                self._send(200, area_json(area)) if area else self._send(404, {"error": "Not Found"})
+            else:
+                self._send(404, {"error": "Not Found"})
 
         def _similar(self, q):
             """Up to `limit` made-up similar artists, always the same ones for the same artist, strongest first. Only names given with
@@ -417,18 +528,22 @@ def main():
     ap.add_argument("--secret", default="scrobblesecret", help="shared secret track.scrobble requests must be signed with")
     ap.add_argument("--artists-file", help="artist names (one per line) artist.getSimilar may answer with")
     ap.add_argument("--similar-latency-ms", type=float, default=250.0, help="delay every artist.getSimilar answer by this long")
+    ap.add_argument("--origin-latency-ms", type=float, default=50.0, help="delay every MusicBrainz stand-in answer by this long")
+    ap.add_argument("--origin-503-every", type=int, default=0, help="answer HTTP 503 to every Nth MusicBrainz stand-in request (0 = never)")
     ap.add_argument("--list", action="store_true", help="print the scenarios, one 'name<TAB>description' per line, and exit")
     args = ap.parse_args()
     if args.list:
         for name, detail in SCENARIOS.items():
             print(f"{name}\t{detail}")
         return
-    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION, SECRET, SIMILAR_NAMES, SIMILAR_LATENCY_SECONDS
+    global LONG_WINDOW_SECONDS, LATENCY_SECONDS, RELEASE_VERSION, SECRET, SIMILAR_NAMES, SIMILAR_LATENCY_SECONDS, ORIGIN_LATENCY_SECONDS, ORIGIN_503_EVERY
     SECRET = args.secret
     RELEASE_VERSION = args.release_version
     LONG_WINDOW_SECONDS = args.window
     LATENCY_SECONDS = args.latency_ms / 1000.0
     SIMILAR_LATENCY_SECONDS = args.similar_latency_ms / 1000.0
+    ORIGIN_LATENCY_SECONDS = args.origin_latency_ms / 1000.0
+    ORIGIN_503_EVERY = args.origin_503_every
     if args.artists_file:
         with open(args.artists_file, encoding="utf-8") as handle:
             SIMILAR_NAMES = [line.strip() for line in handle if line.strip()]

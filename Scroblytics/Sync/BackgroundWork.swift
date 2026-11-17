@@ -9,7 +9,7 @@ import Observation
 @Observable
 final class BackgroundWorkStore {
     enum Job: CaseIterable, Hashable {
-        case artwork, durations, tempos, releaseDates, lovedTracks, popularity, tags, tagWrites, playlists
+        case artwork, durations, tempos, releaseDates, lovedTracks, popularity, tags, tagWrites, playlists, origins
 
         var label: String {
             switch self {
@@ -22,6 +22,7 @@ final class BackgroundWorkStore {
             case .tags: "tags"
             case .tagWrites: "tag changes"
             case .playlists: "playlists"
+            case .origins: "artist origins"
             }
         }
     }

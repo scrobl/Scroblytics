@@ -130,6 +130,7 @@ final class TestProfileLauncher {
             status = "Starting the stand-in Last.fm server (\(scenario))…"
             let port = try await startStandIn(for: name, scenario: scenario)
             environment["SCROBLYTICS_LASTFM_BASE_URL"] = "http://127.0.0.1:\(port)/2.0/"
+            environment["SCROBLYTICS_MUSICBRAINZ_BASE_URL"] = "http://127.0.0.1:\(port)/ws/2/"
             if seedAccount { environment["SCROBLYTICS_PROFILE_SEED_ACCOUNT"] = "1" }
         }
 

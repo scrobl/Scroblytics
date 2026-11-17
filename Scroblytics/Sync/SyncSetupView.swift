@@ -89,6 +89,7 @@ struct SyncSetupView: View {
                 }
                 ScrobblerWatchSettingsSection()
                 AppleMusicDetailsSettingsSection()
+                ArtistOriginSettingsSection()
             }
         }
         .formStyle(.grouped)

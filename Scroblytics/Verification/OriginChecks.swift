@@ -17,17 +17,24 @@ enum OriginChecks {
         var byID: [String: ArtistOriginCandidate] = [:]
         var areas: [String: MBAreaInfo] = [:]
         var failure: Error?
+        /// Names whose search always answers 503, and how long each search takes (so a check can act while one is in flight).
+        var failingNames: Set<String> = []
+        var delay: Duration = .zero
+        private var searched: [String] = []
         private var searchCount = 0
         private var artistFetchCount = 0
         private var areaFetched: [String] = []
 
         var searches: Int { lock.withLock { searchCount } }
+        var searchOrder: [String] { lock.withLock { searched } }
         var artistFetches: Int { lock.withLock { artistFetchCount } }
         var areaRequests: [String] { lock.withLock { areaFetched } }
 
         func searchArtists(name: String) async throws -> [ArtistOriginCandidate] {
-            lock.withLock { searchCount += 1 }
+            lock.withLock { searchCount += 1; searched.append(name) }
+            if delay > .zero { try? await Task.sleep(for: delay) }
             if let failure { throw failure }
+            if failingNames.contains(name) { throw MusicBrainzAPIError.http(503) }
             return byName[name] ?? []
         }
 
@@ -93,6 +100,7 @@ enum OriginChecks {
             parsingChecks(check)
             pacerChecks(check)
             await storeChecks(container: container, check)
+            await sweepChecks(container: container, check)
             await backupChecks(container: container, check)
             HeadlessTask.finish(failures)
         }
@@ -379,6 +387,150 @@ enum OriginChecks {
         for item in (try? context.fetch(FetchDescriptor<ArtistOriginEdit>())) ?? [] { context.delete(item) }
         for item in (try? context.fetch(FetchDescriptor<OriginAreaCacheEntry>())) ?? [] { context.delete(item) }
         try? context.save()
+    }
+
+    // MARK: The sweep
+
+    @MainActor
+    private static func sweepChecks(container: ModelContainer, _ report: (String, Bool, String) -> Void) async {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let context = container.mainContext
+        func cleanUpAll() {
+            cleanUp(context)
+            for item in (try? context.fetch(FetchDescriptor<Scrobble>())) ?? [] { context.delete(item) }
+            try? context.save()
+        }
+        cleanUpAll()
+        await ScrobbleHistoryCache.shared.invalidate()
+        defer { cleanUpAll(); Task { await ScrobbleHistoryCache.shared.invalidate() } }
+        // Plays: A five times, B three (one under another spelling), C once; D and E once each.
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        var clock = 0
+        func play(_ artist: String) {
+            clock += 1
+            context.insert(Scrobble(artistName: artist, albumName: "Album", trackName: "Song \(clock)", imageURL: nil, playedAt: t0.addingTimeInterval(Double(clock) * 60), lastConfirmedAt: t0))
+        }
+        for _ in 0..<5 { play("Artist A") }
+        for _ in 0..<2 { play("Artist B") }
+        play("artist b")
+        for name in ["Artist C", "Artist D", "Artist E"] { play(name) }
+        try? context.save()
+        await ScrobbleHistoryCache.shared.invalidate()
+
+        let store = ArtistOriginDataStore(modelContainer: container)
+        func stub(_ names: [String]) -> Stub {
+            let s = Stub()
+            s.areas = stubAreas()
+            for (i, name) in names.enumerated() { s.byName[name] = [candidate("id-\(i)", name, type: "Group", begin: "city-a")] }
+            return s
+        }
+        func waitUntilIdle(_ sweep: ArtistOriginStore) async {
+            for _ in 0..<400 where sweep.isWarming || sweep.remaining > 0 { try? await Task.sleep(for: .milliseconds(25)) }
+        }
+        func freshDefaults() -> UserDefaults {
+            let suite = "origin-check-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            return defaults
+        }
+        let everyone = ["Artist A", "Artist B", "Artist C", "Artist D", "Artist E"]
+
+        // Seeding: most played first, one entry per artist (case variants joined), nothing for an artist with a fresh answer.
+        let seeded = (try? await ArtistOriginStore.seedTargets(container: container))?.map(\.name)
+        check("every artist is queued, most played first", seeded.map { Array($0.prefix(2)) } == ["Artist A", "Artist B"] && Set(seeded ?? []) == Set(everyone), "\(String(describing: seeded))")
+        try? await store.save([("Artist C", ArtistOriginLookup.Outcome(status: .found, mbid: "m", matchedName: "Artist C", kind: .group, place: OriginPlace(city: "City A", region: nil, country: nil, countryCode: nil), candidates: [])),
+                               ("Artist D", ArtistOriginLookup.Outcome(status: .found, mbid: "m1", matchedName: "Artist D", kind: .group, place: OriginPlace(), candidates: []))])
+        try? await store.choose(mbid: "m2", for: "Artist D")
+        let reseeded = (try? await ArtistOriginStore.seedTargets(container: container)) ?? []
+        check("an artist with a fresh answer is not queued again", !reseeded.map(\.name).contains("Artist C"))
+        check("…but one the person has since picked a different artist for is, with that pick", reseeded.first { $0.name == "Artist D" }?.chosenMBID == "m2")
+        let old = try? await ArtistOriginStore.seedTargets(container: container, now: Date().addingTimeInterval(400 * 86_400))
+        check("every answer is asked again a year and more later", Set(old?.map(\.name) ?? []) == Set(everyone))
+        cleanUp(context)
+
+        // A whole sweep through a stand-in.
+        let work = BackgroundWorkStore()
+        let happy = stub(everyone)
+        let sweep = ArtistOriginStore(defaults: freshDefaults())
+        sweep.makeFetcher = { happy }
+        await sweep.start(container: container, work: work, warm: true)
+        await waitUntilIdle(sweep)
+        check("the sweep looks every artist up, most played first", Array(happy.searchOrder.prefix(2)) == ["Artist A", "Artist B"] && Set(happy.searchOrder) == Set(everyone), "\(happy.searchOrder)")
+        let after = try? await store.allSnapshots()
+        check("each answer is saved, as found, with its place", everyone.allSatisfy { after?.entries[TextNormalization.artistIdentityKey($0)]?.place.text == "City A, State A, United States" })
+        check("the count of artists looked up follows", sweep.knownCount == 5, "\(sweep.knownCount)")
+        check("the status strip job is finished", !work.active.keys.contains(.origins) && work.failures[.origins] == nil)
+        check("the status line says it is up to date", sweep.statusText.contains("5 artists looked up"), sweep.statusText)
+        let requestsAfterFirst = happy.searches
+        await sweep.start(container: container, work: work, warm: true)
+        await waitUntilIdle(sweep)
+        check("a second start with everything answered asks MusicBrainz for nothing", happy.searches == requestsAfterFirst)
+
+        // A failing artist is retried, never recorded, and the rest carry on.
+        cleanUp(context)
+        let flaky = stub(everyone)
+        flaky.failingNames = ["Artist B"]
+        let failing = ArtistOriginStore(defaults: freshDefaults())
+        failing.makeFetcher = { flaky }
+        await failing.start(container: container, work: BackgroundWorkStore(), warm: true)
+        await waitUntilIdle(failing)
+        let failedSnap = try? await store.allSnapshots()
+        check("an artist whose lookup keeps failing is tried \(ArtistOriginStore.maxAttempts) times", flaky.searchOrder.filter { $0 == "Artist B" }.count == ArtistOriginStore.maxAttempts)
+        check("…is not recorded at all (so it is asked again next time)", failedSnap?.entries["artist b"] == nil)
+        check("…is counted as failed", failing.failedThisRun == 1, "\(failing.failedThisRun)")
+        check("…and the others are saved", ["artist a", "artist c", "artist d", "artist e"].allSatisfy { failedSnap?.entries[$0] != nil })
+
+        // MusicBrainz down: the sweep stops instead of grinding through everything.
+        cleanUp(context)
+        for i in 0..<12 { play("Down \(i)") }
+        try? context.save()
+        await ScrobbleHistoryCache.shared.invalidate()
+        let down = Stub()
+        down.areas = stubAreas()
+        down.failure = MusicBrainzAPIError.http(503)
+        let stopping = ArtistOriginStore(defaults: freshDefaults())
+        stopping.makeFetcher = { down }
+        await stopping.start(container: container, work: BackgroundWorkStore(), warm: true)
+        await waitUntilIdle(stopping)
+        check("after \(ArtistOriginStore.failureStreakLimit) failures in a row the sweep stops", down.searches == ArtistOriginStore.failureStreakLimit * ArtistOriginStore.maxAttempts, "\(down.searches)")
+        check("…says MusicBrainz isn't answering", stopping.lastError?.contains("isn’t answering") == true, "\(String(describing: stopping.lastError))")
+        check("…and nothing was recorded", ((try? await store.allSnapshots())?.entries.isEmpty) == true)
+
+        // Switch off, Offline mode.
+        cleanUp(context)
+        let quiet = stub(everyone)
+        let off = ArtistOriginStore(defaults: freshDefaults())
+        off.makeFetcher = { quiet }
+        off.setEnabled(false)
+        await off.start(container: container, work: BackgroundWorkStore(), warm: true)
+        await waitUntilIdle(off)
+        check("with the switch off nothing is looked up", quiet.searches == 0 && off.statusText.hasPrefix("Off"))
+        let onlineBefore = ConnectivityGate.isOffline
+        ConnectivityGate.set(offline: true)
+        let paused = ArtistOriginStore(defaults: freshDefaults())
+        paused.makeFetcher = { quiet }
+        await paused.start(container: container, work: BackgroundWorkStore(), warm: true)
+        await waitUntilIdle(paused)
+        ConnectivityGate.set(offline: onlineBefore)
+        check("in Offline mode nothing is looked up", quiet.searches == 0)
+
+        // Prioritize: what a Query or a page waits on goes first.
+        cleanUp(context)
+        let slow = stub(everyone)
+        slow.delay = .milliseconds(200)
+        let ordered = ArtistOriginStore(defaults: freshDefaults())
+        ordered.makeFetcher = { slow }
+        await ordered.start(container: container, work: BackgroundWorkStore(), warm: true)
+        await ordered.prioritize(["Artist E"], force: true)
+        await waitUntilIdle(ordered)
+        let order = slow.searchOrder
+        check("an artist someone is waiting on is looked up before the rest", order.count >= 3 && order.firstIndex(of: "Artist E").map { $0 <= 1 } == true, "\(order)")
+        check("…and is not looked up twice", order.filter { $0 == "Artist E" }.count == 1, "\(order)")
+        let offered = ArtistOriginStore(defaults: freshDefaults())
+        offered.makeFetcher = { quiet }
+        offered.setEnabled(false)
+        await offered.prioritize(["Artist A"], force: true)
+        check("prioritize does nothing while the switch is off", quiet.searches == 0)
     }
 
     // MARK: Backup

@@ -32,6 +32,17 @@ enum TestProfile {
         return raw.hasSuffix("/") ? raw : raw + "/"
     }()
 
+    /// The loopback address a stand-in MusicBrainz listens on (`SCROBLYTICS_MUSICBRAINZ_BASE_URL`), for the artist origin lookups. Only
+    /// under a test profile and only this Mac, like the Last.fm one.
+    static let musicBrainzBaseURLOverride: URL? = {
+        guard let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_MUSICBRAINZ_BASE_URL"], !raw.isEmpty else { return nil }
+        guard name != nil else { stop("SCROBLYTICS_MUSICBRAINZ_BASE_URL only works under a test profile (SCROBLYTICS_PROFILE).") }
+        guard let url = URL(string: raw), ConnectivityGate.isLoopback(host: url.host) else {
+            stop("SCROBLYTICS_MUSICBRAINZ_BASE_URL must point at this Mac (localhost / 127.0.0.1).")
+        }
+        return raw.hasSuffix("/") ? url : URL(string: raw + "/")!
+    }()
+
     /// Where the update notice asks for the list of releases (`SCROBLYTICS_UPDATE_FEED_URL`), for testing it against a stand-in on
     /// this Mac. Only under a test profile and only a loopback address, so a test can never be pointed at anyone else.
     static let updateFeedURLOverride: URL? = {

@@ -38,7 +38,7 @@ actor MusicBrainzAPIClient {
     /// Root of MusicBrainz's web service. Only a test stand-in ever changes it (the artist origin lookups use it; release dates always ask the real service).
     let baseURL: URL
 
-    init(session: URLSession = .shared, baseURL: URL = URL(string: "https://musicbrainz.org/ws/2/")!) {
+    init(session: URLSession = .shared, baseURL: URL = MusicBrainzEndpoint.base) {
         self.session = session
         self.baseURL = baseURL
     }
@@ -142,4 +142,15 @@ actor MusicBrainzAPIClient {
         n = n.replacingOccurrences(of: "[^a-z0-9]+", with: " ", options: .regularExpression)
         return n.trimmingCharacters(in: .whitespaces)
     }
+}
+
+/// Where MusicBrainz requests for artist origins go. A DEBUG run under a test profile can point them at a stand-in server on this Mac
+/// (`SCROBLYTICS_MUSICBRAINZ_BASE_URL`, loopback only; see `TestProfile`).
+enum MusicBrainzEndpoint {
+    static let base: URL = {
+        #if DEBUG
+        if let override = TestProfile.musicBrainzBaseURLOverride { return override }
+        #endif
+        return URL(string: "https://musicbrainz.org/ws/2/")!
+    }()
 }

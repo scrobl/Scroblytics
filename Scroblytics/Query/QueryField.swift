@@ -8,7 +8,7 @@ import Foundation
 /// may omit fields that do not apply, but must not reorder the remaining ones.
 /// Every selectable field must also show its required `QueryField.help` tooltip.
 enum QueryFieldGroup: Int, CaseIterable, Sendable, Comparable {
-    case identity, scrobble, session, flags, tags, volume, ranking, engagement, recency, sentiment, dates, context, duration, tempo, metadata, similarity, appleMusic
+    case identity, scrobble, session, flags, tags, volume, ranking, engagement, recency, sentiment, dates, context, duration, tempo, metadata, similarity, appleMusic, origin
 
     var title: String {
         switch self {
@@ -29,6 +29,7 @@ enum QueryFieldGroup: Int, CaseIterable, Sendable, Comparable {
         case .metadata: "Album metadata"
         case .similarity: "Similar sounds"
         case .appleMusic: "Apple Music"
+        case .origin: "Origin"
         }
     }
 
@@ -64,7 +65,7 @@ enum QueryCellStyle: Sendable, Hashable {
 
 /// The existing background pipeline that can fill in a background-resolved
 /// field's unresolved values — what the results header's "Resolve" button starts.
-enum QueryResolverKind: Sendable, Hashable { case duration, bpm, releaseDate, albumTracklists, tags }
+enum QueryResolverKind: Sendable, Hashable { case duration, bpm, releaseDate, albumTracklists, tags, origin }
 
 /// How a numeric field's stored unit is presented when the user TYPES a value:
 /// stored in seconds, entered in minutes. `perUnit` is how many stored units make one shown unit.

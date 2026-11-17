@@ -306,7 +306,7 @@ enum TagQuerySource {
         let snapshots = QuerySnapshots(
             popularity: popularity?.snapshot ?? .empty, durations: loaded.durations, releaseDates: loaded.releaseDates,
             turnover: loaded.turnover, lovedKeys: loaded.lovedKeys, flaggedKeys: loaded.flaggedKeys,
-            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, appleMusic: loaded.appleMusic, weather: loaded.weather, images: loaded.images
+            entityTags: loaded.entityTags, libraryPresence: loaded.libraryPresence, appleMusic: loaded.appleMusic, origins: loaded.origins, weather: loaded.weather, images: loaded.images
         )
         let result = await Task.detached(priority: .userInitiated) { () -> QueryResult in
             let asOf = validated.spec.asOf ?? Date()

@@ -94,6 +94,11 @@ struct MissingDataView: View {
     @State private var durationEditContext: DurationEditContext?
     @State private var bpmEditContext: BPMEditContext?
     @State private var albumMatchFixContext: AlbumMatchFixContext?
+    private struct OriginEditTarget: Identifiable {
+        let artist: String
+        var id: String { artist }
+    }
+    @State private var originEditArtist: OriginEditTarget?
 
     private var field: MissingDataField { MissingDataField.all.first { $0.id == options.fieldID } ?? MissingDataField.all[0] }
     /// The sorted, row-limited subset actually on screen — the export and the list must always agree on
@@ -189,6 +194,9 @@ struct MissingDataView: View {
                 modelContext: modelContext, onSaved: { Task { await recompute() } }
             )
         }
+        .sheet(item: $originEditArtist) { target in
+            ArtistOriginEditView(artist: target.artist, container: modelContext.container, onChanged: { Task { await recompute() } })
+        }
         .sheet(item: $albumMatchFixContext) { context in
             AlbumMatchFixView(
                 group: context.group, openedFrom: context.album, modelContext: modelContext, client: context.client,
@@ -246,7 +254,11 @@ struct MissingDataView: View {
                 Row(
                     row: row, onOpen: { open(row) }, onGoToDetail: { goToDetail(row) },
                     onFixAlbumMatch: row.target == .album ? { openAlbumMatchFix(for: row) } : nil,
-                    onKeepMerged: field.canKeepMerged ? { keepMerged(row) } : nil
+                    onKeepMerged: field.canKeepMerged ? { keepMerged(row) } : (field.confirmsOrigin ? { confirmOrigin(row) } : nil),
+                    actionTitle: field.confirmsOrigin ? "Looks Right" : "Keep Merged",
+                    actionHelp: field.confirmsOrigin
+                        ? "Keep this match for the artist and stop listing it here."
+                        : "Count this edition name together with the album’s other editions, and stop listing it here."
                 )
             }
         }
@@ -338,7 +350,7 @@ struct MissingDataView: View {
             }
             let loaded = await QuerySnapshotReader.loadAll(container: modelContainer)
             let snapshots = QuerySnapshots(
-                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, images: loaded.images,
+                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, origins: loaded.origins, images: loaded.images,
                 turnoverGroups: turnoverGroupCache
             )
             let currentField = field
@@ -430,7 +442,18 @@ struct MissingDataView: View {
         case "duration": openDurationEdit(for: row)
         case "bpm": openBPMEdit(for: row)
         case "albumMatch", "mergedEditions": openAlbumMatchFix(for: row)
+        case "artistOrigin", "originReview": originEditArtist = OriginEditTarget(artist: row.name)
         default: break
+        }
+    }
+
+    /// "Looks right": the person checked the best guess for this artist, so it leaves the list.
+    private func confirmOrigin(_ row: MissingDataRow) {
+        let artist = row.name
+        let container = modelContext.container
+        Task {
+            try? await offMain { try await ArtistOriginDataStore(modelContainer: container).confirm(artist) }
+            await recompute()
         }
     }
 
@@ -533,6 +556,8 @@ private struct Row: View {
     let onGoToDetail: () -> Void
     let onFixAlbumMatch: (() -> Void)?
     var onKeepMerged: (() -> Void)? = nil
+    var actionTitle = "Keep Merged"
+    var actionHelp = "Count this edition name together with the album’s other editions, and stop listing it here."
 
     var body: some View {
         HStack(spacing: 8) {
@@ -592,9 +617,9 @@ private struct Row: View {
     @ViewBuilder
     private var keepMergedButton: some View {
         if let onKeepMerged {
-            Button("Keep Merged", action: onKeepMerged)
+            Button(actionTitle, action: onKeepMerged)
                 .buttonStyle(.bordered).controlSize(.small)
-                .help("Count this edition name together with the album’s other editions, and stop listing it here.")
+                .help(actionHelp)
         }
     }
 

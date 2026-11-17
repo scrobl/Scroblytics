@@ -46,6 +46,8 @@ struct MissingDataField: Identifiable, Sendable {
     var wording: (coverage: String, empty: String)? = nil
     /// True when a row can be marked reviewed and left out of the list ("Keep merged").
     var canKeepMerged = false
+    /// True when a row is an artist's best-guess origin, which can be confirmed ("Looks right") and then leaves the list.
+    var confirmsOrigin = false
 
     private static func resolvedValueField(
         id: String, label: String, targets: [QueryTarget], queryFieldID: String, resolverKind: QueryResolverKind
@@ -108,6 +110,19 @@ struct MissingDataField: Identifiable, Sendable {
             },
             wording: (coverage: "may be merged by mistake", empty: "No album name looks merged by mistake."),
             canKeepMerged: true
+        ),
+        resolvedValueField(id: "artistOrigin", label: "Artist Origin", targets: [.artist], queryFieldID: "originPlace", resolverKind: .origin),
+        MissingDataField(
+            id: "originReview", label: "Origin to Review", targets: [.artist], queryFieldID: "originNeedsReview", resolverKind: nil,
+            missingCondition: { QueryCondition(QueryFieldRef("originNeedsReview"), .isTrue, []) },
+            bucket: { cell in if case .value(.bool(true)) = cell { .missing } else { nil } },
+            detailFieldIDs: ["originPlace"],
+            detailText: { cells in
+                guard case .value(.text(let place))? = cells["originPlace"] else { return nil }
+                return "Best guess: \(place). Several artists share this name."
+            },
+            wording: (coverage: "have a best guess to check", empty: "No artist’s origin needs checking."),
+            confirmsOrigin: true
         ),
     ]
 }
@@ -320,6 +335,9 @@ enum MissingDataEngine {
             return nil
         case .tags:
             return nil
+        case .origin:
+            await ArtistOriginStore.shared.prioritize(rows.map { $0.target == .artist ? $0.name : $0.artist })
+            return nil
         }
     }
 }
@@ -342,7 +360,7 @@ enum MissingDataDebugEval {
             let target = QueryTarget(rawValue: targetRaw) ?? field.targets[0]
             let loaded = await QuerySnapshotReader.loadAll(container: container)
             let snapshots = QuerySnapshots(
-                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, images: loaded.images
+                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, origins: loaded.origins, images: loaded.images
             )
             let result = MissingDataEngine.compute(field: field, target: target, scrobbles: scrobbles, snapshots: snapshots)
             var lines = ["missingCount\tpendingCount\tuniverseCount"]

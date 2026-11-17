@@ -45,6 +45,8 @@ enum AskExamples {
         Example(request: "my top 100 songs released in the last year", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("releaseDate", "inLast", value: 1, text: "years")]],
             sorts: [.init(field: "plays", direction: "descending")], limit: 100, unsupported: [])),
+        Example(request: "artists I play from the United Kingdom", target: .artist, ordered: false, query: AskWire.Query(
+            groups: [[cond("originCountry", "textIs", text: "United Kingdom")]], unsupported: [])),
         Example(request: "top 25 most listened songs that were most recently added", target: .track, ordered: true, query: AskWire.Query(
             groups: [[cond("musicDateAdded", "inLast", value: 90, text: "days")]],
             sorts: [.init(field: "plays", direction: "descending")], limit: 25, unsupported: []),

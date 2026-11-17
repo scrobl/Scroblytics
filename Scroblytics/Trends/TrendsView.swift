@@ -289,7 +289,7 @@ struct TrendsView: View {
                 guard latestRequestID == requestID else { return }
                 snapshots = QuerySnapshots(
                     durations: loaded.durations, releaseDates: loaded.releaseDates, turnover: loaded.turnover,
-                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, appleMusic: loaded.appleMusic, weather: loaded.weather, images: loaded.images
+                    lovedKeys: loaded.lovedKeys, entityTags: loaded.entityTags, appleMusic: loaded.appleMusic, origins: loaded.origins, weather: loaded.weather, images: loaded.images
                 )
                 querySnapshots = snapshots
                 dataVersion += 1

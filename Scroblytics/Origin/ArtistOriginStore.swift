@@ -29,7 +29,9 @@ final class ArtistOriginStore {
     /// How many artists have a saved answer (found, guessed or recorded as unknown).
     private(set) var knownCount = 0
 
-    private static let enabledKey = "origin.autoLookup"
+    nonisolated private static let enabledKey = "origin.autoLookup"
+    /// Whether looking up is switched on, readable from any thread (a Query run reads it to tell "not looked up yet" from "never will be").
+    nonisolated static var lookupsEnabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
     @ObservationIgnored private let defaults: UserDefaults
     /// Whether the sweep (and every other automatic origin lookup) may run. On by default.
     private(set) var enabled: Bool

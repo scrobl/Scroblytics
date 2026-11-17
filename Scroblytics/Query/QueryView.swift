@@ -177,6 +177,9 @@ struct QueryView: View {
         .onReceive(NotificationCenter.default.publisher(for: EntityTagsEngine.progressNotification)) { _ in
             if isActive { model.refreshSnapshotsForBackgroundProgress() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in
+            if isActive { model.refreshSnapshotsForBackgroundProgress() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
             guard hasLoaded else { return }
             if isActive { Task { await model.loadScrobbles() } } else { needsScrobbleReload = true }

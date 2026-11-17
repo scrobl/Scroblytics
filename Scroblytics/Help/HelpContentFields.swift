@@ -61,6 +61,11 @@ extension HelpContent {
                         .paragraph("These fields come from the saved read of your Music library, so they work while Music is closed, and have no value until it has been read. See [Apple Music library details](help://apple-music-details). Tempo from the same read appears in the [Tempo](help://fields-tempo) fields."),
                         .fieldGroup(.appleMusic),
                     ]),
+        HelpArticle(id: "fields-origin", title: "Origin", summary: "Where an artist is from: city, state or region and country.",
+                    blocks: [
+                        .paragraph("These fields say where the artist was born (a person) or formed (a group), from MusicBrainz or as you corrected it on the artist page. An album or track takes its artist’s place. They answer from what has been looked up on this Mac and are empty for an artist that has not been looked up yet; in Query, **Resolve** asks for the artists your results are waiting on."),
+                        .fieldGroup(.origin),
+                    ]),
         HelpArticle(id: "fields-similar", title: "Similar sounds", summary: "Match score fields, available only for Similar Sounds results.",
                     blocks: [
                         .paragraph("These two fields only mean something for a generated pool of similar music, so they appear in the [Similar Sounds](help://tool-similar-sounds) refinement conditions and not in the Query tab’s pickers."),

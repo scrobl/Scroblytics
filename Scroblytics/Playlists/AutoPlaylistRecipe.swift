@@ -282,7 +282,7 @@ enum AutoPlaylistSources {
             let all = try await ScrobbleHistoryCache.shared.canonicalSnapshots(container: container)
             let loaded = await QuerySnapshotReader.loadAll(container: container)
             let snapshots = QuerySnapshots(
-                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, images: loaded.images,
+                durations: loaded.durations, bpm: loaded.bpm, releaseDates: loaded.releaseDates, turnover: loaded.turnover, origins: loaded.origins, images: loaded.images,
                 turnoverGroups: TurnoverGroupCache()
             )
             let computed = await Task.detached(priority: .utility) {

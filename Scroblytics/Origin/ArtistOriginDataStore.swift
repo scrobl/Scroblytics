@@ -12,11 +12,11 @@ actor ArtistOriginDataStore: OriginAreaProviding {
         let wanted = Set(artists.map(TextNormalization.artistIdentityKey))
         var entries: [String: OriginEntrySnapshot] = [:]
         for row in try modelContext.fetch(FetchDescriptor<ArtistOriginEntry>()) where wanted.contains(row.normalizedName) {
-            entries[row.normalizedName] = Self.snapshot(of: row)
+            entries[row.normalizedName] = OriginEntrySnapshot(row: row)
         }
         var edits: [String: OriginEditSnapshot] = [:]
         for row in try modelContext.fetch(FetchDescriptor<ArtistOriginEdit>()) where wanted.contains(row.normalizedName) {
-            edits[row.normalizedName] = Self.snapshot(of: row)
+            edits[row.normalizedName] = OriginEditSnapshot(row: row)
         }
         return Dictionary(uniqueKeysWithValues: wanted.map { ($0, (entries[$0], edits[$0])) })
     }
@@ -24,29 +24,10 @@ actor ArtistOriginDataStore: OriginAreaProviding {
     /// Every saved lookup and decision (what a Query run and Missing Data read).
     func allSnapshots() throws -> (entries: [String: OriginEntrySnapshot], edits: [String: OriginEditSnapshot]) {
         var entries: [String: OriginEntrySnapshot] = [:]
-        for row in try modelContext.fetch(FetchDescriptor<ArtistOriginEntry>()) { entries[row.normalizedName] = Self.snapshot(of: row) }
+        for row in try modelContext.fetch(FetchDescriptor<ArtistOriginEntry>()) { entries[row.normalizedName] = OriginEntrySnapshot(row: row) }
         var edits: [String: OriginEditSnapshot] = [:]
-        for row in try modelContext.fetch(FetchDescriptor<ArtistOriginEdit>()) { edits[row.normalizedName] = Self.snapshot(of: row) }
+        for row in try modelContext.fetch(FetchDescriptor<ArtistOriginEdit>()) { edits[row.normalizedName] = OriginEditSnapshot(row: row) }
         return (entries, edits)
-    }
-
-    private static func snapshot(of row: ArtistOriginEntry) -> OriginEntrySnapshot {
-        OriginEntrySnapshot(
-            status: ArtistOriginStatus(rawValue: row.status) ?? .none,
-            mbid: row.mbid, matchedName: row.matchedName, kind: row.kind.flatMap(ArtistOriginKind.init(rawValue:)),
-            place: OriginPlace(city: row.cityName, region: row.regionName, country: row.countryName, countryCode: row.countryCode),
-            candidates: row.candidatesJSON.flatMap { try? JSONDecoder().decode([ArtistOriginCandidate].self, from: $0) } ?? [],
-            resolvedAt: row.resolvedAt
-        )
-    }
-
-    private static func snapshot(of row: ArtistOriginEdit) -> OriginEditSnapshot {
-        OriginEditSnapshot(
-            place: row.hasPlaceOverride
-                ? OriginPlace(city: row.overrideCity, region: row.overrideRegion, country: row.overrideCountry, countryCode: row.overrideCountryCode)
-                : nil,
-            chosenMBID: row.chosenMBID, confirmed: row.confirmed
-        )
     }
 
     // MARK: Saving a lookup

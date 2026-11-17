@@ -99,6 +99,7 @@ enum OriginChecks {
             resolverChecks(check)
             parsingChecks(check)
             pacerChecks(check)
+            queryChecks(check)
             await storeChecks(container: container, check)
             await sweepChecks(container: container, check)
             await backupChecks(container: container, check)
@@ -319,6 +320,103 @@ enum OriginChecks {
         check("after a 503 the next request waits 10 s", abs(throttled.reserve(now: 1, minimum: 1.1) - MusicBrainzPacer.throttledPause) < 0.001)
         check("and for two minutes the gap is at least 4 s, even for a caller that would use 1.1", abs(throttled.reserve(now: 11, minimum: 1.1) - 4.0) < 0.001)
         check("later it is back to the caller's own gap", { var p = throttled; _ = p.reserve(now: 200, minimum: 1.1); return abs(p.reserve(now: 200, minimum: 1.1) - 1.1) < 0.001 }())
+    }
+
+    // MARK: Query fields and Missing Data
+
+    @MainActor
+    private static func queryChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let artists = ["Artist A", "Artist B", "Artist C", "Artist D", "Artist E"]
+        var plays: [ScrobbleSnapshot] = []
+        for (i, artist) in artists.enumerated() {
+            plays.append(ScrobbleSnapshot(artistName: artist, albumName: "Album \(artist)", trackName: "Song \(artist)", imageURL: nil, playedAt: t0.addingTimeInterval(Double(i + 1) * 60)))
+        }
+        func entry(_ status: ArtistOriginStatus, _ place: OriginPlace) -> OriginEntrySnapshot {
+            OriginEntrySnapshot(status: status, mbid: "m", matchedName: nil, kind: .group, place: place, candidates: [], resolvedAt: t0)
+        }
+        let placeA = OriginPlace(city: "City A", region: "State A", country: "United States", countryCode: "US")
+        let placeB = OriginPlace(city: "City B", region: nil, country: "United Kingdom", countryCode: "GB")
+        var snapshot = QueryOriginSnapshot(lookupsOn: true)
+        snapshot.entries["artist a"] = entry(.found, placeA)
+        snapshot.entries["artist b"] = entry(.guess, placeB)
+        snapshot.entries["artist c"] = entry(.none, OriginPlace())
+        snapshot.entries["artist e"] = entry(.guess, placeA)
+        snapshot.edits["artist e"] = OriginEditSnapshot(place: OriginPlace(city: "My City", region: nil, country: "Canada", countryCode: "CA"), chosenMBID: nil, confirmed: false)
+        // Artist D has nothing saved.
+
+        let ids = ["originCity", "originRegion", "originCountry", "originPlace", "originNeedsReview"]
+        func run(_ target: QueryTarget, _ origins: QueryOriginSnapshot, groups: [[QueryCondition]] = []) -> (cells: [String: [String: QueryCell]], result: QueryResult?) {
+            var spec = QuerySpec(target: target)
+            spec.columns = ids.map { QueryFieldRef($0) }
+            spec.groups = groups
+            guard let validated = try? spec.validate(against: .standard) else { return ([:], nil) }
+            var snapshots = QuerySnapshots()
+            snapshots.origins = origins
+            let queryRun = QueryRun(target: target, asOf: t0.addingTimeInterval(86_400), scrobbles: spec.countedPlays(plays), allTimeScrobbles: plays, snapshots: snapshots)
+            let result = QueryEngine.evaluate(validated, run: queryRun)
+            var out: [String: [String: QueryCell]] = [:]
+            for row in result.rows {
+                var cells: [String: QueryCell] = [:]
+                for column in result.columns { cells[column.field.id] = row.cells[column.cacheKey] ?? .missing }
+                out[row.entity.name] = cells
+            }
+            return (out, result)
+        }
+        func text(_ cell: QueryCell?) -> String? { if case .value(.text(let t))? = cell { t } else { nil } }
+        func flag(_ cell: QueryCell?) -> Bool? { if case .value(.bool(let b))? = cell { b } else { nil } }
+        let artistRun = run(.artist, snapshot)
+        let table = artistRun.cells
+        check("an artist's city, region, country and whole place are read from its lookup",
+              text(table["Artist A"]?["originCity"]) == "City A" && text(table["Artist A"]?["originRegion"]) == "State A" && text(table["Artist A"]?["originCountry"]) == "United States"
+                && text(table["Artist A"]?["originPlace"]) == "City A, State A, United States", "\(String(describing: table["Artist A"]))")
+        check("a place with no region has no region value, and reads without a gap", table["Artist B"]?["originRegion"] == .missing && text(table["Artist B"]?["originPlace"]) == "City B, United Kingdom")
+        check("a best guess is flagged for review, and a found place is not", flag(table["Artist B"]?["originNeedsReview"]) == true && flag(table["Artist A"]?["originNeedsReview"]) == false)
+        check("an artist MusicBrainz doesn't know has no value in any place field, and is not flagged",
+              ["originCity", "originRegion", "originCountry", "originPlace"].allSatisfy { table["Artist C"]?[$0] == .missing } && flag(table["Artist C"]?["originNeedsReview"]) == false)
+        check("an artist not looked up yet is pending, and not flagged",
+              ["originCity", "originRegion", "originCountry", "originPlace"].allSatisfy { table["Artist D"]?[$0] == .pending } && flag(table["Artist D"]?["originNeedsReview"]) == false)
+        check("the person's own place wins, and is never flagged even over a guess",
+              text(table["Artist E"]?["originPlace"]) == "My City, Canada" && text(table["Artist E"]?["originCountry"]) == "Canada" && flag(table["Artist E"]?["originNeedsReview"]) == false)
+        var off = snapshot
+        off.lookupsOn = false
+        check("with looking up switched off, an artist nobody answered for has no value instead of waiting", run(.artist, off).cells["Artist D"]?["originCountry"] == .missing)
+        check("a run that loads no origins sees no places and nothing pending", run(.artist, .empty).cells["Artist A"]?["originCountry"] == .missing)
+        let trackTable = run(.track, snapshot).cells
+        let albumTable = run(.album, snapshot).cells
+        check("a track takes its artist's place", text(trackTable["Song Artist A"]?["originPlace"]) == "City A, State A, United States")
+        check("an album takes its artist's place and review flag", text(albumTable["Album Artist B"]?["originCity"]) == "City B" && flag(albumTable["Album Artist B"]?["originNeedsReview"]) == true)
+
+        func names(_ conditions: [QueryCondition]) -> Set<String> { Set(run(.artist, snapshot, groups: [conditions]).cells.keys) }
+        check("a condition on the country finds every artist from it, whatever the case", names([QueryCondition("originCountry", .textIs, [.text("united states")])]) == ["Artist A"], "\(names([QueryCondition("originCountry", .textIs, [.text("united states")])]))")
+        check("an origin you typed is found by the same condition", names([QueryCondition("originCountry", .textIs, [.text("Canada")])]) == ["Artist E"])
+        check("'is missing' finds the artist MusicBrainz doesn't know, not the one still waiting", names([QueryCondition("originCity", .isMissing, [])]) == ["Artist C"])
+        check("'has to review' finds exactly the guess", names([QueryCondition("originNeedsReview", .isTrue, [])]) == ["Artist B"])
+
+        // Resolve: the result reports the artist waiting, under the origin resolver.
+        let pendingArtists = artistRun.result?.pendingEntities[.origin] ?? []
+        check("Query's Resolve is offered the artist still waiting, and only that one", pendingArtists.map(\.name) == ["Artist D"], "\(pendingArtists.map(\.name))")
+        check("…under the origin resolver", artistRun.result?.pending.contains { $0.resolver == .origin } == true)
+        check("an album or track waiting is reported by its own id", Set((run(.track, snapshot).result?.pendingEntities[.origin] ?? []).map(\.name)) == ["Song Artist D"])
+
+        // Missing Data.
+        var snapshots = QuerySnapshots()
+        snapshots.origins = snapshot
+        func missing(_ id: String) -> (rows: [String: MissingDataBucket], missing: Int, pending: Int)? {
+            guard let field = MissingDataField.all.first(where: { $0.id == id }),
+                  let result = MissingDataEngine.compute(field: field, target: .artist, scrobbles: plays, snapshots: snapshots, now: t0.addingTimeInterval(86_400)) else { return nil }
+            return (Dictionary(uniqueKeysWithValues: result.rows.map { ($0.name, $0.bucket) }), result.missingCount, result.pendingCount)
+        }
+        let origin = missing("artistOrigin")
+        check("Missing Data lists the artist with no known origin as missing and the one not looked up as not yet checked",
+              origin?.rows.count == 2 && origin?.rows["Artist C"] == .missing && origin?.rows["Artist D"] == .pending && origin?.missing == 1 && origin?.pending == 1, "\(String(describing: origin))")
+        let review = missing("originReview")
+        check("Origin to Review lists exactly the best guess", review?.rows.count == 1 && review?.rows["Artist B"] == .missing, "\(String(describing: review))")
+        check("both fields are for artists, and only Artist Origin has anything to resolve",
+              MissingDataField.all.first { $0.id == "artistOrigin" }?.targets == [.artist] && MissingDataField.all.first { $0.id == "artistOrigin" }?.resolverKind == .origin
+                && MissingDataField.all.first { $0.id == "originReview" }?.resolverKind == nil && MissingDataField.all.first { $0.id == "originReview" }?.confirmsOrigin == true)
+        check("the Advanced hand-off for the review list is 'to review is true'", MissingDataField.all.first { $0.id == "originReview" }?.missingCondition().op == .isTrue)
     }
 
     // MARK: Saved lookups, edits and areas

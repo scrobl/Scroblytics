@@ -144,6 +144,7 @@ final class QueryBuilderModel {
     private var images = ImageStatusSnapshot.empty
     private var libraryPresence = LibraryPresenceSnapshot.empty
     private var appleMusic = AppleMusicDetailsSnapshot.empty
+    private var origins = QueryOriginSnapshot.empty
     private var weather = WeatherSnapshot.empty
     private var snapshotsRefreshTask: Task<Void, Never>?
     /// Every tag that exists in the library, most common first — the tag picker's suggestions.
@@ -241,6 +242,7 @@ final class QueryBuilderModel {
         images = loaded.images
         libraryPresence = loaded.libraryPresence
         appleMusic = loaded.appleMusic
+        origins = loaded.origins
         weather = loaded.weather
         entityTags = loaded.entityTags
         tagVocabulary = entityTags.vocabulary.map { QueryTagSuggestion(tag: $0.tag, items: $0.items) }
@@ -273,6 +275,10 @@ final class QueryBuilderModel {
             _ = BPMEngine.resolveBPMLookup(context: container.mainContext, scrobbles: unresolved)
         }
         if kinds.contains(.albumTracklists) { await resolveTracklists() }
+        if kinds.contains(.origin) {
+            let artists = (result.pendingEntities[.origin] ?? []).map { $0.target == .artist ? $0.name : $0.artist }
+            await ArtistOriginStore.shared.prioritize(Array(Set(artists)))
+        }
         if kinds.contains(.tags) { await resolveTags(for: result.pendingEntities[.tags] ?? []) }
         if kinds.contains(.releaseDate) {
             ReleaseDateEngine.resolvePending(
@@ -318,7 +324,7 @@ final class QueryBuilderModel {
         let snapshots = QuerySnapshots(
             popularity: popularity?.snapshot ?? .empty, durations: durations, bpm: bpm, releaseDates: releaseDates,
             turnover: turnover, lovedKeys: lovedKeys, flaggedKeys: flaggedKeys,
-            entityTags: entityTags, libraryPresence: libraryPresence, appleMusic: appleMusic, weather: weather, images: images, turnoverGroups: turnoverGroups
+            entityTags: entityTags, libraryPresence: libraryPresence, appleMusic: appleMusic, origins: origins, weather: weather, images: images, turnoverGroups: turnoverGroups
         )
         runTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(250)) }
@@ -620,6 +626,7 @@ actor QuerySnapshotReader {
         let entityTags: EntityTagsSnapshot
         let libraryPresence: LibraryPresenceSnapshot
         let appleMusic: AppleMusicDetailsSnapshot
+        let origins: QueryOriginSnapshot
         let weather: WeatherSnapshot
     }
 
@@ -644,6 +651,7 @@ actor QuerySnapshotReader {
             entityTags: EntityTagsEngine.loadSnapshot(context: modelContext),
             libraryPresence: LibraryPresenceSnapshot.load(context: modelContext),
             appleMusic: AppleMusicDetailsSnapshot.load(),
+            origins: QueryOriginSnapshot.load(context: modelContext),
             weather: WeatherSnapshot.load()
         )
     }

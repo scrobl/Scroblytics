@@ -52,6 +52,7 @@
 		1FE9FED8332F879FE59AF856 /* QueryRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 374B5554658A3F972AB971D1 /* QueryRun.swift */; };
 		20CB87F7F29E936346E533BD /* PopularityMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 545808E4F8A91ED3DCC0DA75 /* PopularityMath.swift */; };
 		211860B3887097FD419BAC90 /* AskPatterns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4726F522DC2428E46AB9FD8E /* AskPatterns.swift */; };
+		2161ABA1199460480192D18A /* QueryOriginFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10EFC12F7506688701B03180 /* QueryOriginFields.swift */; };
 		23608BDA09943439B4A0A81E /* TestProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F42ED7142076CF4DF72172 /* TestProfilesView.swift */; };
 		240CC012A858686E8B34F438 /* ConsistencyChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5033C685E21358856C1B32B6 /* ConsistencyChecks.swift */; };
 		247EDF72138C485B8F2FEFD5 /* HelpNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5908C15F64859658D8D60FD6 /* HelpNavigator.swift */; };
@@ -426,6 +427,7 @@
 		0EDAC91A28ABC0E22C794D07 /* AskSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskSchema.swift; sourceTree = "<group>"; };
 		0F09AF6690CD5D70E1FBAF78 /* AppleMusicDetails.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppleMusicDetails.swift; sourceTree = "<group>"; };
 		0F42BFDA67CDF54DAC09A6FD /* GlobalSearchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSearchEngine.swift; sourceTree = "<group>"; };
+		10EFC12F7506688701B03180 /* QueryOriginFields.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryOriginFields.swift; sourceTree = "<group>"; };
 		12D719F6B51AD25665E7F81D /* WelcomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		14A94D6E40BB0B9606F5A654 /* ArtistDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtistDetailView.swift; sourceTree = "<group>"; };
 		15823A406059F0DBE9DFD419 /* StaleRecordReviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StaleRecordReviewView.swift; sourceTree = "<group>"; };
@@ -1216,6 +1218,7 @@
 				359D06A2DE4BF1E1E56DD86D /* QuerySessionFields.swift */,
 				807BAEB8429FA382607FB44D /* QueryHeadlessRunner.swift */,
 				071D85FDC65BAA1C136C695D /* QueryAppleMusicFields.swift */,
+				10EFC12F7506688701B03180 /* QueryOriginFields.swift */,
 			);
 			path = Query;
 			sourceTree = "<group>";
@@ -1957,6 +1960,7 @@
 				4A583D3A1DB4A1D29C5C57A5 /* ArtistOriginSettingsSection.swift in Sources */,
 				528FA3ED86223BD2BA32213B /* ArtistOriginPresentation.swift in Sources */,
 				1F8DD01C1B64A78FF1633316 /* ArtistOriginEditView.swift in Sources */,
+				2161ABA1199460480192D18A /* QueryOriginFields.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

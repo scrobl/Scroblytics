@@ -73,6 +73,29 @@ struct OriginEditSnapshot: Sendable, Equatable {
     var confirmed: Bool
 }
 
+extension OriginEntrySnapshot {
+    init(row: ArtistOriginEntry) {
+        self.init(
+            status: ArtistOriginStatus(rawValue: row.status) ?? .none,
+            mbid: row.mbid, matchedName: row.matchedName, kind: row.kind.flatMap(ArtistOriginKind.init(rawValue:)),
+            place: OriginPlace(city: row.cityName, region: row.regionName, country: row.countryName, countryCode: row.countryCode),
+            candidates: row.candidatesJSON.flatMap { try? JSONDecoder().decode([ArtistOriginCandidate].self, from: $0) } ?? [],
+            resolvedAt: row.resolvedAt
+        )
+    }
+}
+
+extension OriginEditSnapshot {
+    init(row: ArtistOriginEdit) {
+        self.init(
+            place: row.hasPlaceOverride
+                ? OriginPlace(city: row.overrideCity, region: row.overrideRegion, country: row.overrideCountry, countryCode: row.overrideCountryCode)
+                : nil,
+            chosenMBID: row.chosenMBID, confirmed: row.confirmed
+        )
+    }
+}
+
 /// What the app shows for one artist, whichever of the lookup and the person's edit it came from.
 struct ArtistOriginDisplay: Sendable, Equatable {
     enum State: Sendable, Equatable {

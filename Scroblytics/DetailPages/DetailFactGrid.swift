@@ -30,6 +30,8 @@ struct DetailFact: Identifiable {
     var editHelp: String? = nil
     /// Draws attention to a value that needs a look (an uncertain album match).
     var attention = false
+    /// The value may run to two lines instead of shrinking (a place: city, region and country).
+    var allowsTwoLines = false
 
     var hasValue: Bool {
         if case .text = value { return true }
@@ -163,7 +165,7 @@ struct DetailFactTile: View {
                 Text(fact.displayText)
                     .font(AppTypography.statValue)
                     .foregroundStyle(fact.hasValue ? .primary : .tertiary)
-                    .lineLimit(1)
+                    .lineLimit(fact.allowsTwoLines ? 2 : 1)
                     .minimumScaleFactor(0.8)
                 if fact.corrected {
                     Text("corrected").font(AppTypography.supportingDense).foregroundStyle(.secondary)

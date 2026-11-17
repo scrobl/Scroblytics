@@ -10,6 +10,7 @@ struct ArtistDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var model = ArtistDetailModel()
     @State private var subListEntity: TopChartsEntity = .album
+    @State private var showingOriginEdit = false
 
     private var rangeOptions: [DateRangeOption] {
         DateRangePresets.build(oldestScrobbleDate: model.oldestScrobbleDate)
@@ -44,7 +45,8 @@ struct ArtistDetailView: View {
                     entity: .artist, name: identity.name, subtitle: nil, tertiary: nil,
                     imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
-                    facts: AppleMusicDetailsLookup.facts(model.appleMusic, entity: "artist") + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
+                    facts: [ArtistOriginFact.tile(model.origin, lookupsOn: ArtistOriginStore.shared.enabled, onEdit: { showingOriginEdit = true })]
+                        + AppleMusicDetailsLookup.facts(model.appleMusic, entity: "artist") + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
@@ -69,7 +71,7 @@ struct ArtistDetailView: View {
         .navigationTitle(identity.name)
         .task(id: identity.id) {
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { await model.loadAppleMusic(); return }
+            if model.isLoaded(for: identity.id) { await model.loadAppleMusic(); await model.loadOrigin(); return }
             model.bind(identity: identity, context: modelContext)
             model.loadOldestScrobbleDate()
             model.loadStats(range: range)
@@ -78,7 +80,8 @@ struct ArtistDetailView: View {
             async let time: Void = model.loadTimeListened(range: range)
             async let lean: Void = model.loadWeatherLean(range: range)
             async let music: Void = model.loadAppleMusic()
-            _ = await (ranks, tags, time, lean, music)
+            async let origin: Void = model.loadOrigin()
+            _ = await (ranks, tags, time, lean, music, origin)
             if !Task.isCancelled { model.markLoaded(identity.id) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
@@ -89,6 +92,10 @@ struct ArtistDetailView: View {
             Task { await refreshAfterSync() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .appleMusicDetailsDidUpdate)) { _ in Task { await model.loadAppleMusic() } }
+        .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in Task { await model.loadOrigin() } }
+        .sheet(isPresented: $showingOriginEdit) {
+            ArtistOriginEditView(artist: identity.name, container: modelContext.container, onChanged: { Task { await model.loadOrigin() } })
+        }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await model.loadTimeListened(range: range) }
         }

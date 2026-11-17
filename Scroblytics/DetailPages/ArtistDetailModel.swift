@@ -25,6 +25,18 @@ final class ArtistDetailModel {
     var weatherLean = EntityWeatherLean.Result.unavailable
     /// What the saved read of the Apple Music library says about this artist (earliest date added, common genre); nil until a read has been saved.
     var appleMusic: AppleMusicDetailsInfo?
+    /// Where the artist is from, as looked up and as the person corrected it; nil until read.
+    var origin: ArtistOriginPageState?
+
+    /// Reads where this artist is from. An artist with no answer yet jumps the queue of lookups, so opening a page fills its tile soonest.
+    func loadOrigin() async {
+        guard let context else { return }
+        let requested = identity
+        let state = await ArtistOriginPageState.load(artist: requested.name, container: context.container)
+        guard !Task.isCancelled, identity.id == requested.id else { return }
+        origin = state
+        if state?.display.state == .pending { await ArtistOriginStore.shared.prioritize([requested.name]) }
+    }
 
     func loadAppleMusic() async {
         guard let context else { return }
@@ -53,6 +65,7 @@ final class ArtistDetailModel {
         timeListenedSeconds = nil
         weatherLean = .unavailable
         appleMusic = nil
+        origin = nil
     }
 
     func loadOldestScrobbleDate() {

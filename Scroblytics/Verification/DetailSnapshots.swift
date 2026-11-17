@@ -550,6 +550,51 @@ enum DetailSnapshots {
                     await render(artistCard(stats: sampleStats(loved: false), facts: [weatherTile].compactMap { $0 }), width: width, dark: dark, container: container, to: base.appending(path: "artist-weather-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
+            // Where an artist is from: the tile in each state, the edit sheet, and the Settings section.
+            let longPlace = OriginPlace(city: "City With A Rather Long Name", region: "Region With A Long Name", country: "United Kingdom", countryCode: "GB")
+            let shortPlace = OriginPlace(city: "City A", region: "State A", country: "United States", countryCode: "US")
+            func entry(_ status: ArtistOriginStatus, _ place: OriginPlace, kind: ArtistOriginKind? = .group) -> OriginEntrySnapshot {
+                OriginEntrySnapshot(status: status, mbid: "id-1", matchedName: "Artist A", kind: kind, place: place, candidates: [], resolvedAt: Date())
+            }
+            let own = OriginEditSnapshot(place: OriginPlace(city: "My City", region: nil, country: "Canada", countryCode: "CA"), chosenMBID: nil, confirmed: false)
+            let originStates: [(String, ArtistOriginPageState?, Bool)] = [
+                ("formed", .make(entry: entry(.found, shortPlace), edit: nil), true),
+                ("born-long", .make(entry: entry(.found, longPlace, kind: .person), edit: nil), true),
+                ("guess", .make(entry: entry(.guess, shortPlace), edit: nil), true),
+                ("corrected", .make(entry: entry(.found, shortPlace), edit: own), true),
+                ("unknown", .make(entry: entry(.none, OriginPlace(), kind: nil), edit: nil), true),
+                ("checking", nil, true),
+                ("off", .make(entry: nil, edit: nil), false),
+            ]
+            for width in [900, 440] as [CGFloat] {
+                for dark in [true, false] {
+                    for (name, state, lookupsOn) in originStates {
+                        let tile = ArtistOriginFact.tile(state, lookupsOn: lookupsOn, onEdit: {})
+                        await render(artistCard(stats: sampleStats(loved: false), facts: [tile]), width: width, dark: dark, container: container, to: base.appending(path: "artist-origin-\(name)-\(Int(width))-\(dark ? "dark" : "light").png"))
+                    }
+                }
+            }
+            let namesakes = [
+                ArtistOriginCandidate(id: "id-1", name: "Artist A", score: 100, type: "Group", disambiguation: nil, areaID: nil, areaName: "United States", beginAreaID: nil, beginAreaName: "City A"),
+                ArtistOriginCandidate(id: "id-2", name: "Artist A", score: 97, type: "Person", disambiguation: "singer-songwriter, born 1971", areaID: nil, areaName: "United Kingdom", beginAreaID: nil, beginAreaName: "City B"),
+                ArtistOriginCandidate(id: "id-3", name: "Artist A", score: 95, type: nil, disambiguation: nil, areaID: nil, areaName: nil, beginAreaID: nil, beginAreaName: nil),
+            ]
+            let sheets: [(String, ArtistOriginEditModel)] = [
+                ("found", .sample(artist: "Artist A", state: .make(entry: entry(.found, shortPlace), edit: nil), city: "City A", region: "State A", countryCode: "US")),
+                ("guess", .sample(artist: "Artist A", state: .make(entry: OriginEntrySnapshot(status: .guess, mbid: "id-1", matchedName: "Artist A", kind: .group, place: shortPlace, candidates: namesakes, resolvedAt: Date()), edit: nil), city: "City A", region: "State A", countryCode: "US")),
+                ("corrected", .sample(artist: "Artist A", state: .make(entry: entry(.found, shortPlace), edit: own), city: "My City", region: "", countryCode: "CA", message: "MusicBrainz didn’t answer. Try again in a moment.")),
+                ("unknown", .sample(artist: "Artist A", state: .make(entry: entry(.none, OriginPlace(), kind: nil), edit: nil), city: "", region: "", countryCode: "")),
+            ]
+            for dark in [true, false] {
+                for (name, model) in sheets {
+                    await render(ArtistOriginEditView(model: model), width: 460, dark: dark, container: container, to: base.appending(path: "origin-sheet-\(name)-\(dark ? "dark" : "light").png"))
+                }
+                let settingsOn = ArtistOriginStore(defaults: UserDefaults(suiteName: "origin-snapshot-on")!)
+                let settingsOff = ArtistOriginStore(defaults: UserDefaults(suiteName: "origin-snapshot-off")!)
+                settingsOff.setEnabled(false)
+                await render(Form { ArtistOriginSettingsSection(store: settingsOn) }.formStyle(.grouped), width: 560, dark: dark, container: container, to: base.appending(path: "origin-settings-on-\(dark ? "dark" : "light").png"))
+                await render(Form { ArtistOriginSettingsSection(store: settingsOff) }.formStyle(.grouped), width: 560, dark: dark, container: container, to: base.appending(path: "origin-settings-off-\(dark ? "dark" : "light").png"))
+            }
             await render(albumCard(stats: sampleStats(loved: false), turnover: .ready(sampleTurnover()), extraFacts: [coldTile].compactMap { $0 }), width: 900, dark: true, container: container, to: base.appending(path: "album-weather-900-dark.png"))
             for width in [1200, 700, 440] as [CGFloat] {
                 await render(artistCard(stats: sampleStats(loved: false)), width: width, dark: true, container: container, to: base.appending(path: "artist-\(Int(width))-dark.png"))

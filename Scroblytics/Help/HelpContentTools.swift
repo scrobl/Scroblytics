@@ -202,9 +202,9 @@ extension HelpContent {
         HelpArticle(
             id: "tool-missing-data",
             title: "Missing Data",
-            summary: "Find and fill in missing release dates, images, lengths, tempos and album matches, and spot editions merged by mistake.",
+            summary: "Find and fill in missing release dates, images, lengths, tempos, album matches and artist origins, and spot editions merged by mistake.",
             blocks: [
-                .paragraph("Choose a **Field** — Release Date, Images, Duration, Tempo (BPM), Album Match or Merged Editions — and a Type (artist, album, track as applicable). A coverage line reads “N of M (X%) missing”, split into confirmed missing and not yet checked. What each means: [Missing Data](help://metrics-missing-data)."),
+                .paragraph("Choose a **Field** — Release Date, Images, Duration, Tempo (BPM), Album Match, Merged Editions, Artist Origin or Origin to Review — and a Type (artist, album, track as applicable). A coverage line reads “N of M (X%) missing”, split into confirmed missing and not yet checked. What each means: [Missing Data](help://metrics-missing-data)."),
                 .bullets([
                     "**Resolve Now** re-runs the lookup for items not yet checked.",
                     "**Import from Apple Music** (durations) matches tracks against your Music library and imports only confident matches, skipping ambiguous or unavailable ones. It needs the Music permission.",

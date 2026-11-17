@@ -19,6 +19,7 @@ struct ArtistOriginSettingsSection: View {
             Text("Asks MusicBrainz once for each artist where they were born or formed (city, state or region, and country), starting with the artists you play most, and keeps the answer on this Mac. Only artist names are sent. A large library takes a few hours, quietly in the background; places you correct yourself are never replaced.")
                 .font(AppTypography.supporting).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            HelpLinkButton(articleID: "artist-origin", title: "About artist origins")
         }
         .confirmationDialog("Forget the places that were looked up?", isPresented: $confirmingForget, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { Task { await store.forget() } }

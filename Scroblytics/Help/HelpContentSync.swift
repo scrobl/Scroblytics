@@ -85,6 +85,7 @@ extension HelpContent {
                     ["**Popularity**", "Last.fm and Deezer popularity for the whole library; refreshed when 30 days old", "A few items at a time, about one second apart"],
                     ["**Tags**", "Community tags per artist, album and track; your own tags (up to 500 distinct)", "A few at a time; a first pass over a big library is slow"],
                     ["**Release dates**", "MusicBrainz first, Deezer only if MusicBrainz has nothing", "One request at a time, about a second apart (MusicBrainz’s limit)"],
+                    ["**Artist origins**", "MusicBrainz: where each artist was born or formed, most played first ([details](help://artist-origin))", "One request at a time, a few seconds apart"],
                     ["**Track lengths**", "Deezer, only when a screen needs them", "8 at a time"],
                     ["**Loved tracks**", "As above", ""],
                     ["**Playlists**", "Not a lookup: the [Auto-Updating Playlists](help://tool-auto-playlists) are brought up to date in Music once a sync and its loved-tracks check have finished; the strip reads “Updating playlists · 2 left” while it runs", "One playlist at a time; only while Music is open"],

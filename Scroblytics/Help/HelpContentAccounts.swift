@@ -147,6 +147,29 @@ extension HelpContent {
             ]
         ),
         HelpArticle(
+            id: "artist-origin",
+            title: "Where artists are from",
+            summary: "The city, state or region and country each artist was born or formed in, from MusicBrainz, and how to correct it.",
+            blocks: [
+                .paragraph("Scroblytics asks MusicBrainz, a free open music database, where each of your artists is from, starting with the ones you play most, and keeps the answers on this Mac. A person is shown as **Born in** a place and a group as **Formed in** one. It runs quietly in the background (the status strip reads “artist origins”), a library of a few hundred artists takes under an hour and a few thousand several hours, and it only asks about artists it has not asked about before. Switch it off in **Settings › Sync › Artist origins**."),
+                .heading("Where it shows up"),
+                .bullets([
+                    "**Artist pages** show the place in a tile, with a pencil to correct it. An artist waiting for its turn says “Checking…”, and opening an artist's page moves it to the front of the queue.",
+                    "**Query** has [Origin fields](help://fields-origin): the artist's city, state or region, country, the whole place in one piece, and whether a best guess is waiting to be checked. An album or track takes its artist's place, and **Resolve** asks for the artists your results are waiting on.",
+                    "**[Missing Data](help://tool-missing-data)** lists the artists with no origin, and the best guesses still to check.",
+                    "**Ask** understands a request like “artists I play from the United Kingdom”.",
+                ]),
+                .heading("City, state or region and country"),
+                .paragraph("MusicBrainz knows the city. Scroblytics walks up from it to the state, province or nation and the country. The state or region is the highest of those below the country: Georgia, England, Ontario. A city directly under its country has none. Countries are spelled one way for every artist, so “is United Kingdom” finds them all."),
+                .heading("Best guesses and wrong artists"),
+                .paragraph("Several artists can share a name. When MusicBrainz lists close namesakes, the best one is used and the tile says **Best guess: check**. Open the pencil: **Looks Right** keeps it, or under **Wrong artist?** pick the right one from the artists MusicBrainz has with that name (**Search MusicBrainz** lists them again), and its place is looked up. An artist MusicBrainz does not know shows **Unknown**; you can still type a place for it."),
+                .heading("Correcting a place yourself"),
+                .paragraph("The pencil opens **City**, **State / region** and **Country** (a menu of countries). Whatever you save is shown as “corrected” and is never replaced by a lookup. **Reset to Detected** takes it back. Your corrections, and the MusicBrainz artists you picked, are part of a [backup](help://data-backup); the places that were looked up are not, because they can be looked up again."),
+                .heading("What leaves your Mac"),
+                .paragraph("Only artist names, sent to MusicBrainz one at a time, about every few seconds (its limit is about one a second). [Offline mode](help://offline-mode) pauses it. A lookup that fails for a temporary reason is never remembered as “unknown”; it is tried again at the next launch or sync. An artist MusicBrainz did not know is asked about again after about three months, and a found place after a year. **Forget Looked-Up Places…** in Settings deletes what was looked up and keeps your own corrections."),
+            ]
+        ),
+        HelpArticle(
             id: "what-leaves-your-mac",
             title: "What leaves your Mac",
             summary: "Every outside service the app talks to, and what it is told.",
@@ -157,7 +180,7 @@ extension HelpContent {
                     ["**Last.fm** (`ws.audioscrobbler.com`)", "Sync, loved tracks, tags, now playing, similar music (Rabbit Hole and Artist Map keep the answers on your Mac for 30 days), tracklists, popularity; and writes (loves, tags, scrobbles) if Track Actions is connected", "Your username and API key; artist, album, track and tag names in the request. Writes add a session key and signature."],
                     ["**Deezer** (`api.deezer.com`, no sign-in)", "Track lengths, tempos (fallback), release dates (fallback), artwork, popularity", "Artist, album and track names as search text"],
                     ["**GetSongBPM** (`api.getsong.co`)", "Track tempo, time signature and key", "Artist and track names as search text, with the app’s (or your own) GetSongBPM key"],
-                    ["**MusicBrainz**", "Album release dates", "Artist and album name, with the project’s contact address in the request header, as MusicBrainz asks"],
+                    ["**MusicBrainz**", "Album release dates, and where artists are from (Settings › Sync › Artist origins)", "Artist and album name, or just the artist name, with the project’s contact address in the request header, as MusicBrainz asks. Answers about artists’ places are kept on your Mac"],
                     ["**Image servers** (Last.fm, Deezer)", "Downloading artwork, and your Last.fm profile picture if you turn on **Include my profile picture** for shared cards (the address of the picture comes from Last.fm’s `user.getInfo`)", "An ordinary image request"],
                     ["**Apple Music catalogue** (`itunes.apple.com`, no sign-in)", "**View in Apple Music**, only when you choose it", "Artist, album or track name as search text; the answer is the page to open in the Music app"],
                     ["**Open-Meteo** (`archive-api.open-meteo.com`, `api.open-meteo.com`, `geocoding-api.open-meteo.com`, no sign-in)", "Hourly weather for your home place and any trips you add, only if you turn on **Settings › Weather**; and the city search there", "The coordinates (rounded to about 11 km) of your home place and of any trip, with date ranges; the city name you type when searching. Nothing about your music."],

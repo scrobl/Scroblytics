@@ -451,6 +451,20 @@ enum DetailChecks {
             overQuery.restoreQueryOriginIfPopped()
             check("opening an artist from the collage keeps the collage as the origin until it is closed", overQuery.isOverQuery && overQuery.originLabel == "Collage Generator" && overQuery.path.count == 3)
 
+            // The Query page announcing itself again with an artist open on top of it must not strand Back and the first crumb.
+            let again = DetailNavigationCoordinator(origin: .tools)
+            again.path.append(ToolDescriptor.query)
+            again.setOrigin(.query)
+            again.path.append(ArtistIdentity(name: "Artist A"))
+            again.setOrigin(.query)
+            check("the query announcing itself again under an artist keeps the artist's way back", again.path.count == 2 && again.origin == .query)
+            again.goBack()
+            check("Back from that artist returns to the query", again.path.count == 1)
+            again.path.append(ArtistIdentity(name: "Artist A"))
+            again.setOrigin(.query)
+            again.goToOrigin()
+            check("the Query crumb returns to the query too", again.path.count == 1)
+
             print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
             exit(failures == 0 ? 0 : 1)
         }

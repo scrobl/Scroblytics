@@ -41,6 +41,9 @@ final class DetailNavigationCoordinator {
     }
 
     func setOrigin(_ origin: DetailNavigationOrigin, label: String? = nil) {
+        // A page announcing itself again while something is open on top of it (SwiftUI can re-run its onAppear) must not move the
+        // origin up to the page on top: Back and the first crumb would then have nothing to return to.
+        if self.origin == origin, originLabel == label, path.count > originDepth { return }
         self.origin = origin
         originLabel = label
         originDepth = path.count

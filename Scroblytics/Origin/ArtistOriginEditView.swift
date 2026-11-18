@@ -165,7 +165,12 @@ struct ArtistOriginEditView: View {
                 Divider()
                 matchSection
             } else {
-                ProgressView().controlSize(.small)
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Spacer()
+                    // Always a way out, even if reading the saved place is slow.
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                }
             }
         }
         .padding(20)
@@ -218,7 +223,7 @@ struct ArtistOriginEditView: View {
                 Button("Looks Right") { Task { if await model.confirm() { finish() } } }
             }
             Spacer()
-            Button("Cancel", role: .cancel) { dismiss() }
+            Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
             Button("Save") { Task { if await model.save() { finish() } } }
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.canSave || model.isBusy)

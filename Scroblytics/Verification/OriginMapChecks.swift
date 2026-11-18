@@ -616,6 +616,9 @@ enum OriginMapChecks {
         check("not changing the zoom changes nothing", same == startPan)
         let middle = TrendsOriginMapChart.anchoredPan(anchor: CGPoint(x: 500, y: 250), size: frame, from: (1, .zero), toZoom: 4)
         check("zooming about the middle of an unmoved map leaves it centred", middle == .zero)
+        let growth = [1, 2, 4].map { TrendsOriginMapChart.dotZoomScale(CGFloat($0)) }
+        let deep = [8, 20, 80].map { TrendsOriginMapChart.dotZoomScale(CGFloat($0)) }
+        check("dots grow with zoom up to 4x, then shrink as you zoom deeper, never below 0.7", growth == growth.sorted() && deep == deep.sorted(by: >) && deep.last! >= 0.7 && deep[0] < growth.last!, "\(growth) \(deep)")
 
         // What a click opens is exactly the artists behind the dot, with their plays in the period.
         var snapshots = QuerySnapshots()

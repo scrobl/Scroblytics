@@ -195,7 +195,7 @@ struct TrendsOriginMapChart: View {
     }
 
     private static let minZoom: CGFloat = 1
-    private static let maxZoom: CGFloat = 12
+    private static let maxZoom: CGFloat = 80
 
     /// Sets the zoom. With an `anchor` (a point of the frame) the map is moved so the spot under it stays put: `start` is the zoom and
     /// pan the gesture began with. Without one it zooms about the middle.
@@ -237,8 +237,15 @@ struct TrendsOriginMapChart: View {
     /// Dots shrink on a narrow map so the pictures do not pile onto each other, and grow a little as you zoom in, so a small place
     /// gains its picture when you zoom to it.
     private func dotRadius(_ place: OriginMapResult.Place, max: Int, size: CGSize) -> CGFloat {
-        let scale = Swift.min(1, Swift.max(0.6, size.width / 1000)) * Swift.min(zoom, 9).squareRoot()
+        let scale = Swift.min(1, Swift.max(0.6, size.width / 1000)) * Self.dotZoomScale(zoom)
         return (3.5 + 17 * CGFloat((Double(place.weight) / Double(Swift.max(max, 1))).squareRoot())) * scale
+    }
+
+    /// How much the dots grow with zoom: up to 4× they grow a little (so a small place gains its picture), then they get smaller again, because
+    /// the places keep moving apart as you zoom and dots that stayed big would cover their neighbours (the boroughs of one big city).
+    static func dotZoomScale(_ zoom: CGFloat) -> CGFloat {
+        if zoom <= 4 { return zoom.squareRoot() }
+        return Swift.max(0.7, 2 * pow(4 / zoom, 0.4))
     }
 
     private func screenPoint(_ place: OriginMapResult.Place, size: CGSize) -> CGPoint {
@@ -295,7 +302,9 @@ struct TrendsOriginMapChart: View {
             context.stroke(path, with: .color(Color.primary.opacity(hoveredCountry == country.iso ? 0.7 : 0.2)), lineWidth: hoveredCountry == country.iso ? 1.4 : 0.5)
         }
         let selected: String? = { if case .place(let id)? = hover { id } else { nil } }()
-        for place in result.places.reversed() {
+        // Biggest first, so a small place next to a big one is drawn on top of it and stays visible; the hovered one goes last of all.
+        let drawOrder = result.places.sorted { ($0.id == selected ? 1 : 0, -$0.weight) < ($1.id == selected ? 1 : 0, -$1.weight) }
+        for place in drawOrder {
             let centre = screenPoint(place, size: size)
             let radius = dotRadius(place, max: result.maxPlaceWeight, size: size)
             let circle = Path(ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2))
@@ -322,11 +331,19 @@ struct TrendsOriginMapChart: View {
         }
         // Label the few biggest dots when zoomed far enough that the names fit.
         if zoom >= 2 {
-            for place in result.places.prefix(12) {
+            // Zoomed in a long way, every place on screen is named (up to 40), so close neighbours can be told apart.
+            let named = zoom >= 8 ? Array(result.places.filter { rect.insetBy(dx: 30, dy: 10).contains(screenPoint($0, size: size)) }.prefix(60)) : Array(result.places.prefix(12))
+            var taken: [CGRect] = []
+            for place in named {
                 let centre = screenPoint(place, size: size)
                 guard rect.insetBy(dx: 30, dy: 10).contains(centre) else { continue }
                 let name = place.city ?? place.region ?? place.country
-                context.draw(Text(name).font(.caption2).foregroundStyle(.primary), at: CGPoint(x: centre.x, y: centre.y - dotRadius(place, max: result.maxPlaceWeight, size: size) - 7))
+                let at = CGPoint(x: centre.x, y: centre.y - dotRadius(place, max: result.maxPlaceWeight, size: size) - 7)
+                // Biggest first; a name that would print over one already placed is left out (hover still names it).
+                let box = CGRect(x: at.x - CGFloat(name.count) * 3.6 - 3, y: at.y - 8, width: CGFloat(name.count) * 7.2 + 6, height: 16)
+                guard !taken.contains(where: { $0.intersects(box) }) else { continue }
+                taken.append(box)
+                context.draw(Text(name).font(.caption2).foregroundStyle(.primary), at: at)
             }
         }
     }

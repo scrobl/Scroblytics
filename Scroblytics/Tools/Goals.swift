@@ -238,8 +238,9 @@ enum GoalPlaylistSource {
         let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
         let presence = goal.inAppleLibraryOnly ? LibraryPresenceSnapshot.load(context: context) : nil
         let tags = goal.criteria.tags.isEmpty ? EntityTagsSnapshot.empty : EntityTagsEngine.loadSnapshot(context: context)
+        let origins = goal.criteria.countries.isEmpty ? QueryOriginSnapshot.empty : QueryOriginSnapshot.load(context: context)
         let result = await Task.detached(priority: .utility) {
-            let members = GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags)[goal.id] ?? GoalMembers(loves: [])
+            let members = GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags, origins: origins)[goal.id] ?? GoalMembers(loves: [])
             return GoalCompute.run(goal: goal, members: members, plays: plays, presence: presence, now: .now, calendar: calendar, withForecasts: false)
         }.value
         let matching = GoalRemainingList.apply(result.analysis.remaining, history: result.history, filter: filter, sort: sort, search: search)
@@ -873,6 +874,8 @@ struct GoalResult: Sendable {
     let leadLoves: Int
     /// Tracks a tag test could not be applied to yet (no tags looked up for them or their artist), so they are not counted.
     let pendingTags: Int
+    /// Tracks a country test could not be applied to yet (their artist has not been looked up for where they are from), so they are not counted.
+    let pendingOrigins: Int
 }
 
 enum GoalCompute {
@@ -953,7 +956,7 @@ enum GoalCompute {
             GoalResult(
                 analysis: analysis, forecasts: forecasts, neededPerDay: needed, dedicatedPerDay: dedicated, expectedLovesPerDay: setup.newLovesPerDay,
                 leftOutOfLibrary: leftOut, libraryNeverChecked: neverChecked, libraryCheckedAt: presence?.checkedAt,
-                history: history, leadLoves: GoalSimulator.leadLoves(analysis: analysis, goal: goal), pendingTags: members.pendingTags
+                history: history, leadLoves: GoalSimulator.leadLoves(analysis: analysis, goal: goal), pendingTags: members.pendingTags, pendingOrigins: members.pendingOrigins
             )
         }
         guard withForecasts, analysis.remainingNow > 0, analysis.daysLeft > 0 else { return result([:], needed: nil, dedicated: 0) }
@@ -1003,8 +1006,9 @@ enum GoalSummaryLoader {
         let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
         let presence = goals.contains { $0.inAppleLibraryOnly } ? LibraryPresenceSnapshot.load(context: context) : nil
         let tags = goals.contains { !$0.criteria.tags.isEmpty } ? EntityTagsEngine.loadSnapshot(context: context) : EntityTagsSnapshot.empty
+        let origins = goals.contains { !$0.criteria.countries.isEmpty } ? QueryOriginSnapshot.load(context: context) : QueryOriginSnapshot.empty
         return await Task.detached(priority: .userInitiated) {
-            let members = GoalMembership.members(for: goals, loved: loves, plays: plays, tags: tags)
+            let members = GoalMembership.members(for: goals, loved: loves, plays: plays, tags: tags, origins: origins)
             let now = Date.now
             // Each goal's numbers and outlook are independent of the others, so they are worked out side by side.
             let analyses = GoalParallel.map(count: goals.count) { index -> GoalAnalysis in

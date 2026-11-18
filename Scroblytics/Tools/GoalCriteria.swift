@@ -1,7 +1,7 @@
 import Foundation
 
 /// Which tracks a goal is about: all of your loved tracks (the default), or loved / not loved / any track you've played, narrowed to some
-/// artists and / or some tags. Every part that is set must match.
+/// artists, some tags and / or some countries (where the artist is from). Every part that is set must match.
 struct GoalCriteria: Codable, Equatable, Sendable {
     enum LovedStatus: String, Codable, CaseIterable, Identifiable, Sendable {
         case loved, notLoved, any
@@ -21,24 +21,29 @@ struct GoalCriteria: Codable, Equatable, Sendable {
     var artists: [String] = []
     /// Tags (lowercased); a track matches when it has any of them.
     var tags: [String] = []
+    /// Country names (English, as the person chose them; compared by country code); a track matches when its artist is from any of them,
+    /// by where Artist origin says the artist is from.
+    var countries: [String] = []
 
-    init(loved: LovedStatus = .loved, artists: [String] = [], tags: [String] = []) {
+    init(loved: LovedStatus = .loved, artists: [String] = [], tags: [String] = [], countries: [String] = []) {
         self.loved = loved
         self.artists = artists
         self.tags = tags
+        self.countries = countries
     }
 
-    private enum CodingKeys: String, CodingKey { case loved, artists, tags }
+    private enum CodingKeys: String, CodingKey { case loved, artists, tags, countries }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         loved = (try? c.decodeIfPresent(LovedStatus.self, forKey: .loved)) ?? .loved
         artists = try c.decodeIfPresent([String].self, forKey: .artists) ?? []
         tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        countries = try c.decodeIfPresent([String].self, forKey: .countries) ?? []
     }
 
     /// Every loved track, nothing narrowed: what a goal was before criteria existed.
-    var isLovedOnly: Bool { loved == .loved && artists.isEmpty && tags.isEmpty }
+    var isLovedOnly: Bool { loved == .loved && artists.isEmpty && tags.isEmpty && countries.isEmpty }
 
     /// A goal that isn't about loved tracks is about the tracks in your history, and a track joins it the day you first play it.
     var usesHistory: Bool { loved != .loved }
@@ -66,6 +71,7 @@ struct GoalCriteria: Codable, Equatable, Sendable {
         var text = noun.prefix(1).uppercased() + noun.dropFirst()
         if !artists.isEmpty { text += " by \(Self.list(artists))" }
         if !tags.isEmpty { text += " tagged \(Self.list(tags))" }
+        if !countries.isEmpty { text += " from \(Self.list(countries))" }
         return text
     }
 
@@ -73,6 +79,7 @@ struct GoalCriteria: Codable, Equatable, Sendable {
         var text = "Hear all my \(noun)"
         if !artists.isEmpty { text += " by \(Self.list(artists))" }
         if !tags.isEmpty { text += " tagged \(Self.list(tags))" }
+        if !countries.isEmpty { text += " from \(Self.list(countries))" }
         return text
     }
 }
@@ -95,6 +102,8 @@ struct GoalMembers: Sendable {
     var joinsOnPlay = false
     /// Tracks that would have been counted but have no tags looked up yet (not even their artist's), so a tag test can't say.
     var pendingTags = 0
+    /// Tracks that would have been counted but whose artist has not been looked up for where they are from yet, so a country test can't say.
+    var pendingOrigins = 0
 }
 
 enum GoalMembership {
@@ -119,21 +128,36 @@ enum GoalMembership {
 
     /// The tracks each goal counts; the play history is gone through once however many goals need it.
     static func members(
-        for goals: [ListeningGoal], loved: [GoalLove], plays: [ScrobbleSnapshot], tags: EntityTagsSnapshot
+        for goals: [ListeningGoal], loved: [GoalLove], plays: [ScrobbleSnapshot], tags: EntityTagsSnapshot, origins: QueryOriginSnapshot = .empty
     ) -> [UUID: GoalMembers] {
         let history = goals.contains { $0.criteria.usesHistory } ? historyTracks(plays: plays) : []
-        return Dictionary(uniqueKeysWithValues: goals.map { ($0.id, members(goal: $0, loved: loved, history: history, tags: tags)) })
+        return Dictionary(uniqueKeysWithValues: goals.map { ($0.id, members(goal: $0, loved: loved, history: history, tags: tags, origins: origins)) })
     }
 
     /// The tracks a goal counts. `loved` is the loved list (with love dates), `history` the played tracks, `tags` what is known of tags.
-    static func members(goal: ListeningGoal, loved: [GoalLove], history: [GoalHistoryTrack], tags: EntityTagsSnapshot) -> GoalMembers {
+    static func members(
+        goal: ListeningGoal, loved: [GoalLove], history: [GoalHistoryTrack], tags: EntityTagsSnapshot, origins: QueryOriginSnapshot = .empty
+    ) -> GoalMembers {
         let criteria = goal.criteria
         let artistKeys = Set(criteria.artists.map(TextNormalization.artistIdentityKey))
         let wanted = Set(LastfmTagNormalization.normalizeList(criteria.tags))
+        let wantedCountries = Set(criteria.countries.compactMap { CountryNames.code(for: $0) })
         var pending = 0
+        var pendingOrigins = 0
 
         func artistMatches(_ artist: String) -> Bool {
             artistKeys.isEmpty || artistKeys.contains(TextNormalization.artistIdentityKey(artist))
+        }
+        /// nil = can't tell yet (the artist hasn't been looked up). An artist MusicBrainz doesn't know, or whose place has no country, is not
+        /// from any country; with looking up switched off nothing is waited for.
+        func countryMatches(_ artist: String) -> Bool? {
+            guard !criteria.countries.isEmpty else { return true }
+            let display = origins.display(artist: artist)
+            switch display.state {
+            case .pending: return origins.lookupsOn ? nil : false
+            case .unknown: return false
+            case .known: return OriginHome.countryCode(of: display.place).map(wantedCountries.contains) ?? false
+            }
         }
         /// nil = can't tell yet.
         func tagMatches(artist: String, track: String, album: String?) -> Bool? {
@@ -149,26 +173,36 @@ enum GoalMembership {
         case .loved:
             let kept = loved.filter { love in
                 guard artistMatches(love.artist) else { return false }
+                switch countryMatches(love.artist) {
+                case true?: break
+                case false?: return false
+                case nil: pendingOrigins += 1; return false
+                }
                 switch tagMatches(artist: love.artist, track: love.track, album: nil) {
                 case true?: return true
                 case false?: return false
                 case nil: pending += 1; return false
                 }
             }
-            return GoalMembers(loves: kept, joinsOnPlay: false, pendingTags: pending)
+            return GoalMembers(loves: kept, joinsOnPlay: false, pendingTags: pending, pendingOrigins: pendingOrigins)
         case .notLoved, .any:
             let lovedKeys = criteria.loved == .notLoved ? Set(loved.map(\.key)) : []
             var kept: [GoalLove] = []
             for track in history {
                 if criteria.loved == .notLoved, lovedKeys.contains(track.key) { continue }
                 guard artistMatches(track.artist) else { continue }
+                switch countryMatches(track.artist) {
+                case true?: break
+                case false?: continue
+                case nil: pendingOrigins += 1; continue
+                }
                 switch tagMatches(artist: track.artist, track: track.track, album: track.album) {
                 case true?: kept.append(GoalLove(key: track.key, artist: track.artist, track: track.track, lovedAt: track.firstPlayed))
                 case false?: break
                 case nil: pending += 1
                 }
             }
-            return GoalMembers(loves: kept, joinsOnPlay: true, pendingTags: pending)
+            return GoalMembers(loves: kept, joinsOnPlay: true, pendingTags: pending, pendingOrigins: pendingOrigins)
         }
     }
 }

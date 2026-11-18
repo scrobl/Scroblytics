@@ -323,9 +323,9 @@ enum GoalsChecks {
             // MARK: Goals about other tracks: artists, tags, not loved, all
             let history = GoalMembership.historyTracks(plays: plays)
             let lovedKeys = Set(loves.map(\.key))
-            func members(_ criteria: GoalCriteria, tags: EntityTagsSnapshot = .empty) -> GoalMembers {
+            func members(_ criteria: GoalCriteria, tags: EntityTagsSnapshot = .empty, origins: QueryOriginSnapshot = .empty) -> GoalMembers {
                 var g = goal; g.criteria = criteria
-                return GoalMembership.members(goal: g, loved: loves, history: history, tags: tags)
+                return GoalMembership.members(goal: g, loved: loves, history: history, tags: tags, origins: origins)
             }
             check("the history lists each played track once, with its first play",
                   history.count == Set(history.map(\.key)).count && history.first { $0.track == "Song 6" }?.firstPlayed == at(-3, hour: 10)
@@ -355,6 +355,46 @@ enum GoalsChecks {
             check("a track's own tags win over its artist's",
                   members(GoalCriteria(loved: .any, tags: ["metal"]), tags: known).loves.map(\.track) == ["Other"]
                     && members(GoalCriteria(loved: .any, tags: ["indie"]), tags: known).loves.map(\.track) == ["Other 2"])
+            // Countries: Artist A is from the United States, Artist Z has not been looked up yet.
+            func originEntry(_ status: ArtistOriginStatus, _ place: OriginPlace) -> OriginEntrySnapshot {
+                OriginEntrySnapshot(status: status, mbid: "m", matchedName: nil, kind: .group, place: place, candidates: [], resolvedAt: now)
+            }
+            var origins = QueryOriginSnapshot(lookupsOn: true)
+            origins.entries["artist a"] = originEntry(.found, OriginPlace(city: "City A", region: "State One", country: "United States", countryCode: "US"))
+            let fromUS = members(GoalCriteria(countries: ["United States"]), origins: origins)
+            check("loved tracks can be narrowed to a country: the artists from it count, and nothing is owed for the ones asked about",
+                  fromUS.loves.count == 10 && Set(fromUS.loves.map(\.artist)) == ["Artist A"] && fromUS.pendingOrigins == 0, "\(fromUS.loves.count) \(fromUS.pendingOrigins)")
+            check("a country is found by any of its names", members(GoalCriteria(countries: ["USA"]), origins: origins).loves.count == 10 && members(GoalCriteria(countries: ["us"]), origins: origins).loves.count == 10)
+            check("another country matches nothing", members(GoalCriteria(countries: ["Japan"]), origins: origins).loves.isEmpty)
+            check("a name that is no country matches nothing", members(GoalCriteria(countries: ["Atlantis"]), origins: origins).loves.isEmpty)
+            let playedUS = members(GoalCriteria(loved: .any, countries: ["United States"]), origins: origins)
+            check("played tracks narrowed to a country: its artists' tracks count and the artist not looked up yet is counted as waiting",
+                  Set(playedUS.loves.map(\.artist)) == ["Artist A"] && playedUS.loves.count == 8 && playedUS.pendingOrigins == 2 && playedUS.joinsOnPlay, "\(playedUS.loves.count) \(playedUS.pendingOrigins)")
+            origins.entries["artist z"] = originEntry(.none, OriginPlace())
+            let withUnknown = members(GoalCriteria(loved: .any, countries: ["United States"]), origins: origins)
+            check("an artist MusicBrainz doesn't know is not from the country, and is not waited for", withUnknown.loves.count == 8 && withUnknown.pendingOrigins == 0)
+            origins.entries["artist z"] = originEntry(.found, OriginPlace(city: nil, region: nil, country: "Canada", countryCode: "CA"))
+            check("either of two countries (any of) counts both artists",
+                  members(GoalCriteria(loved: .any, countries: ["United States", "Canada"]), origins: origins).loves.count == 10
+                    && members(GoalCriteria(loved: .any, countries: ["Canada"]), origins: origins).loves.map(\.artist).allSatisfy { $0 == "Artist Z" })
+            var off = QueryOriginSnapshot(lookupsOn: false)
+            off.entries["artist a"] = originEntry(.found, OriginPlace(city: nil, region: nil, country: "United States", countryCode: "US"))
+            let lookupsOff = members(GoalCriteria(loved: .any, countries: ["United States"]), origins: off)
+            check("with looking up switched off an artist with nothing saved is simply not from the country, not waited for", lookupsOff.loves.count == 8 && lookupsOff.pendingOrigins == 0)
+            let noOrigins = members(GoalCriteria(loved: .any, countries: ["United States"]))
+            check("with no origin data at all nothing matches and nothing is counted as waiting while looking up is off", noOrigins.loves.isEmpty && noOrigins.pendingOrigins == 0)
+            var originsAZ = QueryOriginSnapshot(lookupsOn: true)
+            originsAZ.entries["artist a"] = originEntry(.found, OriginPlace(city: nil, region: nil, country: "United States", countryCode: "US"))
+            let both = members(GoalCriteria(loved: .any, artists: ["Artist A", "Artist Z"], tags: ["indie"], countries: ["United States"]), tags: known, origins: originsAZ)
+            check("a country and a tag must both hold; the country is asked first, so a tag is not waited for on an artist from elsewhere",
+                  both.loves.isEmpty && both.pendingOrigins == 2 && both.pendingTags == 8, "\(both.loves.count) \(both.pendingOrigins) \(both.pendingTags)")
+            check("a goal's countries are part of its summary and title, and make it more than loved tracks",
+                  GoalCriteria(countries: ["Japan", "Canada"]).summary == "Loved tracks from Japan and Canada"
+                    && GoalCriteria(loved: .any, tags: ["indie"], countries: ["Japan"]).suggestedTitle == "Hear all my tracks tagged indie from Japan"
+                    && !GoalCriteria(countries: ["Japan"]).isLovedOnly)
+            let savedCriteria = try? JSONDecoder().decode(GoalCriteria.self, from: JSONEncoder().encode(GoalCriteria(loved: .any, countries: ["Japan"])))
+            check("countries are saved, and a goal saved before them has none",
+                  savedCriteria?.countries == ["Japan"] && (try? JSONDecoder().decode(GoalCriteria.self, from: Data("{\"loved\":\"any\",\"artists\":[\"x\"]}".utf8)))?.countries == [])
             // The burn-down of a goal about played tracks, starting on day 5.
             var anyGoal = ListeningGoal(title: "All", start: at(5, hour: 9), deadline: at(30, hour: 20), lookbackDays: 30, criteria: GoalCriteria(loved: .any))
             let everyone = GoalCompute.run(goal: anyGoal, members: members(anyGoal.criteria), plays: plays, now: now, calendar: calendar)
@@ -756,18 +796,31 @@ enum GoalsChecks {
             let topArtist = plays1.max { $0.value < $1.value }?.key ?? ""
             let tagSnapshot = EntityTagsEngine.loadSnapshot(context: context)
             let topTag = tagSnapshot.vocabulary.first?.tag ?? ""
+            // The country most of the played artists are from, and every track of an artist from it, counted without the goal engine.
+            let originSnapshot = QueryOriginSnapshot.load(context: context)
+            var artistsPerCountry = [String: Int]()
+            for artist in Set(artistOf.values) {
+                let display = originSnapshot.display(artist: artist)
+                if display.state == .known, let code = OriginHome.countryCode(of: display.place) { artistsPerCountry[code, default: 0] += 1 }
+            }
+            let topCountry = artistsPerCountry.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key ?? ""
+            let fromTopCountry = Set(firstSeen.keys.filter { key in
+                let display = originSnapshot.display(artist: artistOf[key] ?? "")
+                return display.state == .known && OriginHome.countryCode(of: display.place) == topCountry
+            })
             let cases: [(String, GoalCriteria, Set<String>)] = [
                 ("all tracks", GoalCriteria(loved: .any), Set(firstSeen.keys)),
                 ("not loved", GoalCriteria(loved: .notLoved), Set(firstSeen.keys).subtracting(lovedSet)),
                 ("loved and played", GoalCriteria(loved: .loved), lovedSet),
                 ("all tracks by the most played artist", GoalCriteria(loved: .any, artists: [topArtist]),
                  Set(firstSeen.keys.filter { TextNormalization.artistIdentityKey(artistOf[$0] ?? "") == TextNormalization.artistIdentityKey(topArtist) })),
+                ("all tracks from the commonest country", GoalCriteria(loved: .any, countries: [CountryNames.name(forCode: topCountry) ?? topCountry]), fromTopCountry),
             ]
             for (label, criteria, expectedMembers) in cases {
                 var g = ListeningGoal(title: label, start: startAny, deadline: calendar.date(byAdding: .day, value: 60, to: now)!, criteria: criteria)
                 g.expectNewLoves = true
                 let began = Date()
-                let members = GoalMembership.members(for: [g], loved: loves, plays: plays, tags: tagSnapshot)[g.id]!
+                let members = GoalMembership.members(for: [g], loved: loves, plays: plays, tags: tagSnapshot, origins: originSnapshot)[g.id]!
                 let r = GoalCompute.run(goal: g, members: members, plays: plays, now: now, calendar: calendar)
                 let took = Date().timeIntervalSince(began)
                 let stillOwed = expectedMembers.filter { played[$0] == nil }

@@ -211,7 +211,7 @@ struct GoalsView: View {
                 goal.criteria.isLovedOnly ? "No loved tracks yet" : "No tracks match", systemImage: goal.criteria.isLovedOnly ? "heart" : "line.3.horizontal.decrease",
                 description: Text(goal.criteria.isLovedOnly
                     ? "A goal counts the tracks you've loved on Last.fm. Love some, or sync if you've loved some recently, and they'll appear here."
-                    : "None of the tracks in your history match this goal's criteria\(result.pendingTags > 0 ? ", and \(result.pendingTags.formatted()) can't be checked until their tags are looked up" : ""). Edit the goal to change them.")
+                    : "None of the tracks in your history match this goal's criteria\(result.pendingTags > 0 ? ", and \(result.pendingTags.formatted()) can't be checked until their tags are looked up" : "")\(result.pendingOrigins > 0 ? ", and \(result.pendingOrigins.formatted()) can't be checked until their artists' origins are looked up" : ""). Edit the goal to change them.")
             )
             .frame(maxWidth: .infinity, minHeight: 240)
         } else {
@@ -517,6 +517,10 @@ struct GoalsView: View {
                     Text("\(result.pendingTags.formatted()) \(result.pendingTags == 1 ? "track hasn't" : "tracks haven't") had tags looked up yet, so the tag test can't say and \(result.pendingTags == 1 ? "it isn't" : "they aren't") counted. Tags are looked up in the background; Refresh once they have been.")
                         .font(AppTypography.metadata).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 }
+                if result.pendingOrigins > 0 {
+                    Text("\(result.pendingOrigins.formatted()) \(result.pendingOrigins == 1 ? "track's artist hasn't" : "tracks' artists haven't") had where they are from looked up yet, so the country test can't say and \(result.pendingOrigins == 1 ? "it isn't" : "they aren't") counted. Origins are looked up in the background (Settings › Sync › Artist origins); Refresh once they have been.")
+                        .font(AppTypography.metadata).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 if !result.analysis.joinsOnPlay {
                     Toggle("Expect more loves before the deadline", isOn: binding(\.expectNewLoves))
                 }
@@ -796,9 +800,10 @@ struct GoalsView: View {
             let plays = try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
             let presence = goal.inAppleLibraryOnly ? LibraryPresenceSnapshot.load(context: modelContext) : nil
             let tags = goal.criteria.tags.isEmpty ? EntityTagsSnapshot.empty : EntityTagsEngine.loadSnapshot(context: modelContext)
+            let origins = goal.criteria.countries.isEmpty ? QueryOriginSnapshot.empty : QueryOriginSnapshot.load(context: modelContext)
             let calendar = self.calendar
             let members = await Task.detached(priority: .userInitiated) {
-                GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags)[goal.id] ?? GoalMembers(loves: [])
+                GoalMembership.members(for: [goal], loved: loves, plays: plays, tags: tags, origins: origins)[goal.id] ?? GoalMembers(loves: [])
             }.value
             // Opening a goal shows its numbers, chart and list at once; the forecasts (the slow part) join them when they are ready.
             // A recalculation of a goal already on the page keeps what it shows until the new answer arrives.
@@ -1072,6 +1077,7 @@ struct GoalEditor: View {
     @State private var criteria = GoalCriteria()
     @State private var artistSuggestions: [String] = []
     @State private var tagSuggestions: [String] = []
+    @State private var countrySuggestions: [String] = []
     @State private var start = Date()
     @State private var deadline = Date()
     @State private var existing: ListeningGoal?
@@ -1085,8 +1091,14 @@ struct GoalEditor: View {
         if !criteria.tags.isEmpty {
             text += " Tags are Last.fm community tags already looked up plus your own; a track whose tags haven't been looked up yet isn't counted until they are."
         }
+        if !criteria.countries.isEmpty {
+            text += " Countries are where Artist origin says an artist is from (looked up in the background, or set by you); a track whose artist hasn't been looked up yet isn't counted until it has been."
+        }
         return text
     }
+
+    /// Chosen countries that Scroblytics doesn't recognise, which would match nothing.
+    private var unknownCountries: [String] { criteria.countries.filter { CountryNames.code(for: $0) == nil } }
 
     private var isValid: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty && calendar.startOfDay(for: deadline) > calendar.startOfDay(for: start)
@@ -1105,6 +1117,11 @@ struct GoalEditor: View {
                 .pickerStyle(.segmented)
                 GoalChipsField(title: "Artists (any of)", placeholder: "Add an artist", items: $criteria.artists, suggestions: artistSuggestions, lowercase: false)
                 GoalChipsField(title: "Tags (any of)", placeholder: "Add a tag, e.g. shoegaze", items: $criteria.tags, suggestions: tagSuggestions, lowercase: true)
+                GoalChipsField(title: "Countries (any of)", placeholder: "Add a country, e.g. Japan", items: $criteria.countries, suggestions: countrySuggestions, lowercase: false)
+                if !unknownCountries.isEmpty {
+                    Text("Not a country name Scroblytics knows: \(unknownCountries.joined(separator: ", ")). Pick one from the suggestions.")
+                        .font(AppTypography.metadata).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 Text(criteriaNote).font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
@@ -1177,6 +1194,7 @@ struct GoalEditor: View {
         .task {
             artistSuggestions = ((try? modelContext.fetch(FetchDescriptor<Artist>())) ?? []).map(\.name).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             tagSuggestions = EntityTagsEngine.loadSnapshot(context: modelContext).vocabulary.prefix(2000).map(\.tag)
+            countrySuggestions = ArtistOriginCountries.all.map(\.name)
         }
     }
 

@@ -63,7 +63,17 @@ struct TrendsLocalSceneChart: View {
                 } actions: {
                     Button("Choose Home…") { editingHome = true }
                 }
-                .frame(minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 200)
+            } else if let home, OriginHome.countryCode(of: home) == nil {
+                // Without a country nothing can be at home, so every artist would read as "Elsewhere".
+                ContentUnavailableView {
+                    Label("Home needs a country", systemImage: "house")
+                } description: {
+                    Text("“\(home.text)” has no country, so every artist would count as elsewhere. Add its country (and, if you like, its state or region); it uses names only and nothing is sent anywhere.")
+                } actions: {
+                    Button("Choose Home…") { editingHome = true }
+                }
+                .frame(maxWidth: .infinity, minHeight: 200)
             } else if let result, result.total > 0, result.share(.unknown) < 1 {
                 chart(result)
                     .shareChartArea()

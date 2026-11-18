@@ -15,15 +15,24 @@ enum OriginHome {
     }
 
     /// The weather home place as an origin place: "Oslo, Oslo, Norway" is the city Oslo, the region Oslo and the country Norway. nil when
-    /// no weather home place is set.
-    static func fromWeather(defaults: UserDefaults = .standard) -> OriginPlace? {
+    /// no weather home place is set. A place saved before regions and countries were kept has only a name and coordinates; its country
+    /// (and region) are then worked out from the coordinates on this Mac (`PlaceCoordinates.locate`), so home is never a city in no country.
+    static func fromWeather(defaults: UserDefaults = .standard, places: PlaceCoordinates = .bundled) -> OriginPlace? {
         guard let weather = WeatherSettings.place(defaults: defaults) else { return nil }
         let city = weather.name.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) }
-        let country = weather.country?.trimmingCharacters(in: .whitespaces)
-        let place = OriginPlace(
-            city: city?.isEmpty == false ? city : nil, region: weather.region?.isEmpty == false ? weather.region : nil,
-            country: country, countryCode: country.flatMap { CountryNames.code(for: $0) }
-        )
+        var country = weather.country?.trimmingCharacters(in: .whitespaces)
+        if country?.isEmpty == true { country = nil }
+        var region = weather.region?.isEmpty == false ? weather.region : nil
+        var code = country.flatMap { CountryNames.code(for: $0) }
+        if (country == nil || (code != nil && region == nil)), let latitude = weather.latitude, let longitude = weather.longitude,
+           let found = places.locate(latitude: latitude, longitude: longitude), code == nil || code == found.countryCode {
+            if code == nil {
+                code = found.countryCode
+                country = CountryNames.name(forCode: found.countryCode)
+            }
+            if region == nil { region = found.region }
+        }
+        let place = OriginPlace(city: city?.isEmpty == false ? city : nil, region: region, country: country, countryCode: code)
         return place.isEmpty ? nil : place
     }
 

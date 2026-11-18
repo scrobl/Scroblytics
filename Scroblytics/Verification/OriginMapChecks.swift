@@ -295,6 +295,25 @@ enum OriginMapChecks {
         check("forgetting it goes back to the weather place", OriginHome.current(defaults: defaults)?.city == "City W")
         OriginHome.setChosen(OriginPlace(), defaults: defaults)
         check("an empty place is never saved as the home", OriginHome.chosen(defaults: defaults) == nil)
+        // A weather place saved before countries were kept has only a name and coordinates; the bundled outlines and cities supply the rest.
+        let towns = PlaceCoordinates(tsv: """
+        City One\t\tUS\tState One\t39.1\t-98.2\t90000
+        City Two\t\tUS\tState Two\t30.0\t-95.0\t90000
+        City W\t\tNO\tRegion W\t59.1\t5.7\t90000
+        """)
+        let inland = towns.locate(latitude: 39.0, longitude: -98.0)
+        check("a spot inland is placed by the outline, with the region of the nearest listed city", inland?.countryCode == "US" && inland?.region == "State One", "\(String(describing: inland))")
+        let farFromAny = towns.locate(latitude: 45.0, longitude: -110.0)
+        check("inside a country but over 150 km from any listed city gives the country and no region", farFromAny?.countryCode == "US" && farFromAny?.region == nil, "\(String(describing: farFromAny))")
+        let coast = towns.locate(latitude: 59.05, longitude: 5.3)
+        check("a spot just off the coast, outside the coarse outline, is placed by the nearest city within 60 km", coast?.countryCode == "NO" && coast?.region == "Region W", "\(String(describing: coast))")
+        check("open sea far from any city is nowhere", towns.locate(latitude: 0, longitude: -30) == nil && towns.locate(latitude: 95, longitude: 0) == nil)
+        WeatherSettings.setPlace(WeatherPlace(name: "City One", latitude: 39.0, longitude: -98.0), defaults: defaults)
+        let oldPlace = OriginHome.fromWeather(defaults: defaults, places: towns)
+        check("an older weather place with only a name and coordinates gets its country and region from them", oldPlace == OriginPlace(city: "City One", region: "State One", country: "United States", countryCode: "US"), "\(String(describing: oldPlace))")
+        check("the local scene then puts an artist from that region at home instead of elsewhere", oldPlace.map { LocalScene.of(place: OriginPlace(city: "City Q", region: "State One", country: "United States", countryCode: "US"), home: $0) } == .region)
+        WeatherSettings.setPlace(WeatherPlace(name: "City One", latitude: 39.0, longitude: -98.0, region: nil, country: "Norway"), defaults: defaults)
+        check("a country that was saved is never replaced by the coordinates", OriginHome.fromWeather(defaults: defaults, places: towns)?.countryCode == "NO")
         WeatherSettings.setPlace(WeatherPlace(typedName: "Typed Place"), defaults: defaults)
         check("a weather place that is only a typed name has no country", OriginHome.countryCode(of: OriginHome.current(defaults: defaults) ?? OriginPlace()) == nil)
     }
@@ -741,6 +760,16 @@ enum OriginMapChecks {
                 home: OriginPlace(city: nil, region: nil, country: "United States", countryCode: "US")
             )
             print("LOCALSCENE total=\(scene.total) " + LocalScene.allCases.map { "\($0)=\(scene.overall[$0] ?? 0)" }.joined(separator: " ") + " buckets=\(scene.buckets.count) bucketSum=\(scene.buckets.reduce(0) { $0 + $1.total })")
+            // The home the chart really uses (the Weather home place, with its country and region worked out when it was saved without them).
+            if let home = OriginHome.current() {
+                let real = LocalSceneEngine.compute(
+                    scrobbles: snapshots, origins: origins, durations: .empty, range: DateRange(from: .distantPast, to: Date()), metric: .plays, home: home
+                )
+                print("HOME country=\(OriginHome.countryCode(of: home) ?? "none") region=\(home.region == nil ? "none" : "set") city=\(home.city == nil ? "none" : "set")")
+                print("HOMESCENE total=\(real.total) " + LocalScene.allCases.map { "\($0)=\(real.overall[$0] ?? 0)" }.joined(separator: " "))
+            } else {
+                print("HOME none")
+            }
             for place in result.places { print("MAPPLACE\t\(place.label)\t\(place.weight)\t\(place.artists)\t\(place.level)\t\(String(format: "%.3f", place.latitude))\t\(String(format: "%.3f", place.longitude))") }
             exit(0)
         } catch {

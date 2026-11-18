@@ -588,6 +588,10 @@ enum DetailSnapshots {
                     await render(TrendsLocalSceneChart(inputs: TrendsLocalSceneChart.Inputs(scrobbles: [], snapshots: QuerySnapshots(), range: mapInputs.range, version: 0), openQuery: { _, _ in }, preset: scene.result, home: scene.home).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-home-chart-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
+            // A home that is only a city (no country): the chart asks for one instead of showing everything as elsewhere.
+            for dark in [true, false] {
+                await render(TrendsLocalSceneChart(inputs: TrendsLocalSceneChart.Inputs(scrobbles: [], snapshots: QuerySnapshots(), range: mapInputs.range, version: 0), openQuery: { _, _ in }, preset: scene.result, home: OriginPlace(city: "City W", region: nil, country: nil, countryCode: nil)).padding(), width: 700, dark: dark, container: container, to: base.appending(path: "origin-home-nocountry-\(dark ? "dark" : "light").png"))
+            }
             for dark in [true, false] {
                 await render(OriginHomeEditView(current: scene.home, onSave: { _ in }), width: 440, dark: dark, container: container, to: base.appending(path: "origin-home-sheet-\(dark ? "dark" : "light").png"))
             }

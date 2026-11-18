@@ -18,6 +18,7 @@ struct PlaceCoordinate: Sendable, Equatable {
 struct PlaceCoordinates: Sendable {
     private struct Row: Sendable {
         let name: String
+        let code: String
         let regionKey: String
         let latitude: Double
         let longitude: Double
@@ -45,7 +46,7 @@ struct PlaceCoordinates: Sendable {
             guard f.count >= 7, let lat = Double(f[4]), let lon = Double(f[5]) else { continue }
             let code = String(f[2])
             let regionName = String(f[3])
-            let row = Row(name: String(f[0]), regionKey: Self.key(regionName), latitude: lat, longitude: lon, population: Int(f[6]) ?? 0)
+            let row = Row(name: String(f[0]), code: code, regionKey: Self.key(regionName), latitude: lat, longitude: lon, population: Int(f[6]) ?? 0)
             let index = rows.count
             rows.append(row)
             for name in Set([String(f[0]), f[1].isEmpty ? String(f[0]) : String(f[1])]) {
@@ -84,6 +85,26 @@ struct PlaceCoordinates: Sendable {
             default: String(word)
             }
         }.joined(separator: " ")
+    }
+
+    /// The country and the state or region a spot on the globe is in, worked out on this Mac from the bundled outlines and cities (nothing
+    /// is looked up or sent). The outlines are coarse, so a coastal city can fall just outside its country; then the nearest listed city
+    /// decides, if it is close. The region is the nearest listed city's, when one is within 150 km. nil over open sea or far from any city.
+    func locate(latitude: Double, longitude: Double) -> (countryCode: String, region: String?)? {
+        guard (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
+        let outline = geometry.countryAt(RobinsonProjection.project(longitude: longitude, latitude: latitude))
+        let cosLatitude = cos(latitude * .pi / 180)
+        var best: (row: Row, km: Double)?
+        for row in rows where outline == nil || row.code == outline {
+            var dLongitude = abs(row.longitude - longitude)
+            if dLongitude > 180 { dLongitude = 360 - dLongitude }
+            let km = hypot(row.latitude - latitude, dLongitude * cosLatitude) * 111.2
+            if km < (best?.km ?? .infinity) { best = (row, km) }
+        }
+        func region(_ row: Row) -> String? { row.regionKey.isEmpty ? nil : regions["\(row.code)|\(row.regionKey)"]?.name }
+        if let outline { return (outline, best.flatMap { $0.km <= 150 ? region($0.row) : nil }) }
+        guard let best, best.km <= 60 else { return nil }
+        return (best.row.code, region(best.row))
     }
 
     /// The best coordinates for a place, or nil when not even its country is known.

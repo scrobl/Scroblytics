@@ -578,7 +578,7 @@ enum DetailSnapshots {
             let mapInputs = TrendsOriginMapChart.Inputs(scrobbles: [], snapshots: QuerySnapshots(), range: DateRange(from: Date(timeIntervalSince1970: 1_700_000_000), to: Date(timeIntervalSince1970: 1_800_000_000)), version: 0)
             for width in [1100, 760, 480] as [CGFloat] {
                 for dark in [true, false] {
-                    await render(TrendsOriginMapChart(inputs: mapInputs, openQuery: { _, _ in }, preset: OriginMapChecks.samplePlaces()).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-map-\(Int(width))-\(dark ? "dark" : "light").png"))
+                    await render(TrendsOriginMapChart(inputs: mapInputs, openQuery: { _, _ in }, preset: OriginMapChecks.samplePlaces(), presetArtwork: OriginMapChecks.sampleArtwork()).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-map-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
             // The close-to-home chart and its home editor.

@@ -59,6 +59,8 @@ struct OriginMapResult: Sendable, Equatable {
     let notOnMap: [NotOnMap: Int]
     /// Plays whose track length isn't known yet (only when counting time): not in `total`, never guessed at.
     let pendingLength: Int
+    /// When only the period's top artists were counted: how many (nil = every artist). `total` is then those artists' listening.
+    var topArtists: Int? = nil
 
     var maxPlaceWeight: Int { places.first?.weight ?? 0 }
     var unmapped: Int { notOnMap.values.reduce(0, +) }
@@ -69,7 +71,7 @@ enum OriginMapEngine {
     /// `scrobbles` carry canonical artist names, as every Trends chart's do.
     static func compute(
         scrobbles: [ScrobbleSnapshot], origins: QueryOriginSnapshot, durations: DurationEngine.Snapshot, range: DateRange,
-        metric: TrendsMetric, places coordinates: PlaceCoordinates
+        metric: TrendsMetric, places coordinates: PlaceCoordinates, topArtists: Int? = nil
     ) -> OriginMapResult {
         var weights: [String: Int] = [:]
         var pendingLength = 0
@@ -87,7 +89,13 @@ enum OriginMapEngine {
         var notOnMap: [OriginMapResult.NotOnMap: Int] = [:]
         var total = 0, mapped = 0
 
-        for (artist, weight) in weights where weight > 0 {
+        var counted = weights.filter { $0.value > 0 }
+        if let topArtists, topArtists > 0, counted.count > topArtists {
+            // The most played (or listened to) artists of the period; ties go to the name that sorts first, so the cut is the same every time.
+            let keep = counted.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(topArtists).map(\.key)
+            counted = counted.filter { keep.contains($0.key) }
+        }
+        for (artist, weight) in counted {
             total += weight
             let display = origins.display(artist: artist)
             switch display.state {
@@ -146,7 +154,7 @@ enum OriginMapEngine {
             return place
         }.sorted { ($0.weight, $1.label) > ($1.weight, $0.label) }
         let ranked = countries.values.sorted { ($0.weight, $1.name) > ($1.weight, $0.name) }
-        return OriginMapResult(metric: metric, places: placed, countries: ranked, total: total, mapped: mapped, notOnMap: notOnMap, pendingLength: pendingLength)
+        return OriginMapResult(metric: metric, places: placed, countries: ranked, total: total, mapped: mapped, notOnMap: notOnMap, pendingLength: pendingLength, topArtists: topArtists)
     }
 }
 

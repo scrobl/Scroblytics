@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftData
 
@@ -549,6 +550,37 @@ enum OriginMapChecks {
         let nothing = OriginMapEngine.compute(scrobbles: plays, origins: origins, durations: .empty, range: DateRange(from: t0.addingTimeInterval(-10 * 86_400 * 100), to: t0.addingTimeInterval(-9 * 86_400 * 100)), metric: .plays, places: places)
         check("a period with no plays is an empty map", nothing.total == 0 && nothing.places.isEmpty && nothing.countries.isEmpty)
 
+        // Top artists: only the most played of the period are counted; the totals still add up.
+        let top3 = OriginMapEngine.compute(scrobbles: plays, origins: origins, durations: .empty, range: range, metric: .plays, places: places, topArtists: 3)
+        check("the top 3 artists of the period (F 6, A 5, D 4) are all that is counted", top3.total == 15 && top3.topArtists == 3, "\(top3.total)")
+        check("of them A (5) and D (4) are on the map and F (6) is unknown to MusicBrainz", top3.mapped == 9 && top3.notOnMap[.unknownToMusicBrainz] == 6 && top3.unmapped == 6 && top3.places.map(\.weight) == [5, 4], "\(top3.mapped) \(top3.notOnMap)")
+        check("with the top 3, mapped plus not on the map is still the total", top3.mapped + top3.unmapped == top3.total)
+        let top5 = OriginMapEngine.compute(scrobbles: plays, origins: origins, durations: .empty, range: range, metric: .plays, places: places, topArtists: 5)
+        check("a tie for the last place goes to the name that sorts first (C before G), so the cut is always the same", top5.total == 20 && top5.mapped == 14 && top5.notOnMap[.notLookedUp] == nil, "\(top5.total) \(top5.mapped) \(top5.notOnMap)")
+        let top100 = OriginMapEngine.compute(scrobbles: plays, origins: origins, durations: .empty, range: range, metric: .plays, places: places, topArtists: 100)
+        check("asking for more artists than there are counts everyone, as with no limit", top100.total == result.total && top100.mapped == result.mapped && top100.places == result.places && top100.countries == result.countries)
+        check("no limit leaves the result as it was, with no limit recorded", result.topArtists == nil && OriginMapEngine.compute(scrobbles: plays, origins: origins, durations: .empty, range: range, metric: .plays, places: places, topArtists: 0).total == 24)
+
+        // Zooming about the cursor keeps the spot under it where it is.
+        func screen(_ base: CGPoint, zoom: CGFloat, pan: CGSize, size: CGSize) -> CGPoint {
+            CGPoint(x: size.width / 2 + pan.width + zoom * (base.x - size.width / 2), y: size.height / 2 + pan.height + zoom * (base.y - size.height / 2))
+        }
+        let frame = CGSize(width: 1000, height: 500), anchor = CGPoint(x: 700, y: 100)
+        let startZoom: CGFloat = 2, startPan = CGSize(width: 30, height: -20)
+        // The point of the unzoomed frame that is under the cursor now.
+        let under = CGPoint(x: frame.width / 2 + (anchor.x - frame.width / 2 - startPan.width) / startZoom, y: frame.height / 2 + (anchor.y - frame.height / 2 - startPan.height) / startZoom)
+        var anchored = true
+        for target in [CGFloat(1), 3, 5, 12] {
+            let pan = TrendsOriginMapChart.anchoredPan(anchor: anchor, size: frame, from: (startZoom, startPan), toZoom: target)
+            let after = screen(under, zoom: target, pan: pan, size: frame)
+            anchored = anchored && abs(after.x - anchor.x) < 0.001 && abs(after.y - anchor.y) < 0.001
+        }
+        check("zooming in or out about the cursor leaves the map point under it exactly where it was", anchored)
+        let same = TrendsOriginMapChart.anchoredPan(anchor: anchor, size: frame, from: (startZoom, startPan), toZoom: startZoom)
+        check("not changing the zoom changes nothing", same == startPan)
+        let middle = TrendsOriginMapChart.anchoredPan(anchor: CGPoint(x: 500, y: 250), size: frame, from: (1, .zero), toZoom: 4)
+        check("zooming about the middle of an unmoved map leaves it centred", middle == .zero)
+
         // What a click opens is exactly the artists behind the dot, with their plays in the period.
         var snapshots = QuerySnapshots()
         snapshots.origins = origins
@@ -669,6 +701,23 @@ enum OriginMapChecks {
             metric: .plays, places: places.sorted { $0.weight > $1.weight }, countries: countries.values.sorted { $0.weight > $1.weight },
             total: mapped + 2300, mapped: mapped, notOnMap: [.notLookedUp: 1200, .unknownToMusicBrainz: 1100], pendingLength: 0
         )
+    }
+
+    /// Made-up pictures (a color block with a stripe) for the sample artists, so snapshots show how artwork sits on a dot and in the hover card.
+    @MainActor
+    static func sampleArtwork() -> [String: NSImage] {
+        var images: [String: NSImage] = [:]
+        for (index, name) in ["Artist A", "Artist B", "Artist C"].enumerated() {
+            let image = NSImage(size: NSSize(width: 96, height: 96))
+            image.lockFocus()
+            [NSColor.systemPurple, NSColor.systemTeal, NSColor.systemPink][index].setFill()
+            NSRect(x: 0, y: 0, width: 96, height: 96).fill()
+            NSColor.white.withAlphaComponent(0.6).setFill()
+            NSRect(x: 0, y: 36, width: 96, height: 24).fill()
+            image.unlockFocus()
+            images[name] = image
+        }
+        return images
     }
 
     // MARK: The map of a real library

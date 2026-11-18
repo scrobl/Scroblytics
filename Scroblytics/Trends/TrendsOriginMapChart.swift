@@ -3,7 +3,7 @@ import SwiftUI
 /// Trends › Taste & eras › Where your music is from: a world map of where the artists you played in the period are from. Countries are
 /// shaded by how much of your listening comes from them and cities are dots sized by their share; a hollow dot stands at the middle of a
 /// region or country because its city is not in the map's list. Hover for the details, click a country or dot to open its artists in
-/// Query. Pinch or use the buttons to zoom, drag to move. Everything it draws is bundled with the app and nothing is sent anywhere.
+/// Query. A dot big enough shows its top artist's picture; hover for the top three artists, each with theirs. Pinch or use the buttons to zoom, drag to move. Everything it draws is bundled with the app and nothing is sent anywhere.
 struct TrendsOriginMapChart: View {
     struct Inputs: Equatable {
         let scrobbles: [ScrobbleSnapshot]
@@ -19,27 +19,40 @@ struct TrendsOriginMapChart: View {
     private let preset: OriginMapResult?
 
     @AppStorage("trends.originMap.metric") private var metricRaw = TrendsMetric.plays.rawValue
+    /// 0 = every artist of the period, else only that many of the most played.
+    @AppStorage("trends.originMap.top") private var topCount = 0
     @State private var result: OriginMapResult?
     @State private var isLoading = true
     @State private var zoom: CGFloat = 1
     @State private var pan: CGSize = .zero
     @State private var gestureStartZoom: CGFloat?
     @State private var gestureStartPan: CGSize?
+    @State private var gestureStartZoomPan: CGSize?
     @State private var hover: Hover?
     @State private var hoverPoint = CGPoint.zero
+    /// Pictures by artist name (square thumbnails), loaded in the background; an artist with none keeps a plain dot.
+    @State private var artwork: [String: NSImage] = [:]
+    @State private var artworkTried = Set<String>()
     @Environment(\.shareChartCapture) private var shareCapture
 
-    init(inputs: Inputs, openQuery: @escaping (QuerySpec, String) -> Void, preset: OriginMapResult? = nil) {
+    init(inputs: Inputs, openQuery: @escaping (QuerySpec, String) -> Void, preset: OriginMapResult? = nil, presetArtwork: [String: NSImage] = [:]) {
         self.inputs = inputs
         self.openQuery = openQuery
         self.preset = preset
         _result = State(initialValue: preset)
+        _artwork = State(initialValue: presetArtwork)
+        _artworkTried = State(initialValue: Set(presetArtwork.keys))
     }
+
+    /// A dot at least this big (points, radius) carries its top artist's picture; smaller ones are too small to recognise anyone in.
+    private static let artworkMinimumRadius: CGFloat = 8
+    /// How many of the biggest places get their top artist's picture loaded up front; the rest load when hovered.
+    private static let artworkPreloadPlaces = 80
 
     private let world = WorldGeometry.bundled
     private var store: ArtistOriginStore { ArtistOriginStore.shared }
     private var metric: TrendsMetric { TrendsMetric(rawValue: metricRaw) ?? .plays }
-    private struct ComputeKey: Equatable { let metric: TrendsMetric; let inputs: Inputs }
+    private struct ComputeKey: Equatable { let metric: TrendsMetric; let top: Int; let inputs: Inputs }
 
     enum Hover: Equatable {
         case place(String)
@@ -48,16 +61,9 @@ struct TrendsOriginMapChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Picker("Metric", selection: $metricRaw) {
-                    ForEach(TrendsMetric.allCases) { Text($0.label).tag($0.rawValue) }
-                }
-                .pickerStyle(.segmented).labelsHidden()
-                .fixedSize()
-                Spacer()
-                if let result, result.mapped > 0 {
-                    Text(summaryLine(result)).font(AppTypography.metadata).foregroundStyle(.secondary)
-                }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { controls; Spacer(); summary }
+                VStack(alignment: .leading, spacing: 8) { HStack(spacing: 12) { controls }; summary }
             }
             if let result, result.mapped > 0 {
                 map(result)
@@ -72,7 +78,32 @@ struct TrendsOriginMapChart: View {
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1) }
-        .task(id: ComputeKey(metric: metric, inputs: inputs), priority: .utility) { await recompute() }
+        .task(id: ComputeKey(metric: metric, top: topCount, inputs: inputs), priority: .utility) { await recompute() }
+    }
+
+    @ViewBuilder
+    private var controls: some View {
+        Picker("Metric", selection: $metricRaw) {
+            ForEach(TrendsMetric.allCases) { Text($0.label).tag($0.rawValue) }
+        }
+        .pickerStyle(.segmented).labelsHidden()
+        .fixedSize()
+        Picker("Show", selection: $topCount) {
+            Text("All artists").tag(0)
+            Text("Top 10").tag(10)
+            Text("Top 25").tag(25)
+            Text("Top 50").tag(50)
+            Text("Top 100").tag(100)
+        }
+        .labelsHidden().fixedSize()
+        .help("Map only the artists you played most in the period, or every artist.")
+    }
+
+    @ViewBuilder
+    private var summary: some View {
+        if let result, result.mapped > 0 {
+            Text(summaryLine(result)).font(AppTypography.metadata).foregroundStyle(.secondary)
+        }
     }
 
     // MARK: Map
@@ -94,7 +125,11 @@ struct TrendsOriginMapChart: View {
                         .onContinuousHover { phase in
                             switch phase {
                             case .active(let point):
-                                hover = hit(at: point, size: size, result: result)
+                                let target = hit(at: point, size: size, result: result)
+                                if target != hover, case .place(let id)? = target, let place = result.places.first(where: { $0.id == id }) {
+                                    loadArtwork(for: place.top.map(\.name))
+                                }
+                                hover = target
                                 hoverPoint = point
                             case .ended:
                                 hover = nil
@@ -115,17 +150,21 @@ struct TrendsOriginMapChart: View {
                         .simultaneousGesture(
                             MagnifyGesture()
                                 .onChanged { value in
+                                    // Zoom about the fingers' position, so what is under the cursor stays under it.
                                     let start = gestureStartZoom ?? zoom
+                                    let startPan = gestureStartZoomPan ?? pan
                                     gestureStartZoom = start
-                                    setZoom(start * value.magnification, size: size)
+                                    gestureStartZoomPan = startPan
+                                    let anchor = CGPoint(x: value.startAnchor.x * size.width, y: value.startAnchor.y * size.height)
+                                    setZoom(start * value.magnification, size: size, about: anchor, from: (start, startPan))
                                 }
-                                .onEnded { _ in gestureStartZoom = nil }
+                                .onEnded { _ in gestureStartZoom = nil; gestureStartZoomPan = nil }
                         )
                         zoomControls(size: size)
                         if let hover, let tip = tooltip(for: hover, result: result, byCountry: byCountry) {
                             tip
                                 .fixedSize()
-                                .offset(x: min(hoverPoint.x + 14, max(0, size.width - 230)), y: max(0, min(hoverPoint.y + 14, size.height - 120)))
+                                .offset(x: min(hoverPoint.x + 14, max(0, size.width - 270)), y: max(0, min(hoverPoint.y + 14, size.height - 190)))
                                 .allowsHitTesting(false)
                         }
                     }
@@ -158,9 +197,28 @@ struct TrendsOriginMapChart: View {
     private static let minZoom: CGFloat = 1
     private static let maxZoom: CGFloat = 12
 
-    private func setZoom(_ value: CGFloat, size: CGSize) {
-        zoom = min(max(value, Self.minZoom), Self.maxZoom)
-        pan = clamped(pan, zoom: zoom, size: size)
+    /// Sets the zoom. With an `anchor` (a point of the frame) the map is moved so the spot under it stays put: `start` is the zoom and
+    /// pan the gesture began with. Without one it zooms about the middle.
+    private func setZoom(_ value: CGFloat, size: CGSize, about anchor: CGPoint? = nil, from start: (zoom: CGFloat, pan: CGSize)? = nil) {
+        let target = min(max(value, Self.minZoom), Self.maxZoom)
+        guard let anchor else {
+            zoom = target
+            pan = clamped(pan, zoom: zoom, size: size)
+            return
+        }
+        let origin = start ?? (zoom, pan)
+        zoom = target
+        pan = clamped(Self.anchoredPan(anchor: anchor, size: size, from: origin, toZoom: target), zoom: target, size: size)
+    }
+
+    /// The pan that keeps the map point under `anchor` where it is when the zoom goes from `start.zoom` to `toZoom` (before limiting the pan).
+    /// A point lands at: middle of the frame + pan + zoom × (its place in the unzoomed frame − the middle).
+    static func anchoredPan(anchor: CGPoint, size: CGSize, from start: (zoom: CGFloat, pan: CGSize), toZoom: CGFloat) -> CGSize {
+        let ratio = toZoom / start.zoom
+        return CGSize(
+            width: (anchor.x - size.width / 2) * (1 - ratio) + start.pan.width * ratio,
+            height: (anchor.y - size.height / 2) * (1 - ratio) + start.pan.height * ratio
+        )
     }
 
     private func clamped(_ pan: CGSize, zoom: CGFloat, size: CGSize) -> CGSize {
@@ -176,8 +234,11 @@ struct TrendsOriginMapChart: View {
             .translatedBy(x: -size.width / 2, y: -size.height / 2)
     }
 
-    private func dotRadius(_ place: OriginMapResult.Place, max: Int) -> CGFloat {
-        3.5 + 13 * CGFloat((Double(place.weight) / Double(Swift.max(max, 1))).squareRoot())
+    /// Dots shrink on a narrow map so the pictures do not pile onto each other, and grow a little as you zoom in, so a small place
+    /// gains its picture when you zoom to it.
+    private func dotRadius(_ place: OriginMapResult.Place, max: Int, size: CGSize) -> CGFloat {
+        let scale = Swift.min(1, Swift.max(0.6, size.width / 1000)) * Swift.min(zoom, 9).squareRoot()
+        return (3.5 + 17 * CGFloat((Double(place.weight) / Double(Swift.max(max, 1))).squareRoot())) * scale
     }
 
     private func screenPoint(_ place: OriginMapResult.Place, size: CGSize) -> CGPoint {
@@ -190,7 +251,7 @@ struct TrendsOriginMapChart: View {
         for place in result.places {
             let centre = screenPoint(place, size: size)
             let distance = hypot(centre.x - point.x, centre.y - point.y)
-            if distance <= dotRadius(place, max: result.maxPlaceWeight) + 3, distance < (best?.distance ?? .infinity) { best = (place.id, distance) }
+            if distance <= dotRadius(place, max: result.maxPlaceWeight, size: size) + 3, distance < (best?.distance ?? .infinity) { best = (place.id, distance) }
         }
         if let best { return .place(best.id) }
         let base = point.applying(transform(size: size).inverted())
@@ -236,9 +297,21 @@ struct TrendsOriginMapChart: View {
         let selected: String? = { if case .place(let id)? = hover { id } else { nil } }()
         for place in result.places.reversed() {
             let centre = screenPoint(place, size: size)
-            let radius = dotRadius(place, max: result.maxPlaceWeight)
+            let radius = dotRadius(place, max: result.maxPlaceWeight, size: size)
             let circle = Path(ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2))
-            if place.isApproximate {
+            if radius >= Self.artworkMinimumRadius, let name = place.top.first?.name, let image = artwork[name] {
+                // The place's top artist, in a bubble: dashed ring when the place is only the middle of a region or country.
+                context.fill(circle, with: .color(Color(nsColor: .windowBackgroundColor)))
+                var layer = context
+                layer.clip(to: circle)
+                layer.opacity = place.isApproximate ? 0.75 : 1
+                layer.draw(Image(nsImage: image), in: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2))
+                if place.isApproximate {
+                    context.stroke(circle, with: .color(Color.orange), style: StrokeStyle(lineWidth: 2, dash: [3, 2]))
+                } else {
+                    context.stroke(circle, with: .color(Color.orange), lineWidth: 2)
+                }
+            } else if place.isApproximate {
                 context.fill(circle, with: .color(Color.orange.opacity(0.18)))
                 context.stroke(circle, with: .color(Color.orange), style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
             } else {
@@ -253,7 +326,7 @@ struct TrendsOriginMapChart: View {
                 let centre = screenPoint(place, size: size)
                 guard rect.insetBy(dx: 30, dy: 10).contains(centre) else { continue }
                 let name = place.city ?? place.region ?? place.country
-                context.draw(Text(name).font(.caption2).foregroundStyle(.primary), at: CGPoint(x: centre.x, y: centre.y - dotRadius(place, max: result.maxPlaceWeight) - 7))
+                context.draw(Text(name).font(.caption2).foregroundStyle(.primary), at: CGPoint(x: centre.x, y: centre.y - dotRadius(place, max: result.maxPlaceWeight, size: size) - 7))
             }
         }
     }
@@ -269,7 +342,8 @@ struct TrendsOriginMapChart: View {
                 Text("\(TrendsWeight.format(place.weight, metric: result.metric)) · \(place.artists) artist\(place.artists == 1 ? "" : "s")")
                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                 ForEach(place.top, id: \.name) { top in
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        artistPicture(top.name)
                         Text(top.name).font(AppTypography.compactMetadata).lineLimit(1)
                         Spacer(minLength: 8)
                         Text(TrendsWeight.format(top.weight, metric: result.metric)).font(AppTypography.compactMetadata.monospacedDigit()).foregroundStyle(.secondary)
@@ -291,6 +365,20 @@ struct TrendsOriginMapChart: View {
                     .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
             })
         }
+    }
+
+    /// An artist's picture in the hover card; a plain tile with their initial until it loads (or when they have none).
+    @ViewBuilder
+    private func artistPicture(_ name: String) -> some View {
+        Group {
+            if let image = artwork[name] {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Color.secondary.opacity(0.2).overlay { Text(String(name.prefix(1))).font(AppTypography.compactMetadata).foregroundStyle(.secondary) }
+            }
+        }
+        .frame(width: 28, height: 28)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -362,6 +450,10 @@ struct TrendsOriginMapChart: View {
 
     @ViewBuilder
     private func notes(_ result: OriginMapResult) -> some View {
+        if let top = result.topArtists {
+            Label("Only your top \(top) artists of the period are on the map, and the percentages are of their listening. A click opens everyone from that place, most played first.", systemImage: "line.3.horizontal.decrease.circle")
+                .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
+        }
         if result.unmapped > 0 {
             let parts = OriginMapResult.NotOnMap.allCases.compactMap { reason -> String? in
                 guard let weight = result.notOnMap[reason], weight > 0 else { return nil }
@@ -411,22 +503,42 @@ struct TrendsOriginMapChart: View {
         return "\(places) place\(places == 1 ? "" : "s") in \(countries) countr\(countries == 1 ? "y" : "ies")"
     }
 
+    /// Loads the pictures saved for these artists (or reachable, when online; Offline mode never asks the network). The map draws at once
+    /// and the pictures come in as they load; an artist with none is not asked for again.
+    private func loadArtwork(for names: [String]) {
+        guard preset == nil else { return }
+        let wanted = names.filter { artwork[$0] == nil && !artworkTried.contains($0) }
+        guard !wanted.isEmpty else { return }
+        artworkTried.formUnion(wanted)
+        let lookup = inputs.snapshots.images.lookup
+        Task {
+            var urls: [String: String] = [:]
+            for name in wanted {
+                let target = ImageTarget(kind: .artist, artist: name, album: nil, track: nil)
+                if let url = ImageResolutionEngine.effectiveImageURL(for: target, lookup: lookup) { urls[name] = url }
+            }
+            let loaded = await ShareArtwork.load(Array(urls.values))
+            for (name, url) in urls { if let image = loaded[url] { artwork[name] = ArtistMapArtwork.thumbnail(image) } }
+        }
+    }
+
     private func recompute() async {
         guard preset == nil else { return }
         isLoading = true
-        let (metric, inputs) = (self.metric, self.inputs)
+        let (metric, inputs, top) = (self.metric, self.inputs, self.topCount)
         let computed = await TrendsComputeGate.shared.run {
             OriginMapEngine.compute(
                 scrobbles: inputs.scrobbles, origins: inputs.snapshots.origins, durations: inputs.snapshots.durations, range: inputs.range,
-                metric: metric, places: PlaceCoordinates.bundled
+                metric: metric, places: PlaceCoordinates.bundled, topArtists: top > 0 ? top : nil
             )
         }
         guard !Task.isCancelled, let computed else { return }
         result = computed
         isLoading = false
+        loadArtwork(for: computed.places.prefix(Self.artworkPreloadPlaces).compactMap { $0.top.first?.name })
         shareCapture?.summary = ShareChartSummary(
             headline: "Where my music is from",
-            detail: "\(computed.places.count) places in \(computed.countries.count) countries · \(metric == .plays ? "by scrobbles" : "by time listened")",
+            detail: "\(top > 0 ? "Top \(top) artists · " : "")\(computed.places.count) places in \(computed.countries.count) countries · \(metric == .plays ? "by scrobbles" : "by time listened")",
             legend: []
         )
     }

@@ -5,9 +5,10 @@ private struct TimelineDataSnapshot: Sendable {
     let scrobbles: [ScrobbleSnapshot]
     let lovedSet: Set<String>
     let imageLookup: [String: String]
+    let origins: QueryOriginSnapshot
 }
 
-private struct TimelineResponsiveLayout {
+struct TimelineResponsiveLayout {
     let isCompact: Bool
     let tileColumnCount: Int
     let pagePadding: CGFloat
@@ -63,6 +64,7 @@ struct TimelineView: View {
     @State private var needsReload = false
     @State private var lastDurationReloadAt = Date.distantPast
     @State private var durationReloadTask: Task<Void, Never>?
+    @State private var originReloadTask: Task<Void, Never>?
     @State private var latestRequestID = UUID()
     @State private var reloadDebounceTask: Task<Void, Never>?
 
@@ -119,6 +121,21 @@ struct TimelineView: View {
         .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .weekStartDidChange)) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in requestReload() }
+        .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in
+            // Where artists are from is announced every few seconds while it is looked up, and each reload reads and ranks the whole history;
+            // a country marker only appears when an artist from a new country turns up, so catching up every few minutes is enough.
+            let wait = 180 - Date().timeIntervalSince(lastDurationReloadAt)
+            if wait <= 0 {
+                requestReload()
+            } else if originReloadTask == nil {
+                originReloadTask = Task {
+                    try? await Task.sleep(for: .seconds(wait))
+                    originReloadTask = nil
+                    guard !Task.isCancelled else { return }
+                    requestReload()
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             guard settings.metric == .timeListened else { return }
             // Track lengths are announced every few seconds during a long backlog, and each reload reads and ranks the whole history.
@@ -240,7 +257,8 @@ struct TimelineView: View {
             let snapshot = TimelineDataSnapshot(
                 scrobbles: scrobbles,
                 lovedSet: LovedTracksEngine.lovedSet(context: modelContext),
-                imageLookup: try ImageResolutionEngine.imageLookup(context: modelContext)
+                imageLookup: try ImageResolutionEngine.imageLookup(context: modelContext),
+                origins: QueryOriginSnapshot.load(context: modelContext)
             )
             guard latestRequestID == requestID else { return }
             let durationLookup = metric == .timeListened
@@ -250,7 +268,7 @@ struct TimelineView: View {
             let computed = await Task.detached(priority: .utility) {
                 TimelineEngine.fetch(
                     scrobbles: snapshot.scrobbles, metric: metric, durationLookup: durationLookup,
-                    lovedSet: snapshot.lovedSet, imageLookup: snapshot.imageLookup
+                    lovedSet: snapshot.lovedSet, imageLookup: snapshot.imageLookup, origins: snapshot.origins
                 )
             }.value
             guard latestRequestID == requestID else { return }
@@ -266,7 +284,7 @@ struct TimelineView: View {
     }
 }
 
-private struct TimelineMonthPanel: View {
+struct TimelineMonthPanel: View {
     let month: TimelineMonth
     let metric: TopChartsMetric
     let layout: TimelineResponsiveLayout
@@ -282,6 +300,7 @@ private struct TimelineMonthPanel: View {
             TimelineMonthTotalsBar(
                 totals: month.totals,
                 milestones: month.milestones,
+                countryFirsts: month.countryFirsts,
                 isCompact: layout.isCompact
             )
             TimelinePeriodTilesRow(
@@ -345,6 +364,7 @@ private struct TimelineMonthPanel: View {
 private struct TimelineMonthTotalsBar: View {
     let totals: TimelineMonthTotals
     let milestones: [TimelineMilestone]
+    let countryFirsts: [TimelineCountryFirst]
     let isCompact: Bool
 
     /// Grouped by kind (Total, Artist, Album, Track), biggest first within a kind.
@@ -373,6 +393,14 @@ private struct TimelineMonthTotalsBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
+            if !countryFirsts.isEmpty {
+                TagFlowLayout(spacing: 6) {
+                    Text("First artist from:").font(AppTypography.supporting).foregroundStyle(.secondary)
+                    ForEach(countryFirsts, id: \.code) { first in
+                        countryBadge(first)
+                    }
+                }
+            }
             if !sortedMilestones.isEmpty {
                 TagFlowLayout(spacing: 6) {
                     Text("Milestones:").font(AppTypography.supporting).foregroundStyle(.secondary)
@@ -401,6 +429,22 @@ private struct TimelineMonthTotalsBar: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.05))
+    }
+
+    /// A country you first heard an artist from this month: its flag and name (and, in a wide window, the artist).
+    private func countryBadge(_ first: TimelineCountryFirst) -> some View {
+        let artist = first.artist.count > 24 ? "\(first.artist.prefix(24))…" : first.artist
+        return HStack(spacing: 4) {
+            Text(CountryNames.flag(forCode: first.code)).font(AppTypography.badge)
+            Text(first.name).font(AppTypography.badge)
+            if !isCompact {
+                Text(artist).font(AppTypography.supportingDense).opacity(0.7)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .foregroundStyle(Color.teal)
+        .background(Color.teal.opacity(0.15), in: Capsule())
+        .help("The first artist you played from \(first.name) was \(first.artist), on \(first.firstHeard.formatted(date: .abbreviated, time: .omitted)) — country number \(first.ordinal.formatted()) you had heard from.")
     }
 
     private func milestoneBadge(_ m: TimelineMilestone) -> some View {

@@ -494,6 +494,23 @@ enum OriginMapChecks {
         check("sixteen countries reach the steps 1, 5, 10 and 15, each dated by the country that made it", long.countryCount == 16 && long.steps.map(\.count) == [1, 5, 10, 15], "\(long.steps.map(\.count))")
         check("the fifth country's date is the day its first artist was first played (DE was country 5, day 30)", long.steps[1].reachedAt == day(30) && long.steps[1].country == "Germany", "\(long.steps[1])")
         check("the next step after sixteen countries is twenty", long.nextStep == 20)
+        // The Timeline's "first artist from" markers are the passport's stamps, put in the month they happened in.
+        let nov = TrendEngine.bucketStart(day(0), granularity: .month)
+        let timeline = TimelineEngine.fetch(scrobbles: plays, metric: .scrobbles, origins: origins)
+        let novMonth = timeline.months.first { $0.monthStart == nov }
+        check("the Timeline marks each country in the month its first artist was played, in the order heard, numbered as the passport counts them",
+              novMonth?.countryFirsts.map(\.code) == ["US", "GB", "FR", "JP"] && novMonth?.countryFirsts.map(\.ordinal) == [1, 2, 3, 4], "\(String(describing: novMonth?.countryFirsts.map(\.code)))")
+        check("each marker names the artist and day the passport names",
+              zip(novMonth?.countryFirsts ?? [], result.stamps).allSatisfy { $0.artist == $1.firstArtist && $0.firstHeard == $1.firstHeard && $0.name == $1.name })
+        check("a month with no new country has no marker, and so does the one with later plays by a known artist (A again on day 20)",
+              timeline.months.filter { $0.monthStart != nov }.allSatisfy { $0.countryFirsts.isEmpty } && timeline.months.map { $0.countryFirsts.count }.reduce(0, +) == 4)
+        let noMarkers = TimelineEngine.fetch(scrobbles: plays, metric: .scrobbles)
+        check("with no origins known the Timeline has no country markers", noMarkers.months.allSatisfy { $0.countryFirsts.isEmpty })
+        let longTimeline = TimelineEngine.fetch(scrobbles: longPlays, metric: .scrobbles, origins: many)
+        let markersInOrder = longTimeline.months.reversed().flatMap(\.countryFirsts)
+        check("sixteen countries make sixteen markers, numbered one to sixteen across the months in the order heard",
+              markersInOrder.map(\.ordinal) == Array(1...16) && markersInOrder.map(\.code).prefix(5) == ["US", "GB", "FR", "JP", "DE"], "\(markersInOrder.map(\.ordinal))")
+        check("the plays and top artists of the month are unchanged by the markers", timeline.months.map(\.totals.plays).reduce(0, +) == plays.count)
         let none = CountryPassportEngine.compute(scrobbles: plays, origins: .empty)
         check("with no origins known there is no country and every artist is unknown", none.countryCount == 0 && none.steps.isEmpty && none.unknownArtists == 7 && none.nextStep == 1)
         check("a passport stamp opens everyone from that country over all time, most played first",
@@ -760,6 +777,14 @@ enum OriginMapChecks {
                 home: OriginPlace(city: nil, region: nil, country: "United States", countryCode: "US")
             )
             print("LOCALSCENE total=\(scene.total) " + LocalScene.allCases.map { "\($0)=\(scene.overall[$0] ?? 0)" }.joined(separator: " ") + " buckets=\(scene.buckets.count) bucketSum=\(scene.buckets.reduce(0) { $0 + $1.total })")
+            // The Timeline's country markers against the passport's stamps, over the real history.
+            let passport = CountryPassportEngine.compute(scrobbles: snapshots, origins: origins)
+            let timeline = TimelineEngine.fetch(scrobbles: snapshots, metric: .scrobbles, origins: origins)
+            let markers = timeline.months.reversed().flatMap(\.countryFirsts)
+            let sameAsPassport = markers.count == passport.stamps.count && zip(markers, passport.stamps).allSatisfy { $0.code == $1.code && $0.firstHeard == $1.firstHeard && $0.artist == $1.firstArtist }
+            let monthsWithMarkers = timeline.months.filter { !$0.countryFirsts.isEmpty }.count
+            let misplaced = timeline.months.flatMap { month in month.countryFirsts.filter { TrendEngine.bucketStart($0.firstHeard, granularity: .month) != month.monthStart } }.count
+            print("TIMELINEFIRSTS markers=\(markers.count) passportCountries=\(passport.countryCount) same=\(sameAsPassport) monthsWithMarkers=\(monthsWithMarkers) misplaced=\(misplaced)")
             // The home the chart really uses (the Weather home place, with its country and region worked out when it was saved without them).
             if let home = OriginHome.current() {
                 let real = LocalSceneEngine.compute(

@@ -581,6 +581,23 @@ enum DetailSnapshots {
                     await render(TrendsOriginMapChart(inputs: mapInputs, openQuery: { _, _ in }, preset: OriginMapChecks.samplePlaces(), presetArtwork: OriginMapChecks.sampleArtwork()).padding(), width: width, dark: dark, container: container, to: base.appending(path: "origin-map-\(Int(width))-\(dark ? "dark" : "light").png"))
                 }
             }
+            // A Timeline month with country markers beside its milestones.
+            let monthStart = Date(timeIntervalSince1970: 1_700_000_000)
+            let sampleMonth = TimelineMonth(
+                monthStart: monthStart, top: TimelinePeriodTop(artist: nil, album: nil, track: nil), weeks: [],
+                totals: TimelineMonthTotals(plays: 842, artists: 61, albums: 70, tracks: 300),
+                milestones: [TimelineMilestone(kind: .artist, name: "Artist A", artist: nil, milestone: 1000, achievedAt: monthStart)],
+                countryFirsts: [
+                    TimelineCountryFirst(code: "GB", name: "United Kingdom", artist: "Artist A", firstHeard: monthStart, ordinal: 2),
+                    TimelineCountryFirst(code: "JP", name: "Japan", artist: "An Artist With A Rather Long Name Indeed", firstHeard: monthStart, ordinal: 3),
+                    TimelineCountryFirst(code: "NZ", name: "New Zealand", artist: "Artist C", firstHeard: monthStart, ordinal: 4),
+                ]
+            )
+            for width in [1000, 440] as [CGFloat] {
+                for dark in [true, false] {
+                    await render(TimelineMonthPanel(month: sampleMonth, metric: .scrobbles, layout: TimelineResponsiveLayout(width: width)), width: width, dark: dark, container: container, to: base.appending(path: "timeline-countries-\(Int(width))-\(dark ? "dark" : "light").png"))
+                }
+            }
             // The close-to-home chart and its home editor.
             let scene = OriginMapChecks.sampleLocalScene()
             for width in [900, 480] as [CGFloat] {

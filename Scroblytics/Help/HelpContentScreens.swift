@@ -140,7 +140,7 @@ extension HelpContent {
             title: "Timeline",
             summary: "Your top artist, album and track for every month and week.",
             blocks: [
-                .paragraph("Newest month first. Each month shows totals (plays, artists, albums, tracks), any milestone badges reached that month, and the top artist, album and track; its weeks (starting on your chosen week-start day) are nested beneath. The only control is the Metric. It ignores the date range. Each month has a **Share** button that makes a recap card of it ([Sharing](help://screen-sharing))."),
+                .paragraph("Newest month first. Each month shows totals (plays, artists, albums, tracks), any milestone badges reached that month, a **First artist from** row of flags when that month is the first time you played an artist from some country (the country, the artist and the day are in the tooltip, with how many countries that made; the same countries, artists and days as the passport in [Trends](help://screen-trends), taken from [where artists are from](help://artist-origin), so the row fills in as those are looked up), and the top artist, album and track; its weeks (starting on your chosen week-start day) are nested beneath. The only control is the Metric. It ignores the date range. Each month has a **Share** button that makes a recap card of it ([Sharing](help://screen-sharing))."),
                 .paragraph("A period’s winner is the highest value; ties go to whichever was first played in that period, then to artist name. Artist spellings are combined; albums are identified by exact artist and album name."),
             ]
         ),

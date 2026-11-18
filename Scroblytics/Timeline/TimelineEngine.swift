@@ -57,6 +57,17 @@ struct TimelineMilestone: Hashable, Sendable {
     let achievedAt: Date
 }
 
+/// The month you first heard an artist from a country, with that artist: one marker on the Timeline.
+struct TimelineCountryFirst: Hashable, Sendable {
+    let code: String
+    let name: String
+    /// The first artist you played from there, and the day.
+    let artist: String
+    let firstHeard: Date
+    /// Which country this was to reach: 1 for the first country ever heard, 2 for the second, and so on.
+    let ordinal: Int
+}
+
 struct TimelineMonth: Identifiable, Hashable, Sendable {
     /// Local start-of-month instant.
     let monthStart: Date
@@ -66,6 +77,8 @@ struct TimelineMonth: Identifiable, Hashable, Sendable {
     let totals: TimelineMonthTotals
     /// Most recently achieved first; ties broken by bigger milestone.
     let milestones: [TimelineMilestone]
+    /// Countries whose first artist you played this month, in the order you heard them. Empty until where artists are from is known.
+    var countryFirsts: [TimelineCountryFirst] = []
     var id: Date { monthStart }
 }
 
@@ -110,7 +123,8 @@ enum TimelineEngine {
 
     static func fetch(
         scrobbles rawSorted: [ScrobbleSnapshot], metric: TopChartsMetric,
-        durationLookup: [String: Int] = [:], lovedSet: Set<String> = [], imageLookup: [String: String] = [:]
+        durationLookup: [String: Int] = [:], lovedSet: Set<String> = [], imageLookup: [String: String] = [:],
+        origins: QueryOriginSnapshot = .empty
     ) -> TimelineResult {
         let canonicalNames = TextNormalization.canonicalArtistNames(rawSorted.map(\.artistName))
         let scrobbles = rawSorted.map { s in
@@ -238,6 +252,7 @@ enum TimelineEngine {
         }
 
         let milestonesByMonth = monthlyMilestones(scrobbles: scrobbles)
+        let countryFirstsByMonth = monthlyCountryFirsts(scrobbles: scrobbles, origins: origins)
 
         let months = monthBuckets.reversed().map { bucket in
             TimelineMonth(
@@ -247,7 +262,8 @@ enum TimelineEngine {
                 totals: TimelineMonthTotals(
                     plays: bucket.plays, artists: bucket.artists.count, albums: bucket.albums.count, tracks: bucket.tracks.count
                 ),
-                milestones: milestonesByMonth[bucket.start] ?? []
+                milestones: milestonesByMonth[bucket.start] ?? [],
+                countryFirsts: countryFirstsByMonth[bucket.start] ?? []
             )
         }
 
@@ -260,6 +276,21 @@ enum TimelineEngine {
         }
 
         return TimelineResult(months: months, metric: metric)
+    }
+
+    /// The first artist you played from each country, bucketed by the local month it was first played in. It is the passport's own count
+    /// (`CountryPassportEngine`), so the Timeline and the Trends passport always name the same artist and day for a country. A country
+    /// appears once where its artists' origins are known, so the markers fill in as the lookups do.
+    private static func monthlyCountryFirsts(scrobbles: [ScrobbleSnapshot], origins: QueryOriginSnapshot) -> [Date: [TimelineCountryFirst]] {
+        guard !origins.entries.isEmpty || !origins.edits.isEmpty else { return [:] }
+        let passport = CountryPassportEngine.compute(scrobbles: scrobbles, origins: origins)
+        var byMonth: [Date: [TimelineCountryFirst]] = [:]
+        for (index, stamp) in passport.stamps.enumerated() {
+            byMonth[TrendEngine.bucketStart(stamp.firstHeard, granularity: .month), default: []].append(
+                TimelineCountryFirst(code: stamp.code, name: stamp.name, artist: stamp.firstArtist, firstHeard: stamp.firstHeard, ordinal: index + 1)
+            )
+        }
+        return byMonth
     }
 
     /// Every milestone threshold crossed (total + per artist/album/track),

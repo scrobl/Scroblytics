@@ -41,7 +41,7 @@ struct SyncSetupView: View {
                 TextField("API Key", text: $form.apiKey)
                     .textFieldStyle(.roundedBorder)
                     .font(AppTypography.codeInput)
-                Text("Get a free API key at last.fm/api/account/create — the sync layer has no bundled key of its own.")
+                Text("Get an API key at last.fm/api/account/create — the sync layer has no bundled key of its own. Last.fm requires Last.fm Pro on the account that owns a key.")
                     .font(AppTypography.supporting)
                     .foregroundStyle(.secondary)
                 HelpLinkButton(articleID: "lastfm-account", title: "What these are and where they’re stored")

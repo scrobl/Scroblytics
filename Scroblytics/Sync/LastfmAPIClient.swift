@@ -81,8 +81,8 @@ extension LastfmAPIError: LocalizedError {
         switch self {
         case .api(let code, let message):
             switch code {
-            case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync."
-            case 26: return "Last.fm has suspended this API key."
+            case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key that used to work stops working if that subscription lapses."
+            case 26: return "Last.fm has suspended this API key. Since 1 December 2026 a key also needs its owner to have Last.fm Pro."
             case 29: return "Last.fm is limiting requests from this connection, even after waiting several minutes. Wait a few minutes, then press Retry."
             case 17: return "Last.fm needs a login to show this data. If you hid your recent listening in your Last.fm privacy settings, that is the cause."
             case 4, 9: return "Last.fm rejected the session. Reconnect Track Actions in Settings › Sync."

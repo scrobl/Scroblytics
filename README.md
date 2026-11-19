@@ -44,8 +44,9 @@ Everything is explained in the app under **Help**.
 ## Requirements
 
 - macOS 15 or later (Apple silicon or Intel).
-- A free Last.fm API key. Last.fm gives one to each account; the app walks you through getting it on first launch. Your key and username
-  stay on your Mac, in the Keychain.
+- A Last.fm API key, which you register yourself (the app walks you through it on first launch). **Since 1 December 2026 Last.fm requires a
+  Last.fm Pro subscription on the account that owns an API key**, so reading your history needs Pro on your Last.fm account. Scroblytics
+  itself is free. Your key and username stay on your Mac, in the Keychain.
 - Optional: the Music app, for the features that look at your Music library. The on-device Ask model needs macOS 26 or later.
 
 ## Install

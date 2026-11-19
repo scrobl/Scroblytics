@@ -22,9 +22,12 @@ struct WelcomeView: View {
                 VStack(spacing: 28) {
                     header
                     VStack(alignment: .leading, spacing: 22) {
-                        step(1, "Get a free Last.fm API key") {
+                        step(1, "Get a Last.fm API key") {
                             Text("Scroblytics reads your listening history from Last.fm using a key that is yours alone. Registering one takes a minute. Any name and description will do, and Last.fm then shows you an **API key**.")
                                 .foregroundStyle(.secondary)
+                            Text("Last.fm now requires a **Last.fm Pro** subscription on the account that owns an API key. Scroblytics is free, but your key is yours, so your Last.fm account needs Pro for the app to be able to read your history.")
+                                .font(.callout)
+                                .foregroundStyle(.orange)
                             Button("Open Last.fm’s API page") { NSWorkspace.shared.open(Self.createKeyURL) }
                         }
                         step(2, "Enter your username and the key") { accountForm }

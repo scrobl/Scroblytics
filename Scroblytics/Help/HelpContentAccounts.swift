@@ -7,11 +7,12 @@ extension HelpContent {
             title: "Your Last.fm account and API key",
             summary: "What to enter, where it is kept, and what it lets the app do.",
             blocks: [
-                .paragraph("Scroblytics reads your listening history from Last.fm. It needs your **Last.fm username** and a **Last.fm API key**. There is no password. The app doesn’t ship with a key, so you create your own; that is free."),
+                .paragraph("Scroblytics reads your listening history from Last.fm. It needs your **Last.fm username** and a **Last.fm API key**. There is no password. The app doesn’t ship with a key, so you create your own."),
+                .callout(.warning, "**Last.fm Pro is required.** Since 1 December 2026 Last.fm only accepts an API key whose owner has a **Last.fm Pro** subscription. You own the key you register, so the Last.fm account you register it under needs Pro, and keys registered before that date stop working until it subscribes. Scroblytics itself is free and doesn’t charge for anything; the subscription is Last.fm’s, and Last.fm sets its price and terms."),
                 .heading("Set it up"),
                 .steps([
                     "Register an API application at **last.fm/api/account/create** (any name and description). Last.fm shows you an **API key** and a **Shared secret**.",
-                    "In Scroblytics open **Settings (⌘,) › Sync**, enter your username and the API key, and click **Test & Save**. The app first asks Last.fm whether the pair works. If it does, you see how many scrobbles it found, the account is saved, and the first import starts by itself. If not, nothing is saved and the message says what to fix (an unrecognised key, a misspelled username, a private profile, no connection).",
+                    "In Scroblytics open **Settings (⌘,) › Sync**, enter your username and the API key, and click **Test & Save**. The app first asks Last.fm whether the pair works. If it does, you see how many scrobbles it found, the account is saved, and the first import starts by itself. If not, nothing is saved and the message says what to fix (an unrecognised key, which can also mean the key’s owner has no Last.fm Pro, a misspelled username, a private profile, no connection).",
                     "Watch the import in the banner at the top. A large history takes a while (see [Sync, Full Resync, and Targeted Resync](help://sync-types)), but you can use the app while it runs.",
                 ]),
                 .heading("What this allows"),

@@ -48,8 +48,8 @@ enum LastfmAccountCheck {
             switch error {
             case .api(let code, let text):
                 switch code {
-                case 10: return "Last.fm doesn’t recognise this API key. Copy it again from last.fm/api/accounts. It must be the API key, not the shared secret."
-                case 26: return "Last.fm has suspended this API key. Register a new one at last.fm/api/account/create."
+                case 10: return "Last.fm doesn’t recognise this API key. Copy it again from last.fm/api/accounts. It must be the API key, not the shared secret. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key from an account without it is refused."
+                case 26: return "Last.fm has suspended this API key. Register a new one at last.fm/api/account/create. Since 1 December 2026 the account that owns a key needs Last.fm Pro."
                 case 6: return "Last.fm has no user named “\(username)”. Check the spelling: it is the name in your profile address (last.fm/user/…)."
                 case 17: return "Last.fm won’t share this profile’s listening history. In your Last.fm privacy settings, turn off “Hide recent listening information”, then try again."
                 case 29: return "Last.fm is limiting requests right now. Wait a minute and try again."

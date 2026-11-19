@@ -11,7 +11,7 @@ extension HelpContent {
                 .heading("Getting started"),
                 .paragraph("The first time you open Scroblytics, a welcome screen walks you through these steps. You can also do them later in Settings › Sync."),
                 .steps([
-                    "Get your free Last.fm API key and save it with your username: [Your Last.fm account and API key](help://lastfm-account).",
+                    "Get your Last.fm API key (it needs a Last.fm Pro subscription on your account) and save it with your username: [Your Last.fm account and API key](help://lastfm-account).",
                     "The first import starts by itself once your account checks out. It reads your whole history and can take a while; see [Your first import](help://first-sync). You can browse while it runs, and use the toolbar’s Sync button for later updates.",
                     "Extra details (artwork, tags, popularity, release dates) fill in over the following hours in the background; see [What happens after a sync](help://sync-after).",
                     "Optional: connect [Track Actions](help://track-actions) to love tracks, edit tags and scrobble missed plays from the app, and choose an [Ask engine](help://ask-keys).",

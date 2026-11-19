@@ -3,20 +3,31 @@ import Foundation
 import os
 import Security
 
-/// A connected Last.fm account. Reading a public profile's scrobble history
-/// only needs an app-level API key (no per-user OAuth) — `apiSecret` and
-/// `sessionKey` are reserved for a future signed write call (e.g. track.love)
-/// and are never required for sync.
+/// A connected Last.fm account. Reading a public profile's scrobble history only needs an app-level API key (no per-user OAuth);
+/// `apiSecret` and `sessionKey` are for the signed write calls (track actions, scrobbling) and are never required for sync.
+///
+/// `apiKey` and `apiSecret` are always the **effective** pair: when `usesBuiltInKey` is true they are the key and secret built into
+/// this release (`LastfmBuiltInKey`), filled in when the account is read; otherwise they are the person's own. Everything that calls
+/// Last.fm just uses them, and `sessionKey` is the person's approval for that particular key.
 struct LastfmCredentials: Equatable {
     var username: String
     var apiKey: String
     var apiSecret: String?
     var sessionKey: String?
+    /// True when `apiKey` and `apiSecret` are the built-in pair rather than the person's own.
+    var usesBuiltInKey: Bool = false
+
+    /// An account that uses the built-in key and secret (empty strings if this build has none; see `LastfmBuiltInKey.isAvailable`).
+    static func builtIn(username: String, sessionKey: String? = nil) -> LastfmCredentials {
+        let pair = LastfmBuiltInKey.pair
+        return LastfmCredentials(username: username, apiKey: pair?.key ?? "", apiSecret: pair?.secret, sessionKey: sessionKey, usesBuiltInKey: true)
+    }
 }
 
-/// Keychain-backed credential storage. There is no bundled API key to fall back to, so the user supplies
-/// their own key/secret from last.fm/api/account/create — this store just
-/// persists whatever they enter.
+/// Keychain-backed credential storage. A person either uses the key built into the app or their own key and secret from
+/// last.fm/api/account/create; this store persists the username, the session key and, for an own key, the key and secret. An
+/// account that uses the built-in key is stored with an empty key and no secret, and the built-in pair is filled in when it is read,
+/// so the pair itself is never written to the Keychain and a later release can replace it.
 ///
 /// The Keychain can stop to ask (a locked login keychain, a changed app identity), and while it asks the calling thread waits: most
 /// callers are on the main thread, so the window freezes until the dialog is answered. So a successful read is kept in memory for
@@ -71,6 +82,10 @@ enum LastfmCredentialsStore {
         return nil
     }
 
+    /// The account already read in this session, or nil if none has been read (never touches the Keychain). For wording that depends on
+    /// which key is in use, where reading the Keychain from an error path would be wrong.
+    static var cachedAccount: LastfmCredentials? { state.withLock { $0.credentials } }
+
     /// Why the last read failed, or nil when it didn't (or there has been none). Cleared by a successful read, "not saved", save and clear.
     static var lastProblem: OSStatus? { state.withLock { $0.problem } }
 
@@ -105,6 +120,8 @@ enum LastfmCredentialsStore {
             guard let data, let stored = try? JSONDecoder().decode(StoredCredentials.self, from: data) else {
                 return .unreadable(errSecDecode)
             }
+            // An empty stored key means "the built-in key"; items saved before it existed always hold the person's own key.
+            if stored.apiKey.isEmpty { return .connected(.builtIn(username: stored.username, sessionKey: stored.sessionKey)) }
             return .connected(LastfmCredentials(username: stored.username, apiKey: stored.apiKey, apiSecret: stored.apiSecret, sessionKey: stored.sessionKey))
         case errSecItemNotFound:
             return .notSaved
@@ -155,16 +172,41 @@ enum LastfmCredentialsStore {
         rawReader.withLock { $0 = reader }
         state.withLock { $0 = State() }
     }
+
+    /// Replaces the Keychain write (checks only): `save` hands the bytes it would store to `writer` and touches nothing real. Pass nil to
+    /// go back to the Keychain.
+    static func useRawWriterForTesting(_ writer: (@Sendable (Data) throws -> Void)?) {
+        rawWriter.withLock { $0 = writer }
+    }
+
+    private static let rawWriter = OSAllocatedUnfairLock<(@Sendable (Data) throws -> Void)?>(initialState: nil)
     #endif
 
-    static func save(_ credentials: LastfmCredentials) throws {
+    /// The bytes written for `credentials`: an account on the built-in key keeps only the username and session (the built-in pair is
+    /// never stored), an own-key account keeps its key and secret. Exposed so a check can look at exactly what would be saved.
+    static func encodedForStorage(_ credentials: LastfmCredentials) throws -> Data {
+        let builtIn = credentials.usesBuiltInKey
         let stored = StoredCredentials(
             username: credentials.username,
-            apiKey: credentials.apiKey,
-            apiSecret: credentials.apiSecret,
+            apiKey: builtIn ? "" : credentials.apiKey,
+            apiSecret: builtIn ? nil : credentials.apiSecret,
             sessionKey: credentials.sessionKey
         )
-        let data = try JSONEncoder().encode(stored)
+        return try JSONEncoder().encode(stored)
+    }
+
+    static func save(_ credentials: LastfmCredentials) throws {
+        let data = try encodedForStorage(credentials)
+        // What is remembered is the effective account, with the current built-in pair filled in.
+        let effective = credentials.usesBuiltInKey ? LastfmCredentials.builtIn(username: credentials.username, sessionKey: credentials.sessionKey) : credentials
+        #if DEBUG
+        // A check can catch what would be written instead of touching the real Keychain item.
+        if let writer = rawWriter.withLock({ $0 }) {
+            try writer(data)
+            noteSaved(effective)
+            return
+        }
+        #endif
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -185,7 +227,7 @@ enum LastfmCredentialsStore {
         } else if updateStatus != errSecSuccess {
             throw KeychainError.write(updateStatus)
         }
-        noteSaved(credentials)
+        noteSaved(effective)
     }
 
     /// What saving does to the memory: the saved account is now the known one.

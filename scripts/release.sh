@@ -87,6 +87,20 @@ else
     || fail "Config/Secrets.xcconfig is missing or has no GETSONGBPM_API_KEY. Public builds are meant to include it."
 fi
 
+# The Last.fm key and shared secret built into the app (docs/RELEASING.md): both present as 32 hex digits, secret different from key.
+xc_value() { sed -n -E "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\\1/p" "$root/Config/Secrets.xcconfig" 2>/dev/null | head -1; }
+lastfm_key="$(xc_value LASTFM_API_KEY)"; lastfm_secret="$(xc_value LASTFM_API_SECRET)"
+if [[ "$lastfm_key" =~ ^[0-9a-f]{32}$ && "$lastfm_secret" =~ ^[0-9a-f]{32}$ && "$lastfm_key" != "$lastfm_secret" ]]; then
+  ok "the built-in Last.fm key and secret will be included (they are readable in the shipped app)"
+  if git -C "$root" grep -q -F -e "$lastfm_key" -e "$lastfm_secret" -- .; then
+    fail "the Last.fm key or secret appears in a file tracked by git (values not printed). Keep them only in Config/Secrets.xcconfig."
+  fi
+  ok "the Last.fm key and secret are not in any tracked file"
+else
+  [ "$test_package" = 1 ] && warn "Config/Secrets.xcconfig has no valid LASTFM_API_KEY / LASTFM_API_SECRET (32 hex digits each, different); this build would ask people for their own key" \
+    || fail "Config/Secrets.xcconfig is missing LASTFM_API_KEY / LASTFM_API_SECRET, or they are not two different 32-digit hex values."
+fi
+
 forbidden=""
 if [ -f "$forbidden_file" ]; then
   forbidden="$(grep -v '^[[:space:]]*#' "$forbidden_file" | grep -v '^[[:space:]]*$' | head -1)"
@@ -109,7 +123,7 @@ else
   xcodebuild -project "$project" -scheme "$scheme" -configuration Debug -destination 'platform=macOS' \
     -derivedDataPath "$work/debug" build >"$work/debug-build.log" 2>&1 || { tail -20 "$work/debug-build.log" >&2; fail "the Debug build failed."; }
   debug_bin="$work/debug/Build/Products/Debug/Scroblytics.app/Contents/MacOS/Scroblytics"
-  for check in HELP_CHECK HELP_CLAIMS PROFILE_CHECK FIRSTRUN_CHECK LOVEDAUDIT_CHECK MUSICLINK_CHECK QUERYCAP_CHECK RATELIMIT_CHECK UPDATE_CHECK DIAGNOSTICS_CHECK PERF_CHECK DETAIL_CHECK OVERVIEWDRILL_CHECK KEYCHAIN_CHECK OVERVIEW_CHECK EDITION_CHECK RABBITHOLE_CHECK NEWMUSIC_CHECK GOALS_CHECK AUTOPLAYLIST_CHECK BACKUPCOVERAGE_CHECK RELEASEYEAR_CHECK SONGSNOALBUM_CHECK UNSCROBBLED_CHECK SCROBBLERWATCH_CHECK MUSICDETAILS_CHECK SHARE_CHECK WEATHER_CHECK WEATHERPERF_CHECK SCROBBLEQUERY_CHECK COLLAGEQUERY_CHECK TAGMATCH_CHECK DUPLICATES_CHECK ARTISTMAP_CHECK ORIGIN_CHECK ORIGINMAP_CHECK; do
+  for check in HELP_CHECK HELP_CLAIMS PROFILE_CHECK FIRSTRUN_CHECK LOVEDAUDIT_CHECK MUSICLINK_CHECK QUERYCAP_CHECK RATELIMIT_CHECK UPDATE_CHECK DIAGNOSTICS_CHECK PERF_CHECK DETAIL_CHECK OVERVIEWDRILL_CHECK KEYCHAIN_CHECK BUILTINKEY_CHECK OVERVIEW_CHECK EDITION_CHECK RABBITHOLE_CHECK NEWMUSIC_CHECK GOALS_CHECK AUTOPLAYLIST_CHECK BACKUPCOVERAGE_CHECK RELEASEYEAR_CHECK SONGSNOALBUM_CHECK UNSCROBBLED_CHECK SCROBBLERWATCH_CHECK MUSICDETAILS_CHECK SHARE_CHECK WEATHER_CHECK WEATHERPERF_CHECK SCROBBLEQUERY_CHECK COLLAGEQUERY_CHECK TAGMATCH_CHECK DUPLICATES_CHECK ARTISTMAP_CHECK ORIGIN_CHECK ORIGINMAP_CHECK; do
     if env "SCROBLYTICS_STORE_PATH=$work/check.store" "SCROBLYTICS_$check=1" perl -e 'alarm 300; exec @ARGV' "$debug_bin" >"$work/$check.log" 2>&1; then
       ok "$check"
     else
@@ -171,12 +185,18 @@ verify_app() {
   [ -n "$(/usr/libexec/PlistBuddy -c 'Print NSAppleEventsUsageDescription' "$info" 2>/dev/null)" ] && ok "Music usage description present" || fail "NSAppleEventsUsageDescription is missing."
   if [ -n "$(/usr/libexec/PlistBuddy -c 'Print GetSongBPMAPIKey' "$info" 2>/dev/null)" ]; then ok "tempo-lookup key included"
   else [ "$test_package" = 1 ] && warn "no tempo-lookup key in this build" || fail "the tempo-lookup key is empty in this build."; fi
+  built_key="$(/usr/libexec/PlistBuddy -c 'Print LastfmAPIKey' "$info" 2>/dev/null || true)"
+  built_secret="$(/usr/libexec/PlistBuddy -c 'Print LastfmAPISecret' "$info" 2>/dev/null || true)"
+  if [[ "$built_key" =~ ^[0-9a-f]{32}$ && "$built_secret" =~ ^[0-9a-f]{32}$ && "$built_key" != "$built_secret" && "$built_key" != "0123456789abcdef0123456789abcdef" ]]; then ok "built-in Last.fm key and secret included"
+  else [ "$test_package" = 1 ] && warn "no valid built-in Last.fm key and secret in this build" || fail "the built-in Last.fm key and secret are missing or malformed in this build (values not printed)."; fi
   strings -a "$bin" >"$work/binary-strings.txt"
   if grep -q -E "SCROBLYTICS_[A-Z_]+" "$work/binary-strings.txt"; then
     grep -o -E "SCROBLYTICS_[A-Z_]+" "$work/binary-strings.txt" | sort -u | head -5 >&2
     fail "debug hooks are present in the binary (above)."
   fi
   ok "no debug hooks in the binary"
+  if [ -n "$built_key" ] && grep -q -F -e "$built_key" -e "$built_secret" "$work/binary-strings.txt"; then fail "the Last.fm key or secret is embedded in the binary itself (values not printed); it should only be in Info.plist."; fi
+  ok "the Last.fm secret is only in Info.plist, not in the binary"
   if grep -q -E "/Users/[A-Za-z]" "$work/binary-strings.txt"; then
     grep -E "/Users/[A-Za-z]" "$work/binary-strings.txt" | head -3 >&2
     fail "a home-folder path is embedded in the binary (above)."

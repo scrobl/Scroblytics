@@ -15,8 +15,10 @@ comfortable with that. The same information is available inside the app under **
   tempos, release dates, your own corrections, saved queries, decisions you make in the tools) live in a database in
   `~/Library/Application Support/`. Downloaded and custom images live in folders beside it.
 - **Preferences** (for example your chosen date range and which Ask engine you use) are stored in the app's macOS preferences.
-- **Credentials** (your Last.fm username and API key, any Ask API key, an optional GetSongBPM key, and, if you turn on Track
-  Actions, a Last.fm session key) are stored in your **macOS Keychain**, never in the database, in backups or in logs.
+- **Credentials** (your Last.fm username, any Ask API key, an optional GetSongBPM key of your own and, if you turn on Track
+  Actions, a Last.fm session key; also your own Last.fm API key and secret if you choose to use them instead of the app's) are
+  stored in your **macOS Keychain**, never in the database, in backups or in logs. The Last.fm API key and shared secret built into
+  Scroblytics belong to the app, are the same for everyone who uses it, and are not stored on your Mac separately.
 - **Your Music library.** With your permission the app reads your Music app through macOS's scripting interface for features
   such as matching albums, auditing loved tracks, finding gaps and exporting playlists. That information is not sent anywhere.
   If you turn on *Apple Music library details* in Settings, the app keeps a copy of when each song was added to your library, its
@@ -27,7 +29,7 @@ comfortable with that. The same information is available inside the app under **
 - **Shared images and text.** The Share button makes an image or text on your Mac. It contains your name only if you turn that
   on, and your Last.fm profile picture only if you also turn that on. Nothing is sent anywhere by the app, and what you copy,
   save or send from the Share menu is your choice. If you turn the picture on, the app asks Last.fm for its address (an ordinary
-  request with your username and API key, like a sync) and downloads it from Last.fm's image server, then keeps it in the
+  request with your username and the API key, like a sync) and downloads it from Last.fm's image server, then keeps it in the
   Scroblytics folder on your Mac and refreshes it about once a week.
 - **Weather.** If you turn on weather in Settings, the weather for your home place is downloaded and kept in a `Weather` folder
   in the Scroblytics folder on your Mac. It is not part of backups (it can be downloaded again) and *Remove Downloaded Weather*
@@ -47,7 +49,7 @@ The app only contacts these services, and only the ones for features you use. Tu
 
 | Service | Why | What it receives |
 | --- | --- | --- |
-| **Last.fm** | Importing and updating your history, loved tracks, tags, popularity, similar music, now playing. With **Track Actions** connected: loving or unloving tracks, editing your tags and scrobbling plays you ask it to (these change your public Last.fm profile). A scrobble contains the artist, track and album names and the time Music last played the song. | Your Last.fm username and the API key you registered; artist, album, track and tag names in the requests. Writes also send a session key and a signature (your shared secret is used on your Mac to sign and is never sent). |
+| **Last.fm** | Importing and updating your history, loved tracks, tags, popularity, similar music, now playing. With **Track Actions** connected: loving or unloving tracks, editing your tags and scrobbling plays you ask it to (these change your public Last.fm profile). A scrobble contains the artist, track and album names and the time Music last played the song. | Your Last.fm username and the API key (the one built into the app, or your own if you chose one); artist, album, track and tag names in the requests. Writes also send a session key and a signature (the shared secret is used on your Mac to sign and is never sent). Because the built-in key is shared, Last.fm sees requests from everyone who uses Scroblytics under that one key, as it already sees each username. |
 | **Deezer** (no sign-in) | Track lengths, tempos and release dates as a fallback, artwork, popularity | Artist, album and track names as search text |
 | **GetSongBPM** | Tempo, time signature and musical key | Artist and track names as search text, with a GetSongBPM key |
 | **MusicBrainz** | Album release dates; where artists were born or formed (Settings › Sync › Artist origins, can be turned off) | Artist and album names, or just artist names. As MusicBrainz asks, requests identify the app and a project contact address. Answers about artists' places are kept on your Mac. |

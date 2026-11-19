@@ -23,7 +23,7 @@ struct HistoryEmptyState<Fallback: View>: View {
             ContentUnavailableView {
                 Label("Add your Last.fm account", systemImage: "person.crop.circle.badge.plus")
             } description: {
-                Text("Scroblytics needs your Last.fm username and API key to import your listening history.")
+                Text("Scroblytics needs your Last.fm username to import your listening history.")
             } actions: {
                 SettingsLink { Text("Open Settings") }
             }
@@ -49,7 +49,11 @@ struct HistoryEmptyState<Fallback: View>: View {
             } actions: {
                 switch failure.kind {
                 case .retry: Button("Retry") { NotificationCenter.default.post(name: .syncRequested, object: nil) }
-                case .fixAccount: SettingsLink { Text("Open Settings") }
+                case .fixAccount:
+                    if failure.keyRejected, LastfmKeyMode.offersBuiltInSwitch(LastfmCredentialsStore.cachedAccount) {
+                        UseBuiltInKeyButton { NotificationCenter.default.post(name: .syncRequested, object: nil) }
+                    }
+                    SettingsLink { Text("Open Settings") }
                 }
             }
         case .accountHasNoScrobbles:

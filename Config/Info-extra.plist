@@ -6,5 +6,9 @@
 	<string>Scroblytics uses Music to see which songs and albums are in your library, to build playlists you ask for, and, only when you confirm, to remove entries from your Favorite Songs.</string>
 	<key>GetSongBPMAPIKey</key>
 	<string>$(GETSONGBPM_API_KEY)</string>
+	<key>LastfmAPIKey</key>
+	<string>$(LASTFM_API_KEY)</string>
+	<key>LastfmAPISecret</key>
+	<string>$(LASTFM_API_SECRET)</string>
 </dict>
 </plist>

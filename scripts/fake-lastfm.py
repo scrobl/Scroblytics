@@ -34,7 +34,7 @@ empty artist (1) or track (2), and keeps every accepted play. GET /__scrobbles l
 
 GET /__stats returns what was served, and the dataset's own totals, as JSON, for cross-checking an import. It also reports the
 busiest second (max_requests_in_one_second), the shortest gap between history requests (min_history_gap_ms) and how many requests
-were answered with error 29 (rate_limit_answers).
+were answered with error 29 (rate_limit_answers) and the distinct api_key values requests carried (api_keys_seen).
 """
 import argparse
 import hashlib
@@ -191,6 +191,7 @@ class State:
         self.request_times = []        # time.monotonic() of every request
         self.history_times = []        # ... of every history request (limit > 1)
         self.rate_limit_answers = 0
+        self.api_keys_seen = set()     # every distinct api_key a request carried (to prove which key the app used)
         self.first_history_at = None
         self.scrobbles = []            # plays accepted through track.scrobble, in the order they arrived
 
@@ -235,6 +236,7 @@ class State:
             "max_requests_in_one_second": self.max_in_one_second(),
             "min_history_gap_ms": self.min_history_gap_ms(),
             "rate_limit_answers": self.rate_limit_answers,
+            "api_keys_seen": sorted(self.api_keys_seen),
             "scrobbles_accepted": len(self.scrobbles),
             "history_span_ms": round((self.history_times[-1] - self.history_times[0]) * 1000) if len(self.history_times) > 1 else None,
         }
@@ -386,6 +388,9 @@ def build_handler(state):
                 time.sleep(3)
             if is_history and LATENCY_SECONDS:
                 time.sleep(LATENCY_SECONDS)
+            with state.lock:
+                if q.get("api_key"):
+                    state.api_keys_seen.add(q.get("api_key"))
             if state.scenario in ERRORS:
                 self._error(*ERRORS[state.scenario])
                 return

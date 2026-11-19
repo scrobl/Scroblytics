@@ -28,25 +28,35 @@ enum LastfmAccountCheck {
         return (name, key, nil)
     }
 
-    static func validate(username: String, apiKey: String, session: URLSession = .shared) async -> Outcome {
-        let typed = normalize(username: username, apiKey: apiKey)
+    /// Checks a username with Last.fm. `apiKey` is the person's own key; leave it nil to check with the key built into the app.
+    static func validate(username: String, apiKey: String?, session: URLSession = .shared) async -> Outcome {
+        let usingBuiltIn = apiKey == nil
+        // With the built-in key only the username can be wrong, so the key rules are checked against a stand-in that always passes them.
+        let typed = normalize(username: username, apiKey: apiKey ?? LastfmBuiltInKey.pair?.key ?? "0")
         if let problem = typed.problem { return .invalid(problem) }
-        let client = LastfmAPIClient(apiKey: typed.apiKey, username: typed.username, session: session)
+        if usingBuiltIn, !LastfmBuiltInKey.isAvailable { return .invalid(builtInMissing) }
+        let client = LastfmAPIClient(apiKey: usingBuiltIn ? (LastfmBuiltInKey.pair?.key ?? "") : typed.apiKey, username: typed.username, session: session)
         do {
             let info = try await client.fetchUserInfo()
             return .valid(Account(username: info.name, scrobbles: info.playcount))
         } catch {
-            return .invalid(message(for: error, username: typed.username))
+            return .invalid(message(for: error, username: typed.username, usingBuiltInKey: usingBuiltIn))
         }
     }
 
+    /// Said when the key built into the app is the one being refused (nothing the person typed can fix it).
+    static let builtInKeyRefused = "Last.fm isn’t accepting the key built into Scroblytics right now. That isn’t something you did wrong. Try again later, or use your own API key (Settings › Sync, or “Use my own API key” here), and please tell us through Help › Report a Problem…."
+    /// Said when this build has no built-in key at all (a build made without one).
+    static let builtInMissing = "This copy of Scroblytics doesn’t include a Last.fm key. Enter your own API key instead."
+
     /// What to tell a person about a failed check.
-    static func message(for error: Error, username: String) -> String {
+    static func message(for error: Error, username: String, usingBuiltInKey: Bool = false) -> String {
         if error is OfflineError { return "Offline mode is on. Go online to check your account." }
         if ConnectivityGate.isConnectivityError(error) { return "Can’t reach Last.fm. Check your internet connection and try again." }
         if let error = error as? LastfmAPIError {
             switch error {
             case .api(let code, let text):
+                if usingBuiltInKey, code == 10 || code == 26 { return LastfmBuiltInKey.isAvailable ? builtInKeyRefused : builtInMissing }
                 switch code {
                 case 10: return "Last.fm doesn’t recognise this API key. Copy it again from last.fm/api/accounts. It must be the API key, not the shared secret. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key from an account without it is refused."
                 case 26: return "Last.fm has suspended this API key. Register a new one at last.fm/api/account/create. Since 1 December 2026 the account that owns a key needs Last.fm Pro."

@@ -25,6 +25,8 @@ final class HistoryStatus {
         enum Kind: Equatable, Sendable { case retry, fixAccount }
         let message: String
         let kind: Kind
+        /// Last.fm refused the API key (invalid or suspended). With an own key and a built-in one available, switching is offered.
+        let keyRejected: Bool
 
         /// Key, suspended-key and privacy errors can't be cured by retrying; everything else might be.
         init(error: Error) {
@@ -39,11 +41,13 @@ final class HistoryStatus {
             } else {
                 kind = .retry
             }
+            if case .api(let code, _)? = error as? LastfmAPIError { keyRejected = code == 10 || code == 26 } else { keyRejected = false }
         }
 
-        init(message: String, kind: Kind) {
+        init(message: String, kind: Kind, keyRejected: Bool = false) {
             self.message = message
             self.kind = kind
+            self.keyRejected = keyRejected
         }
     }
 
@@ -67,6 +71,8 @@ final class HistoryStatus {
     /// Plain words when the database couldn't be counted (disk full, locked, damaged…); the count above then keeps its last good value.
     private(set) var storeProblem: String?
     private(set) var hasAccount = false
+    /// The saved account uses its own API key rather than the one built into the app (see `BuiltInKeyOfferStrip`).
+    private(set) var usesOwnKey = false
     /// Set when the Keychain wouldn't give up the saved account (locked, access refused): the macOS status. Not the same as having
     /// no account.
     private(set) var credentialsProblem: OSStatus?
@@ -135,9 +141,9 @@ final class HistoryStatus {
         }
         let before = credentialsProblem
         switch LastfmCredentialsStore.read() {
-        case .connected: hasAccount = true; credentialsProblem = nil
-        case .notSaved: hasAccount = false; credentialsProblem = nil
-        case .unreadable(let status): hasAccount = false; credentialsProblem = status
+        case .connected(let credentials): hasAccount = true; credentialsProblem = nil; usesOwnKey = !credentials.usesBuiltInKey
+        case .notSaved: hasAccount = false; credentialsProblem = nil; usesOwnKey = false
+        case .unreadable(let status): hasAccount = false; credentialsProblem = status; usesOwnKey = false
         }
         // One line in the activity log when it starts or stops, for Report a Problem (a status number, nothing else).
         if credentialsProblem != before {

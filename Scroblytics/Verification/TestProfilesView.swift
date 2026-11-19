@@ -13,7 +13,7 @@ struct TestProfilesView: View {
 
     private var nameIsValid: Bool { TestProfile.isValid(name: newName) }
     private var scenarioDetail: String {
-        launcher.scenarios.first { $0.name == scenario }?.detail ?? "Talks to the real Last.fm. You enter your own username and API key in the profile."
+        launcher.scenarios.first { $0.name == scenario }?.detail ?? "Talks to the real Last.fm. You enter your own username in the profile."
     }
 
     var body: some View {

@@ -49,6 +49,7 @@ struct ImportStatusStrips: View {
                         case .retry:
                             Button("Retry", action: onResume).disabled(Connectivity.shared.isOffline)
                         case .fixAccount:
+                            if failure.keyRejected, LastfmKeyMode.offersBuiltInSwitch(LastfmCredentialsStore.cachedAccount) { UseBuiltInKeyButton(onResume: onResume) }
                             SettingsLink { Text("Open Settings") }
                         }
                     }

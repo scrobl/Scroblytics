@@ -17,10 +17,10 @@ extension HelpContent {
                     ["Your Last.fm profile picture, only if you turned on **Include my profile picture** for shared cards", "`~/Library/Application Support/Scroblytics/ProfilePicture`"],
                     ["A small log of what the app did, for [Report a Problem](help://report-a-problem) (no music, account name or keys; the newest few hundred lines)", "`~/Library/Application Support/Scroblytics/activity.log`"],
                     ["Preferences and screen settings (date range, Ask engine choice and model names, and so on)", "The app’s preferences file"],
-                    ["Last.fm credentials, Ask API keys and the GetSongBPM key", "The macOS Keychain, never in the database"],
+                    ["Your Last.fm username and session key (and your own Last.fm key and secret, if you chose one), Ask API keys and your own GetSongBPM key", "The macOS Keychain, never in the database. The keys built into the app are part of the app, not saved on your Mac"],
                 ]),
                 .bullets([
-                    "Nothing in the app **deletes your history**. Disconnecting Track Actions only removes the secret and session key from the Keychain.",
+                    "Nothing in the app **deletes your history**. Disconnecting Track Actions only removes the session key (and an own key’s secret) from the Keychain.",
                     "Everything in the database that came from Last.fm can be rebuilt by syncing again. Things **you** created (corrections, overrides, custom images, flagged tracks, saved queries, tag rules, editions you counted on their own, Library Gaps confirmations, Loved Status Audit and Release Year Audit decisions, artist origin corrections, automatic playlists) are the part worth backing up: see [Backup and restore](help://data-backup).",
                     "To start completely fresh, quit the app and delete the database files and image folders above, and the Keychain items if you also want the credentials gone.",
                 ]),

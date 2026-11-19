@@ -161,6 +161,7 @@ struct ScroblyticsApp: App {
         DetailChecks.runHeadlessIfRequested()
         WeatherChecks.runHeadlessIfRequested()
         KeychainChecks.runHeadlessIfRequested()
+        BuiltInKeyChecks.runHeadlessIfRequested(container: modelContainer)
         OverviewChecks.runHeadlessIfRequested()
         OverviewDrillChecks.runHeadlessIfRequested(container: modelContainer)
         ArtistMapChecks.runHeadlessIfRequested(container: modelContainer)
@@ -194,6 +195,7 @@ struct ScroblyticsApp: App {
         Task { @MainActor in
             TestProfile.autoConnectIfRequested()
             TestProfile.stopAfterIfRequested()
+            TestProfile.switchKeyAfterIfRequested()
             TestProfile.retryAfterIfRequested()
         }
         TestProfileLauncher.optionHeldAtLaunch = NSEvent.modifierFlags.contains(.option)

@@ -19,6 +19,15 @@ sandboxed, so it is not for the Mac App Store. One script does the whole build; 
    search is skipped, with a warning.
 4. **Tempo-lookup key.** Public builds include the key in `Config/Secrets.xcconfig` (git-ignored; see
    `Config/Secrets.example.xcconfig`). It is readable by anyone who opens the app, so treat it as shared and revocable.
+5. **Last.fm key and shared secret.** Every public build includes the app's own Last.fm API key and shared secret, so people only
+   enter a username. Register an API account named Scroblytics at last.fm/api/account/create with an account that has **Last.fm Pro**
+   (Last.fm requires Pro for whoever owns a key), then add both values to `Config/Secrets.xcconfig` as `LASTFM_API_KEY` and
+   `LASTFM_API_SECRET` yourself (never paste them into a chat or a commit). `scripts/release.sh` checks they are two different 32-digit
+   hex values, that neither is in any tracked file or in the binary, and that both are in the built app's `Info.plist`. They are readable
+   by anyone who opens the app. **If the key's owner lets Pro lapse, or Last.fm suspends the key, syncing stops for everyone who uses
+   the built-in key** (people can switch to their own key under Settings › Sync › advanced), so keep the subscription active and
+   rotate the key by changing these two values and releasing again (a rotation also asks people who use Track Actions to approve
+   access once more).
 
 ## Testing day to day (before any release)
 
@@ -99,7 +108,7 @@ machine on this Mac is enough:
 2. Copy the app to the VM (a DMG copied over ssh has no download marker, so Gatekeeper is not tested there) and run it. To exercise a
    real first import safely, run a copy with the test hooks (`xcodebuild -configuration Release OTHER_SWIFT_FLAGS='$(inherited) -DDEBUG'`),
    re-sign it ad hoc with a profile bundle id, and launch it with `open -n --stderr log --env CFFIXED_USER_HOME=… --env
-   SCROBLYTICS_PROFILE=<name> --env SCROBLYTICS_PROFILE_SEED_LASTFM=<username>:<api key>`. That seeds a real, read-only account
+   SCROBLYTICS_PROFILE=<name> --env SCROBLYTICS_PROFILE_SEED_LASTFM=<username>` (the key built into the app) or `...=<username>:<api key>` (an own key). That seeds a real, read-only account
    into the profile's own Keychain item. Delete the profile's Keychain item before each launch, or macOS shows a permission dialog you
    cannot see. Never put a key in the repository.
 3. Pass criteria: a first import of a large library finishes, the app then runs 6 more minutes with the Overview open (artwork, tags and
@@ -147,7 +156,7 @@ import:
    on made-up data (20 years, 400,000 plays) and then on the copy. Without `…_REAL` it uses only made-up data, which is what
    `scripts/release.sh` runs. A Release build does each step in well under 3 s on a 368k-play, 17-year library.
 4. For work after an import, do a real first import in an isolated test profile (`scripts/first-run-profile.sh <name> --env
-   SCROBLYTICS_PROFILE_SEED_LASTFM=<user>:<key>`, with `SCROBLYTICS_APP_PATH` set to the hooks build) and log CPU every 15 s for the
+   SCROBLYTICS_PROFILE_SEED_LASTFM=<user>`, with `SCROBLYTICS_APP_PATH` set to the hooks build) and log CPU every 15 s for the
    half hour after it finishes: it should settle to a few percent. `sample <pid> 30` then names what is busy (use a Debug build for
    readable names). `SCROBLYTICS_PERF_CHECK=1` on a scratch copy times the artwork lookup against the old per-album query.
 

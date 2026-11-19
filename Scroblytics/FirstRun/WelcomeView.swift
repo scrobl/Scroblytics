@@ -22,18 +22,24 @@ struct WelcomeView: View {
                 VStack(spacing: 28) {
                     header
                     VStack(alignment: .leading, spacing: 22) {
-                        step(1, "Get a Last.fm API key") {
-                            Text("Scroblytics reads your listening history from Last.fm using a key that is yours alone. Registering one takes a minute. Any name and description will do, and Last.fm then shows you an **API key**.")
-                                .foregroundStyle(.secondary)
-                            Text("Last.fm now requires a **Last.fm Pro** subscription on the account that owns an API key. Scroblytics is free, but your key is yours, so your Last.fm account needs Pro for the app to be able to read your history.")
-                                .font(.callout)
-                                .foregroundStyle(.orange)
-                            Button("Open Last.fm’s API page") { NSWorkspace.shared.open(Self.createKeyURL) }
-                        }
-                        step(2, "Enter your username and the key") { accountForm }
-                        step(3, "Import your history") {
-                            Text("As soon as Last.fm confirms the details, the import starts by itself. A long history takes a while, and you can use the app while it runs. If you quit, it carries on where it stopped.")
-                                .foregroundStyle(.secondary)
+                        if form.asksForOwnKey {
+                            step(1, "Get a Last.fm API key") {
+                                Text("Scroblytics reads your listening history from Last.fm using a key. Registering your own takes a minute. Any name and description will do, and Last.fm then shows you an **API key**.")
+                                    .foregroundStyle(.secondary)
+                                Text("Last.fm requires a **Last.fm Pro** subscription on the account that owns an API key, so the account you register the key with needs Pro.")
+                                    .font(.callout)
+                                    .foregroundStyle(.orange)
+                                Button("Open Last.fm’s API page") { NSWorkspace.shared.open(Self.createKeyURL) }
+                            }
+                            step(2, "Enter your username and the key") { accountForm }
+                            step(3, "Import your history") { importNote }
+                        } else {
+                            step(1, "Enter your Last.fm username") {
+                                Text("Scroblytics reads your listening history from Last.fm. Type your username, the name in your profile address (last.fm/user/…). Nothing else is needed.")
+                                    .foregroundStyle(.secondary)
+                                accountForm
+                            }
+                            step(2, "Import your history") { importNote }
                         }
                     }
                     .padding(24)
@@ -63,17 +69,24 @@ struct WelcomeView: View {
         }
     }
 
+    private var importNote: some View {
+        Text("As soon as Last.fm confirms the details, the import starts by itself. A long history takes a while, and you can use the app while it runs. If you quit, it carries on where it stopped.")
+            .foregroundStyle(.secondary)
+    }
+
     private var accountForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Last.fm username", text: $form.username)
                 .textFieldStyle(.roundedBorder)
                 .focused($focused, equals: .username)
-                .onSubmit { focused = .apiKey }
-            TextField("API key", text: $form.apiKey)
-                .textFieldStyle(.roundedBorder)
-                .font(AppTypography.codeInput)
-                .focused($focused, equals: .apiKey)
-                .onSubmit { Task { await form.testAndSave() } }
+                .onSubmit { if form.asksForOwnKey { focused = .apiKey } else { Task { await form.testAndSave() } } }
+            if form.asksForOwnKey {
+                TextField("API key", text: $form.apiKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(AppTypography.codeInput)
+                    .focused($focused, equals: .apiKey)
+                    .onSubmit { Task { await form.testAndSave() } }
+            }
             HStack(spacing: 10) {
                 Button("Test & Save") { Task { await form.testAndSave() } }
                     .buttonStyle(.borderedProminent)
@@ -82,6 +95,10 @@ struct WelcomeView: View {
                     ProgressView().controlSize(.small)
                     Text("Checking with Last.fm…").foregroundStyle(.secondary)
                 }
+            }
+            if LastfmBuiltInKey.isAvailable {
+                Button(form.usesOwnKey ? "Use Scroblytics’ built-in key instead" : "Use my own API key instead (advanced)") { form.usesOwnKey.toggle() }
+                    .buttonStyle(.link).font(AppTypography.supporting)
             }
             switch form.phase {
             case .idle, .checking:
@@ -106,7 +123,7 @@ struct WelcomeView: View {
             Text("Your history is kept only on this Mac. Scroblytics talks to Last.fm to read it, and nothing else about you is sent anywhere.")
                 .font(AppTypography.supporting).foregroundStyle(.secondary).multilineTextAlignment(.center)
             HStack(spacing: 18) {
-                HelpLinkButton(articleID: "lastfm-account", title: "What the key is and where it’s stored")
+                HelpLinkButton(articleID: "lastfm-account", title: "About your Last.fm account and where it’s stored")
                 Button("Restore from a backup…") { openWindow(id: "data-management") }
                     .buttonStyle(.link).font(AppTypography.supporting)
                 Button("Skip for now") { onSkip() }

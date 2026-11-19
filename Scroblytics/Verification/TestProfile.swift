@@ -72,36 +72,46 @@ enum TestProfile {
         guard name != nil, lastfmBaseURLOverride != nil,
               ProcessInfo.processInfo.environment["SCROBLYTICS_PROFILE_SEED_ACCOUNT"] != nil,
               LastfmCredentialsStore.load() == nil else { return }
-        try? LastfmCredentialsStore.save(LastfmCredentials(
-            username: "tester", apiKey: "0123456789abcdef0123456789abcdef", apiSecret: nil, sessionKey: nil
-        ))
+        // `=own` seeds an account on the person's own key (to try moving it to the built-in key); anything else uses the built-in key.
+        let ownKey = ProcessInfo.processInfo.environment["SCROBLYTICS_PROFILE_SEED_ACCOUNT"] == "own"
+        try? LastfmCredentialsStore.save(ownKey
+            ? LastfmCredentials(username: "tester", apiKey: "0123456789abcdef0123456789abcdef", apiSecret: nil, sessionKey: nil)
+            : LastfmCredentials.builtIn(username: "tester"))
     }
 
-    /// With `SCROBLYTICS_PROFILE_SEED_LASTFM=username:apikey`, saves a REAL Last.fm account into the test profile's own Keychain item (never
-    /// the real one: the profile has its own), so a profile can run a true, read-only first import without typing into the Welcome screen.
+    /// With `SCROBLYTICS_PROFILE_SEED_LASTFM=username` (the key built into the app, which a build made with `Config/Secrets.xcconfig` has) or
+    /// `username:apikey` (an own key), saves a REAL Last.fm account into the test profile's own Keychain item (never the real one: the
+    /// profile has its own), so a profile can run a true, read-only first import without typing into the Welcome screen.
     /// Only under a test profile, and only while the profile has no account yet. Nothing is written to Last.fm.
     static func seedRealLastfmAccountIfRequested() {
         guard name != nil, let pair = ProcessInfo.processInfo.environment["SCROBLYTICS_PROFILE_SEED_LASTFM"],
               LastfmCredentialsStore.load() == nil else { return }
-        let parts = pair.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return }
-        try? LastfmCredentialsStore.save(LastfmCredentials(username: parts[0], apiKey: parts[1], apiSecret: nil, sessionKey: nil))
+        let parts = pair.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard let name = parts.first, !name.isEmpty else { return }
+        if parts.count == 2, !parts[1].isEmpty {
+            try? LastfmCredentialsStore.save(LastfmCredentials(username: name, apiKey: parts[1], apiSecret: nil, sessionKey: nil))
+        } else if LastfmBuiltInKey.pair != nil {
+            try? LastfmCredentialsStore.save(LastfmCredentials.builtIn(username: name))
+        }
     }
 
-    /// With `SCROBLYTICS_PROFILE_AUTOCONNECT=username:apikey` (stand-in server only), fills in the account form and presses
-    /// Test & Save a few seconds after launch, as a person would, and prints what happened. For repeatable first-run
-    /// tests of each stand-in scenario without typing.
+    /// With `SCROBLYTICS_PROFILE_AUTOCONNECT=username` or `username:apikey` (stand-in server only), fills in the account form (a username
+    /// alone uses the built-in key, a key after the colon is an own key) and presses Test & Save a few seconds after launch, as a
+    /// person would, and prints what happened. For repeatable first-run tests of each stand-in scenario without typing.
     @MainActor
     static func autoConnectIfRequested() {
         guard name != nil, lastfmBaseURLOverride != nil,
               let pair = ProcessInfo.processInfo.environment["SCROBLYTICS_PROFILE_AUTOCONNECT"] else { return }
-        let parts = pair.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return }
+        let parts = pair.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard let name = parts.first, !name.isEmpty else { return }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(4))
             let form = LastfmAccountForm()
-            form.username = parts[0]
-            form.apiKey = parts[1]
+            form.username = name
+            if parts.count == 2, !parts[1].isEmpty {
+                form.usesOwnKey = true
+                form.apiKey = parts[1]
+            }
             let ok = await form.testAndSave()
             FileHandle.standardError.write(Data("AUTOCONNECT saved=\(ok) result=\(form.phase)\n".utf8))
         }
@@ -121,6 +131,24 @@ enum TestProfile {
             try? await Task.sleep(for: .seconds(seconds))
             log("STOP requested")
             NotificationCenter.default.post(name: .syncStopRequested, object: nil)
+        }
+    }
+
+    /// With `SCROBLYTICS_PROFILE_SWITCH_KEY_AFTER=<seconds>`, does what the "Switch" button on the offer strip does, that long after launch:
+    /// moves the saved account to the key built into the app, then asks for a sync.
+    @MainActor
+    static func switchKeyAfterIfRequested() {
+        guard name != nil, let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_PROFILE_SWITCH_KEY_AFTER"], let seconds = Double(raw) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            let before = LastfmCredentialsStore.load()
+            do {
+                let after = try LastfmKeyMode.switchToBuiltIn()
+                log("KEYSWITCH from own=\(before.map { !$0.usesBuiltInKey } ?? false) to builtIn=\(after.usesBuiltInKey) session=\(after.sessionKey != nil)")
+            } catch {
+                log("KEYSWITCH failed: \(error)")
+            }
+            NotificationCenter.default.post(name: .syncRequested, object: nil)
         }
     }
 

@@ -6,8 +6,9 @@ extension Notification.Name {
     static let lastfmAccountConnected = Notification.Name("LastfmAccountConnected")
 }
 
-/// The username/API-key form shared by Settings › Sync and the welcome screen: checks the pair with Last.fm, saves it
-/// to the Keychain only if it works, and starts the import.
+/// The account form shared by Settings › Sync and the welcome screen: checks the username (and, for a person who uses their own key,
+/// the key) with Last.fm, saves it to the Keychain only if it works, and starts the import. By default only a username is needed:
+/// requests use the key built into the app. `usesOwnKey` is the advanced alternative.
 @MainActor
 @Observable
 final class LastfmAccountForm {
@@ -20,11 +21,16 @@ final class LastfmAccountForm {
 
     var username = ""
     var apiKey = ""
+    /// The person chose to use their own API key (advanced).
+    var usesOwnKey = false
     private(set) var phase = Phase.idle
+
+    /// Whether the form needs an API key from the person: they chose their own, or this build has no built-in key to use.
+    var asksForOwnKey: Bool { usesOwnKey || !LastfmBuiltInKey.isAvailable }
 
     var isChecking: Bool { phase == .checking }
     var canSubmit: Bool {
-        !username.trimmingCharacters(in: .whitespaces).isEmpty && !apiKey.trimmingCharacters(in: .whitespaces).isEmpty && !isChecking
+        !username.trimmingCharacters(in: .whitespaces).isEmpty && (!asksForOwnKey || !apiKey.trimmingCharacters(in: .whitespaces).isEmpty) && !isChecking
     }
 
     /// Fills the fields from the saved account, if there is one. Returns whether there was one.
@@ -32,13 +38,15 @@ final class LastfmAccountForm {
     func loadSaved() -> Bool {
         guard let saved = LastfmCredentialsStore.load() else { return false }
         username = saved.username
-        apiKey = saved.apiKey
+        usesOwnKey = !saved.usesBuiltInKey
+        apiKey = saved.usesBuiltInKey ? "" : saved.apiKey
         return true
     }
 
     func reset() {
         username = ""
         apiKey = ""
+        usesOwnKey = false
         phase = .idle
     }
 
@@ -48,24 +56,28 @@ final class LastfmAccountForm {
     func testAndSave() async -> Bool {
         guard canSubmit else { return false }
         phase = .checking
-        let outcome = await LastfmAccountCheck.validate(username: username, apiKey: apiKey)
+        let ownKey = asksForOwnKey
+        let outcome = await LastfmAccountCheck.validate(username: username, apiKey: ownKey ? apiKey : nil)
         switch outcome {
         case .invalid(let message):
             phase = .failed(message)
             return false
         case .valid(let account):
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Saving the same account again keeps its write access (secret and session); a different account or key
-            // starts without it, as before.
-            var credentials = LastfmCredentials(username: account.username, apiKey: key, apiSecret: nil, sessionKey: nil)
-            if let existing = LastfmCredentialsStore.load(), existing.apiKey == key, existing.username.caseInsensitiveCompare(account.username) == .orderedSame {
+            // Saving the same account again keeps its write access (secret and session); a different account or key (or a move
+            // between the built-in key and an own one) starts without it, because a session belongs to one key.
+            var credentials = ownKey
+                ? LastfmCredentials(username: account.username, apiKey: key, apiSecret: nil, sessionKey: nil)
+                : LastfmCredentials.builtIn(username: account.username)
+            if let existing = LastfmCredentialsStore.load(), existing.usesBuiltInKey == !ownKey, existing.apiKey == credentials.apiKey,
+               existing.username.caseInsensitiveCompare(account.username) == .orderedSame {
                 credentials.apiSecret = existing.apiSecret
                 credentials.sessionKey = existing.sessionKey
             }
             do {
                 try LastfmCredentialsStore.save(credentials)
             } catch {
-                phase = .failed("Last.fm accepted these, but they couldn’t be saved: \(describeSyncError(error))")
+                phase = .failed("Last.fm accepted the account, but it couldn’t be saved: \(describeSyncError(error))")
                 return false
             }
             username = account.username

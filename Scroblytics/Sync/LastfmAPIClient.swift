@@ -81,8 +81,8 @@ extension LastfmAPIError: LocalizedError {
         switch self {
         case .api(let code, let message):
             switch code {
-            case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key that used to work stops working if that subscription lapses."
-            case 26: return "Last.fm has suspended this API key. Since 1 December 2026 a key also needs its owner to have Last.fm Pro."
+            case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key that used to work stops working if that subscription lapses.\(LastfmBuiltInKey.isAvailable ? " You can switch to Scroblytics’ built-in key there instead." : "")"
+            case 26: return "Last.fm has suspended this API key. Since 1 December 2026 a key also needs its owner to have Last.fm Pro.\(LastfmBuiltInKey.isAvailable ? " You can switch to Scroblytics’ built-in key in Settings › Sync instead." : "")"
             case 29: return "Last.fm is limiting requests from this connection, even after waiting several minutes. Wait a few minutes, then press Retry."
             case 17: return "Last.fm needs a login to show this data. If you hid your recent listening in your Last.fm privacy settings, that is the cause."
             case 4, 9: return "Last.fm rejected the session. Reconnect Track Actions in Settings › Sync."
@@ -102,6 +102,10 @@ extension LastfmAPIError: LocalizedError {
 func describeSyncError(_ error: Error) -> String {
     if error is CancellationError { return "Cancelled." }
     if let storeProblem = StoreProblem.describe(error) { return storeProblem }
+    // A refused key reads differently when it is the one built into the app: the person can't fix that key, only use their own.
+    if case .api(let code, _)? = error as? LastfmAPIError, code == 10 || code == 26, LastfmCredentialsStore.cachedAccount?.usesBuiltInKey == true {
+        return LastfmBuiltInKey.isAvailable ? LastfmAccountCheck.builtInKeyRefused : LastfmAccountCheck.builtInMissing
+    }
     if let described = (error as? LocalizedError)?.errorDescription { return described }
     return error.localizedDescription
 }

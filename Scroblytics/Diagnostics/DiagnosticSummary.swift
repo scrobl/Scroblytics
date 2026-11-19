@@ -23,6 +23,8 @@ struct DiagnosticSummary: Sendable {
         var freeDiskMB: Int?
         var databaseMB: Int?
         var accountConnected = false
+        /// Whether the saved account uses the key built into the app (true) or the person's own (false); nil when there is no account.
+        var usesBuiltInKey: Bool?
         /// The macOS status when the Keychain wouldn't give up the saved account (so "not connected" would be untrue).
         var keychainProblem: OSStatus?
         var lastSyncedAt: Date?
@@ -59,6 +61,7 @@ struct DiagnosticSummary: Sendable {
         } else {
             lines.append("  Last.fm account: \(i.accountConnected ? "connected" : "not connected")")
         }
+        if let builtIn = i.usesBuiltInKey { lines.append("  Last.fm key: \(builtIn ? "built in" : "the person's own")") }
         if let problem = i.storeProblem {
             lines.append("  Imported: unknown (the database could not be read: \(clean(problem)))")
         } else {
@@ -135,6 +138,7 @@ struct DiagnosticSummary: Sendable {
         }
         let credentials = await Task.detached(priority: .userInitiated) { loadCredentials() }.value
         i.accountConnected = credentials != nil
+        i.usesBuiltInKey = credentials?.usesBuiltInKey
         i.keychainProblem = credentials == nil ? LastfmCredentialsStore.lastProblem : nil
         i.offline = ConnectivityGate.isOffline
         i.askEngine = AskSettingsStore.load().selected.label

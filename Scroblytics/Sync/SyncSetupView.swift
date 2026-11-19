@@ -12,11 +12,13 @@ extension Notification.Name {
     static let lastfmCredentialsDidChange = Notification.Name("LastfmCredentialsDidChange")
 }
 
-/// Settings › Sync: the Last.fm account (username and API key) and the optional write access ("Track Actions").
+/// Settings › Sync: the Last.fm account (a username; an own API key is optional) and the optional write access ("Track Actions").
 /// Syncing itself lives in the toolbar and the Library menu.
 struct SyncSetupView: View {
     @State private var form = LastfmAccountForm()
     @State private var hasSavedCredentials = false
+    /// The saved account uses the key built into the app (false: the person's own key).
+    @State private var savedUsesBuiltInKey = false
     /// Set when an account is probably saved but the Keychain wouldn't give it up (see `CredentialsProblemText`).
     @State private var readProblem: OSStatus?
 
@@ -38,13 +40,36 @@ struct SyncSetupView: View {
             Section("Last.fm Account") {
                 TextField("Username", text: $form.username)
                     .textFieldStyle(.roundedBorder)
-                TextField("API Key", text: $form.apiKey)
-                    .textFieldStyle(.roundedBorder)
-                    .font(AppTypography.codeInput)
-                Text("Get an API key at last.fm/api/account/create — the sync layer has no bundled key of its own. Last.fm requires Last.fm Pro on the account that owns a key.")
-                    .font(AppTypography.supporting)
-                    .foregroundStyle(.secondary)
-                HelpLinkButton(articleID: "lastfm-account", title: "What these are and where they’re stored")
+                if form.asksForOwnKey {
+                    TextField("API Key", text: $form.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .font(AppTypography.codeInput)
+                    Text(LastfmBuiltInKey.isAvailable
+                         ? "Your own API key, from last.fm/api/accounts (or register one at last.fm/api/account/create). Last.fm requires Last.fm Pro on the account that owns a key. Changing the key means approving Track Actions again."
+                         : "This copy of Scroblytics doesn’t include a Last.fm key, so enter your own: register one at last.fm/api/account/create. Last.fm requires Last.fm Pro on the account that owns a key.")
+                        .font(AppTypography.supporting)
+                        .foregroundStyle(.secondary)
+                    // A saved own-key account gets the one-click switch below instead.
+                    if LastfmBuiltInKey.isAvailable, !(hasSavedCredentials && !savedUsesBuiltInKey) {
+                        Button("Use Scroblytics’ built-in key instead") { form.usesOwnKey = false }
+                            .buttonStyle(.link).font(AppTypography.supporting)
+                    }
+                } else {
+                    Text("Scroblytics uses its own Last.fm key, so a username is all it needs.")
+                        .font(AppTypography.supporting)
+                        .foregroundStyle(.secondary)
+                    Button("Use my own API key instead (advanced)") { form.usesOwnKey = true }
+                        .buttonStyle(.link).font(AppTypography.supporting)
+                }
+                if hasSavedCredentials, !savedUsesBuiltInKey, LastfmBuiltInKey.isAvailable {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("You’re using your own API key. Scroblytics now has its own, so yours (and the Last.fm Pro it needs) isn’t required any more. Switching keeps all your data. If you use Track Actions, you approve them once more in your browser.")
+                            .font(AppTypography.supporting)
+                            .foregroundStyle(.secondary)
+                        Button("Switch to Scroblytics’ built-in key") { switchToBuiltInKey() }
+                    }
+                }
+                HelpLinkButton(articleID: "lastfm-account", title: "About your Last.fm account and where it’s stored")
                 if let readProblem, !hasSavedCredentials {
                     Label("\(CredentialsProblemText.headline) \(CredentialsProblemText.reason(readProblem)) \(CredentialsProblemText.guidance(readProblem))", systemImage: "lock.trianglebadge.exclamationmark")
                         .foregroundStyle(.orange)
@@ -99,7 +124,7 @@ struct SyncSetupView: View {
             Button("Remove Account", role: .destructive) { removeAccount() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Scroblytics forgets your username, API key and write access. Your synced history, loved tracks, edits and everything else on this Mac are kept, and the authorization you gave Last.fm is not revoked (you can do that in your Last.fm account settings). You can add the account again at any time.")
+            Text("Scroblytics forgets your username, any API key you entered and your write access. Your synced history, loved tracks, edits and everything else on this Mac are kept, and the authorization you gave Last.fm is not revoked (you can do that in your Last.fm account settings). You can add the account again at any time.")
         }
     }
 
@@ -122,8 +147,21 @@ struct SyncSetupView: View {
         if let saved {
             form.loadSaved()
             hasSavedCredentials = true
+            savedUsesBuiltInKey = saved.usesBuiltInKey
             hasSecret = saved.apiSecret != nil
             isConnected = saved.sessionKey != nil
+        }
+    }
+
+    /// One click for someone on their own key: the username and all data stay, write access has to be approved again.
+    private func switchToBuiltInKey() {
+        do {
+            try LastfmKeyMode.switchToBuiltIn()
+            trackActionsError = nil
+            pendingAuthToken = nil
+            loadCredentials()
+        } catch {
+            trackActionsError = "Couldn’t switch the key: \(describeSyncError(error))"
         }
     }
 
@@ -132,6 +170,7 @@ struct SyncSetupView: View {
         guard await form.testAndSave() else { return }
         let saved = LastfmCredentialsStore.load()
         hasSavedCredentials = true
+        savedUsesBuiltInKey = saved?.usesBuiltInKey ?? false
         hasSecret = saved?.apiSecret != nil
         isConnected = saved?.sessionKey != nil
     }
@@ -172,6 +211,11 @@ struct SyncSetupView: View {
                 Button("Cancel") { self.pendingAuthToken = nil }
             }
         } else {
+            if savedUsesBuiltInKey {
+                Text("Connect write access to love tracks, add or remove your own tags on artists, albums, and tracks, and scrobble missed plays from Unscrobbled Plays. Last.fm asks you to approve it in your browser.")
+                    .font(AppTypography.supporting)
+                    .foregroundStyle(.secondary)
+            }
             Button("Connect") { Task { await startConnect() } }
                 .disabled(isConnecting || Connectivity.shared.isOffline)
                 .help(Connectivity.shared.isOffline ? "Offline mode is on. Go online to connect." : "")
@@ -263,7 +307,8 @@ struct SyncSetupView: View {
         credentials.sessionKey = nil
         do {
             try LastfmCredentialsStore.save(credentials)
-            hasSecret = false
+            // On the built-in key the secret is always there; only an own key's secret is forgotten.
+            hasSecret = credentials.usesBuiltInKey
             isConnected = false
             pendingAuthToken = nil
         } catch {

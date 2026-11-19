@@ -206,6 +206,7 @@ struct ContentView: View {
                     )
                 }
                 CredentialsProblemStrip()
+                BuiltInKeyOfferStrip()
                 ImportStatusStrips(container: modelContainer, isSyncing: isSyncing, onResume: { startSync(full: false) })
                 RecheckStrip(container: modelContainer, isSyncing: isSyncing, onCheckNow: { startRecheck() })
                 ScrobblerWatchStrip(onReview: {

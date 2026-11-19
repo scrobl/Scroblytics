@@ -35,6 +35,7 @@
 		11E65B77376AA899B7304F4F /* WeatherClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A4594A4430E78905ECA766 /* WeatherClient.swift */; };
 		127601E563EC4B73A4CEF263 /* CrashReports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E615F12ACE0E17618DE7D85 /* CrashReports.swift */; };
 		12CF25E2750E1D38CAC0F1CF /* AppleMusicPlaylistReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1948E6E58F2067CC9B8F6F40 /* AppleMusicPlaylistReader.swift */; };
+		12FCE708C01D7BEFBD1016BB /* LastfmKeyMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D266989C0041FCC5D2252C9 /* LastfmKeyMode.swift */; };
 		135D44F8C31C1FE279FC1895 /* UnscrobbledPlaysScrobbling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 554B89E7B2079D5450BFCB5A /* UnscrobbledPlaysScrobbling.swift */; };
 		14CFB04C9D09528375F24FA9 /* ToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D5DBB1A5B2B942A80D8173 /* ToolsView.swift */; };
 		14EAB428037966584C74D50D /* WeatherSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E799C4805DA9F1D11A928E2C /* WeatherSettingsView.swift */; };
@@ -52,6 +53,7 @@
 		1FE9FED8332F879FE59AF856 /* QueryRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 374B5554658A3F972AB971D1 /* QueryRun.swift */; };
 		20CB87F7F29E936346E533BD /* PopularityMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 545808E4F8A91ED3DCC0DA75 /* PopularityMath.swift */; };
 		211860B3887097FD419BAC90 /* AskPatterns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4726F522DC2428E46AB9FD8E /* AskPatterns.swift */; };
+		213D01B770D20AC03097B7DA /* BuiltInKeyChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BC242CBFCAB26320986C2F /* BuiltInKeyChecks.swift */; };
 		2161ABA1199460480192D18A /* QueryOriginFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10EFC12F7506688701B03180 /* QueryOriginFields.swift */; };
 		23608BDA09943439B4A0A81E /* TestProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F42ED7142076CF4DF72172 /* TestProfilesView.swift */; };
 		240CC012A858686E8B34F438 /* ConsistencyChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5033C685E21358856C1B32B6 /* ConsistencyChecks.swift */; };
@@ -339,6 +341,7 @@
 		CFF5E536E8028412E8939396 /* MissingDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17F116B1650D326F18D206 /* MissingDataView.swift */; };
 		D004572DB47FBE61EBDD03E9 /* QueryBuilderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49096B678D3666625628A026 /* QueryBuilderModel.swift */; };
 		D043F18AD3B5A5353A122098 /* QueryScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D1D3672276B33D19658D2E7 /* QueryScope.swift */; };
+		D0864E190F6710F73F630D92 /* LastfmBuiltInKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2F0F6363C9B5944ACD2B78 /* LastfmBuiltInKey.swift */; };
 		D0DA7504A2EF570EDC97822B /* RabbitHoleCandidates.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B802548ED63D482898828B /* RabbitHoleCandidates.swift */; };
 		D11FAA7BA3C0C47A4F2108A2 /* TrendsWeatherMapViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A4561C05BA8422560B62253 /* TrendsWeatherMapViews.swift */; };
 		D18E009A51A096D8481CD5D3 /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09293A443493E8814F6A0B23 /* ImageStore.swift */; };
@@ -374,6 +377,7 @@
 		E506C21FCC72703B0B476A91 /* FadingFavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B660323F181943A0585DFA1A /* FadingFavoritesView.swift */; };
 		E64EDF56AB85FE18A1ADFF46 /* HelpContentAskQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA6B32AB7724980D0CD927E /* HelpContentAskQuery.swift */; };
 		E6D315C775051CAFF8B784D1 /* TrendsDecadeRiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06364A6367779D744018FB8 /* TrendsDecadeRiver.swift */; };
+		E7744EE1264178E325077D65 /* BuiltInKeyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F6934A565495F0509DA97E /* BuiltInKeyViews.swift */; };
 		E8829CDD73AB0FF868BD093E /* AskModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC3EA26E5EA1B6ABCE53D8F /* AskModel.swift */; };
 		E9F5598835343DFA27F5CB87 /* TrendsLongTailChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3E10EEBAACE1153F57F971 /* TrendsLongTailChart.swift */; };
 		EB2DB5EFD29485E6DA17C9E8 /* ShareArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E03FC3689D1ECB99FC9699 /* ShareArtwork.swift */; };
@@ -475,6 +479,7 @@
 		265B3C3178DD9D75CC91CA0E /* BackupCoverageChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupCoverageChecks.swift; sourceTree = "<group>"; };
 		26D30E1EDDF0E68BB694FD8A /* AskWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskWire.swift; sourceTree = "<group>"; };
 		2780F0F6A4046C783247034C /* AppleMusicDetailsChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppleMusicDetailsChecks.swift; sourceTree = "<group>"; };
+		27F6934A565495F0509DA97E /* BuiltInKeyViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BuiltInKeyViews.swift; sourceTree = "<group>"; };
 		2800500006C57670CDEC55D5 /* PopularityMarker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopularityMarker.swift; sourceTree = "<group>"; };
 		296FB6FDDDCDEA4FC2BD10A1 /* QueryScrobbleFields.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QueryScrobbleFields.swift; sourceTree = "<group>"; };
 		29BDBA28F434F1CF2E264E4D /* TrackDetailModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrackDetailModel.swift; sourceTree = "<group>"; };
@@ -591,6 +596,7 @@
 		6C62FDE003685B4814E2ADBF /* AppleMusicMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicMatcher.swift; sourceTree = "<group>"; };
 		6CCD6B341E970BDCE14EEC73 /* OverviewSyncEventSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewSyncEventSections.swift; sourceTree = "<group>"; };
 		6D25A5F06F8BEAC905DF929D /* AppTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTypography.swift; sourceTree = "<group>"; };
+		6D266989C0041FCC5D2252C9 /* LastfmKeyMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LastfmKeyMode.swift; sourceTree = "<group>"; };
 		6E91E2A52193C85F673A1989 /* OverviewGoalsSection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OverviewGoalsSection.swift; sourceTree = "<group>"; };
 		6FB4B0817343EE8CD301C15C /* BackgroundWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundWork.swift; sourceTree = "<group>"; };
 		70FAD58FEC9A2A2B27849881 /* MissingData.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MissingData.swift; sourceTree = "<group>"; };
@@ -630,6 +636,7 @@
 		87AA681809AD730D0ACCCE73 /* DiagnosticSummary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiagnosticSummary.swift; sourceTree = "<group>"; };
 		895E6E93613F2189755A778C /* SyncEventsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEventsEngine.swift; sourceTree = "<group>"; };
 		8A2DE804C2BD59559CC51D84 /* UpdateViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateViews.swift; sourceTree = "<group>"; };
+		8B2F0F6363C9B5944ACD2B78 /* LastfmBuiltInKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LastfmBuiltInKey.swift; sourceTree = "<group>"; };
 		8B712979706D0BE6C002EF37 /* QueryValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValue.swift; sourceTree = "<group>"; };
 		8C35B8D484C94D4971026C5A /* Goals.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Goals.swift; sourceTree = "<group>"; };
 		8D64F7223BFEA111C35D60B6 /* ShareProfileCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareProfileCardView.swift; sourceTree = "<group>"; };
@@ -716,6 +723,7 @@
 		BF2A82A15900AAB1A3F8B798 /* AlbumDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AlbumDetailView.swift; sourceTree = "<group>"; };
 		C1CAA97BD6C70DC68F155BA6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		C2313144945136882B6F87B5 /* UnscrobbledPlaysScrobbleSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnscrobbledPlaysScrobbleSheet.swift; sourceTree = "<group>"; };
+		C2BC242CBFCAB26320986C2F /* BuiltInKeyChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BuiltInKeyChecks.swift; sourceTree = "<group>"; };
 		C2F7925A42B90D8548A09413 /* LovedSyncPlan.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LovedSyncPlan.swift; sourceTree = "<group>"; };
 		C4C7D684A3A9C8E4893EBB19 /* ListeningFlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningFlowLayout.swift; sourceTree = "<group>"; };
 		C59612875235DD5729636341 /* QueryMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryMatcher.swift; sourceTree = "<group>"; };
@@ -898,6 +906,7 @@
 				A9FF2274FCCAC88EE2F153C0 /* ArtistMapChecks.swift */,
 				A7463128650E868603987B22 /* OriginChecks.swift */,
 				393426330DDF1ED3E867E950 /* OriginMapChecks.swift */,
+				C2BC242CBFCAB26320986C2F /* BuiltInKeyChecks.swift */,
 			);
 			path = Verification;
 			sourceTree = "<group>";
@@ -1066,6 +1075,7 @@
 				39A8D38A2DB7D07F0FAD2343 /* CredentialsProblemViews.swift */,
 				08578F3BAC9EB22A591C7E89 /* RecheckStrip.swift */,
 				E98C201622625E934020B169 /* ScrobblerWatchViews.swift */,
+				27F6934A565495F0509DA97E /* BuiltInKeyViews.swift */,
 			);
 			name = FirstRun;
 			path = FirstRun;
@@ -1295,6 +1305,8 @@
 				2F520EE53DEC38E1709BBFC6 /* SyncLogWording.swift */,
 				ECD9B8292428893C7146DE40 /* ScrobblerWatch.swift */,
 				AFE8BB25CE5F0E373418B740 /* ScrobblerWatchStore.swift */,
+				8B2F0F6363C9B5944ACD2B78 /* LastfmBuiltInKey.swift */,
+				6D266989C0041FCC5D2252C9 /* LastfmKeyMode.swift */,
 			);
 			path = Sync;
 			sourceTree = "<group>";
@@ -2027,6 +2039,10 @@
 				59E4E9A74FBF39DCC6DACC69 /* TrendsLocalSceneChart.swift in Sources */,
 				63CD23EBF3CC05D62B5E7367 /* CountryPassport.swift in Sources */,
 				859C62BD6803FFA8B1B0CCD6 /* TrendsPassportChart.swift in Sources */,
+				D0864E190F6710F73F630D92 /* LastfmBuiltInKey.swift in Sources */,
+				12FCE708C01D7BEFBD1016BB /* LastfmKeyMode.swift in Sources */,
+				213D01B770D20AC03097B7DA /* BuiltInKeyChecks.swift in Sources */,
+				E7744EE1264178E325077D65 /* BuiltInKeyViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2042,7 +2058,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2054,7 +2070,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.9.20;
+				MARKETING_VERSION = 0.9.21;
 				PRODUCT_BUNDLE_IDENTIFIER = app.scroblytics.Scroblytics;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
@@ -2137,7 +2153,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2149,7 +2165,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.9.20;
+				MARKETING_VERSION = 0.9.21;
 				PRODUCT_BUNDLE_IDENTIFIER = app.scroblytics.Scroblytics;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;

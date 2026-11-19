@@ -7,8 +7,10 @@
 #   scripts/first-run-profile.sh <name> --fake <scenario>     also start a stand-in Last.fm server (see scripts/fake-lastfm.py)
 #   scripts/first-run-profile.sh <name> --fake <scenario> --seed   also have the app save made-up credentials in the
 #                                                            profile's own Keychain item, so it syncs from the stand-in at launch
+#   scripts/first-run-profile.sh <name> --fake <scenario> --seed-own-key   the same, but the saved account is on its own API key (to try
+#                                                            moving it to the key built into the app)
 #   scripts/first-run-profile.sh <name> --fake <scenario> --env KEY=VALUE   pass an environment variable to the app, e.g.
-#                                                            SCROBLYTICS_PROFILE_AUTOCONNECT=name:key (types the account in for you)
+#                                                            SCROBLYTICS_PROFILE_AUTOCONNECT=name (or name:key for an own key; types the account in for you)
 #   scripts/first-run-profile.sh <name> --fake <scenario> --port 8800
 #   scripts/first-run-profile.sh <name> --fake <scenario> --artists-file names.txt [--similar-latency-ms 300]   let the stand-in answer
 #                                                            artist.getSimilar (the Artist Map) with these artist names
@@ -75,6 +77,7 @@ while [ $# -gt 0 ]; do
     --fake) scenario="${2:?scenario}"; shift ;;
     --port) port="${2:?port}"; shift ;;
     --seed) seed=1 ;;
+    --seed-own-key) seed=own ;;
     --latency-ms) latency_ms="${2:?milliseconds}"; shift ;;
     --artists-file) artists_file="${2:?file}"; shift ;;
     --similar-latency-ms) similar_latency_ms="${2:?milliseconds}"; shift ;;
@@ -135,9 +138,9 @@ if [ -n "$scenario" ]; then
   extra_env+=("SCROBLYTICS_UPDATE_FEED_URL=http://127.0.0.1:$port/repos/scrobl/Scroblytics/releases?per_page=10")
 fi
 
-if [ "$seed" -eq 1 ]; then
+if [ "$seed" != 0 ]; then
   [ -n "$scenario" ] || { echo "--seed needs --fake (it saves made-up credentials that only the stand-in server accepts)." >&2; exit 1; }
-  extra_env+=("SCROBLYTICS_PROFILE_SEED_ACCOUNT=1")
+  extra_env+=("SCROBLYTICS_PROFILE_SEED_ACCOUNT=$([ "$seed" = own ] && echo own || echo 1)")
 fi
 
 [ ${#user_env[@]} -eq 0 ] || extra_env+=("${user_env[@]}")

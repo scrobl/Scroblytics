@@ -9,6 +9,10 @@ import SwiftUI
 enum LayoutSnapshots {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_KEYMODE"] {
+            snapshotKeyMode(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_ASKENGINE"] {
             snapshotAskEngine(into: folder)
             return
@@ -1023,6 +1027,53 @@ enum LayoutSnapshots {
                     }
                 }
             }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_KEYMODE=<folder>`: the welcome screen with and without a built-in key, the Settings › Sync account section
+    /// for an account on the built-in key and on an own key, and the one-time offer strip, light and dark, at a few widths. The Keychain
+    /// is replaced by stubs, so nothing real is read.
+    @MainActor
+    private static func snapshotKeyMode(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let pair = LastfmBuiltInKey.Pair(key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", secret: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+            let own = LastfmCredentials(username: "listener", apiKey: "cccccccccccccccccccccccccccccccc", apiSecret: nil, sessionKey: nil)
+            func install(_ credentials: LastfmCredentials?) {
+                let data = credentials.flatMap { try? LastfmCredentialsStore.encodedForStorage($0) }
+                LastfmCredentialsStore.useRawReaderForTesting { (data == nil ? errSecItemNotFound : errSecSuccess, data) }
+            }
+            @MainActor func render(_ name: String, _ make: () -> AnyView, widths: [CGFloat], height: CGFloat) async {
+                for width in widths {
+                    for dark in [true, false] {
+                        let host = NSHostingView(rootView: make().frame(width: width, height: height).environment(\.colorScheme, dark ? .dark : .light))
+                        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+                        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                        window.contentView = host
+                        for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(120)); host.layoutSubtreeIfNeeded() }
+                        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                            host.cacheDisplay(in: host.bounds, to: rep)
+                            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(Int(width))-\(dark ? "dark" : "light").png"))
+                        }
+                    }
+                }
+            }
+            // Welcome: a built-in key (username only), and a build without one (asks for the key).
+            LastfmBuiltInKey.useForTesting(.pair(pair)); install(nil)
+            await render("welcome-builtin", { AnyView(WelcomeView(onSkip: {})) }, widths: [900, 520], height: 760)
+            LastfmBuiltInKey.useForTesting(.unavailable)
+            await render("welcome-nokey", { AnyView(WelcomeView(onSkip: {})) }, widths: [900], height: 860)
+            // Settings › Sync: an account on the built-in key, and one on an own key (with the offer).
+            LastfmBuiltInKey.useForTesting(.pair(pair))
+            install(.builtIn(username: "listener"))
+            await render("settings-builtin", { AnyView(SyncSetupView()) }, widths: [620], height: 720)
+            install(own)
+            await render("settings-ownkey", { AnyView(SyncSetupView()) }, widths: [620], height: 800)
+            // The one-time offer strip.
+            let history = HistoryStatus(container: container)
+            await render("offer-strip", { AnyView(BuiltInKeyOfferStrip().environment(history)) }, widths: [1100, 700, 440], height: 70)
+            LastfmBuiltInKey.useForTesting(.none)
             exit(0)
         }
     }

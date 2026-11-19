@@ -1,3 +1,4 @@
 // Build settings shared by every configuration. Secrets.xcconfig is optional and git-ignored; without it the
-// built-in GetSongBPM key is empty and tempos come from Deezer alone.
+// built-in GetSongBPM key is empty (tempos come from Deezer alone) and there is no built-in Last.fm key
+// (the app then asks people for their own).
 #include? "Secrets.xcconfig"

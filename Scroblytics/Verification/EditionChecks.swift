@@ -482,6 +482,29 @@ enum EditionChecks {
                 check("the edition holding the tracks you played ranks first, whatever the name asked for", bonusPlayed.first?.album == deluxe && bonusPlayed.first?.observedMatches == 2, "\(bonusPlayed.map { "\($0.album) \($0.observedMatches)" })")
                 let twice = AppleMusicMatcher.groupIntoEditions(regular + regular + regular.map { Raw(title: $0.title, album: standard.uppercased() + "  ", trackNumber: $0.trackNumber, discNumber: 1, seconds: 200) }, targetAlbum: standard, observedTitles: [])
                 check("two copies of one release (even with different case or spacing) are still one edition with its tracks listed once", twice.count == 1 && twice[0].tracks.count == 3, "\(twice.map { "\($0.album) \($0.tracks.count)" })")
+                // "Already played" counts an edition's own plays only: plays scrobbled under the plain album's name are not the anniversary
+                // edition's, even where the song titles are the same once edition notes are folded away.
+                let key = AppleMusicMatcher.exactAlbumKey
+                let split = AppleMusicMatcher.groupIntoEditions(
+                    regular + anniversary, targetAlbum: deluxe, observedTitles: ["One", "Two", "Three", "Live One", "Live Two"],
+                    playedByAlbumName: [key(standard): ["One", "Two", "Three"], key(deluxe): ["Live One", "Live Two"]]
+                )
+                check("a plain album's plays are counted for it (3) and not for its anniversary edition, which counts its own plays (2)",
+                      split.first { $0.album == standard }?.observedMatches == 3 && split.first { $0.album == deluxe }?.observedMatches == 2,
+                      "\(split.map { "\($0.album) \($0.observedMatches)" })")
+                check("only the tracks played under the edition's own name are marked played in it",
+                      split.first { $0.album == deluxe }?.playedTitles == ["live one", "live two"], "\(split.first { $0.album == deluxe }?.playedTitles as Any)")
+                let onlyPlain = AppleMusicMatcher.groupIntoEditions(
+                    regular + anniversary, targetAlbum: standard, observedTitles: ["One", "Two", "Three"], playedByAlbumName: [key(standard): ["One", "Two", "Three"]]
+                )
+                check("with nothing played under the anniversary edition's name, none of the plain album's plays count for it",
+                      onlyPlain.first { $0.album == deluxe }?.observedMatches == 0 && onlyPlain.first?.album == standard, "\(onlyPlain.map { "\($0.album) \($0.observedMatches)" })")
+                let unknownName = AppleMusicMatcher.groupIntoEditions(
+                    regular + anniversary, targetAlbum: standard, observedTitles: ["One", "Two", "Three"], playedByAlbumName: [key("Album One [Remastered]"): ["One", "Two", "Three"]]
+                )
+                check("when no release carries the name the plays were scrobbled under, all the plays are compared with every edition",
+                      unknownName.first { $0.album == standard }?.observedMatches == 3 && unknownName.first { $0.album == deluxe }?.observedMatches == 3,
+                      "\(unknownName.map { "\($0.album) \($0.observedMatches)" })")
                 check("a search that finds only one album gives one edition", AppleMusicMatcher.groupIntoEditions(anniversary, targetAlbum: deluxe, observedTitles: []).count == 1)
             }
 

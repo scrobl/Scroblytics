@@ -34,9 +34,11 @@ enum AppleMusicMatcher {
         /// The exact raw album tag this edition's tracks carry in the library.
         let album: String
         let tracks: [Track]
-        /// How many of this edition's distinct tracks match the user's already-
-        /// scrobbled titles for this album group — a ranking hint, not a silent pick.
+        /// How many of this edition's distinct tracks match what the user played of THIS edition (see `groupIntoEditions`)
+        /// — a ranking hint, not a silent pick.
         let observedMatches: Int
+        /// The played titles this edition is compared with (folded as `normalizeTrackTitleFolded`), for marking its tracks as played.
+        var playedTitles: Set<String> = []
     }
 
     enum MatchError: Error, LocalizedError {
@@ -63,7 +65,11 @@ enum AppleMusicMatcher {
     /// artist+album at all; the caller decides how to handle zero/one/many editions.
     /// `observedTitles` (the user's own already-scrobbled track titles for this
     /// album) ranks the most likely edition first — a hint, never a silent pick.
-    static func findAlbumEditions(artist: String, album: String, observedTitles: [String]) async throws -> [Edition] {
+    /// `playedByAlbumName` is the same plays split by the album name they were scrobbled under (keyed by `exactAlbumKey`): plays
+    /// scrobbled under one edition's name count for that edition only.
+    static func findAlbumEditions(
+        artist: String, album: String, observedTitles: [String], playedByAlbumName: [String: [String]] = [:]
+    ) async throws -> [Edition] {
         let script = """
         on trimText(t)
             set t to t as string
@@ -121,7 +127,7 @@ enum AppleMusicMatcher {
 
         let output = try await runAppleScript(script, arguments: [artist.trimmingCharacters(in: .whitespaces), album.trimmingCharacters(in: .whitespaces)])
         let candidates = parseCandidates(output)
-        return groupIntoEditions(candidates, targetAlbum: album, observedTitles: observedTitles)
+        return groupIntoEditions(candidates, targetAlbum: album, observedTitles: observedTitles, playedByAlbumName: playedByAlbumName)
     }
 
     /// Finds a track in the user's Music.app library and returns its runtime.
@@ -344,7 +350,14 @@ enum AppleMusicMatcher {
     /// Groups the songs Music returned by the exact album they are on, so each release of the album (the plain one, the anniversary
     /// edition…) is its own choice with its own tracks. Two copies of the same release (an explicit and a clean one) have the same name
     /// and still form one edition, which `toAlbumTracks` de-duplicates.
-    static func groupIntoEditions(_ candidates: [RawCandidate], targetAlbum: String, observedTitles: [String]) -> [Edition] {
+    ///
+    /// What counts as "already played" for an edition: when any release found carries the name some of the plays were scrobbled under,
+    /// each edition is compared only with the plays scrobbled under its own name (so the plays of the plain album are never counted for
+    /// its anniversary edition, and the other way round). When no release carries a played name (a spelling Music doesn't use), all
+    /// the plays are compared with every edition, as `observedTitles`.
+    static func groupIntoEditions(
+        _ candidates: [RawCandidate], targetAlbum: String, observedTitles: [String], playedByAlbumName: [String: [String]] = [:]
+    ) -> [Edition] {
         var groups: [String: [RawCandidate]] = [:]
         var groupsOrdered: [String] = []
         for c in candidates {
@@ -353,16 +366,19 @@ enum AppleMusicMatcher {
             groups[key, default: []].append(c)
         }
 
-        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty })
+        func folded(_ titles: [String]) -> Set<String> { Set(titles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty }) }
+        let allPlayed = folded(observedTitles)
         let normTarget = TextNormalization.normalizeAlbumName(targetAlbum)
         let exactTarget = exactAlbumKey(targetAlbum)
+        let playedNamesFound = groupsOrdered.contains { playedByAlbumName[$0]?.isEmpty == false }
 
         var editions: [Edition] = []
         for key in groupsOrdered {
             let group = groups[key]!
+            let played = playedNamesFound ? folded(playedByAlbumName[key] ?? []) : allPlayed
             let groupTitles = Set(group.map { TextNormalization.normalizeTrackTitleFolded($0.title) })
-            let observedMatches = groupTitles.filter { observedNorm.contains($0) }.count
-            editions.append(Edition(album: group[0].album, tracks: toAlbumTracks(group), observedMatches: observedMatches))
+            let observedMatches = groupTitles.filter { played.contains($0) }.count
+            editions.append(Edition(album: group[0].album, tracks: toAlbumTracks(group), observedMatches: observedMatches, playedTitles: played))
         }
 
         editions.sort { a, b in

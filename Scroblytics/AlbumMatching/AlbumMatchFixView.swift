@@ -537,8 +537,7 @@ struct AlbumMatchFixView: View {
                         selection = .appleMusicEdition(index: index)
                     }
                     if expandedAppleMusicIndex == index {
-                        let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitleFolded))
-                        trackList(edition.tracks.map { ($0.title, observedNorm.contains(TextNormalization.normalizeTrackTitleFolded($0.title))) }, numbered: true)
+                        trackList(edition.tracks.map { ($0.title, edition.playedTitles.contains(TextNormalization.normalizeTrackTitleFolded($0.title))) }, numbered: true)
                     }
                 }
             }
@@ -550,7 +549,13 @@ struct AlbumMatchFixView: View {
         do {
             let deciding = effectiveGroup
             let album = deciding.editionKey == nil ? TextNormalization.stripEditionSuffix(deciding.displayName) : deciding.displayName
-            let editions = try await AppleMusicMatcher.findAlbumEditions(artist: deciding.artist, album: album, observedTitles: observedTitles)
+            var playedByAlbumName: [String: [String]] = [:]
+            for scrobble in deciding.scrobbles {
+                playedByAlbumName[AppleMusicMatcher.exactAlbumKey(scrobble.albumName), default: []].append(scrobble.trackName)
+            }
+            let editions = try await AppleMusicMatcher.findAlbumEditions(
+                artist: deciding.artist, album: album, observedTitles: observedTitles, playedByAlbumName: playedByAlbumName
+            )
             appleMusicEditions = .loaded(editions)
         } catch {
             appleMusicEditions = .failed(error.localizedDescription)

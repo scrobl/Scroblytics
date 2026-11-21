@@ -155,6 +155,8 @@ enum AskExamples {
             groups: [[cond("plays", "between", value: 1, valueTo: 2)]], unsupported: [])),
         Example(request: "tracks from artists in my top 20", target: .track, ordered: false, query: AskWire.Query(
             groups: [[cond("artistPlayRank", "lessThanOrEqual", value: 20)]], unsupported: [])),
+        Example(request: "my most played song from each of my top 100 albums", target: .track, ordered: true, query: AskWire.Query(
+            groups: [[cond("albumPlayRank", "lessThanOrEqual", value: 100)]], sorts: [.init(field: "plays", direction: "descending")], unsupported: [], perAlbum: 1)),
         Example(request: "tunes shorter than 90 seconds", target: .track, ordered: false, query: AskWire.Query(
             groups: [[cond("duration", "lessThan", value: 1.5)]], unsupported: [])),
         Example(request: "songs tagged jazz but not blues", target: .track, ordered: false, query: AskWire.Query(

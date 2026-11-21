@@ -21,6 +21,7 @@ struct QueryView: View {
     @State private var hasLoaded = false
     @State private var showingSaveAs = false
     @State private var saveName = ""
+    @State private var columnSearch = ""
     /// From the request that last loaded a spec here (e.g. a Tool's own name) — defaults Save As
     /// when nothing more specific (an already-loaded saved set's own name) applies.
     @State private var suggestedName: String?
@@ -517,25 +518,16 @@ struct QueryView: View {
                     }
                 }
             }
-            Menu {
-                Button("Shuffle (random)") { model.spec.sorts.append(QuerySort(key: .shuffle(seed: nil))) }
-                    .help("Put the matching rows in a random order.")
-                Divider()
-                ForEach(QueryFieldGroup.allCases, id: \.self) { group in
-                    let fields = model.registry.fields(for: model.spec.target, in: group).filter { $0.type != .tags }
-                    if !fields.isEmpty {
-                        Section(group.title) {
-                            ForEach(fields, id: \.id) { field in
-                                Button(field.name) {
-                                    model.spec.sorts.append(QuerySort(key: .field(QueryFieldRef.starting(field)), direction: .descending))
-                                }
-                                .help(field.help)
-                            }
-                        }
-                    }
+            QueryFieldPicker(
+                registry: model.registry, target: model.spec.target, filter: { $0.type != .tags },
+                shortcuts: [.init(title: "Shuffle (random)", help: "Put the matching rows in a random order.") {
+                    model.spec.sorts.append(QuerySort(key: .shuffle(seed: nil)))
+                }],
+                onPick: { field in
+                    model.spec.sorts.append(QuerySort(key: .field(QueryFieldRef.starting(field)), direction: .descending))
                 }
-            } label: { Label("Add sort", systemImage: "plus") }
-                .menuStyle(.borderlessButton).fixedSize().font(AppTypography.metadata)
+            ) { Label("Add sort", systemImage: "plus") }
+                .fixedSize().font(AppTypography.metadata)
                 .help("Order the results by a field, or shuffle them. Later sorts break ties in earlier ones.")
             Text("Rows with no value always sort last.").font(AppTypography.supportingDense).foregroundStyle(.tertiary)
             resultOrderRow
@@ -566,28 +558,22 @@ struct QueryView: View {
     private var resultOrderRow: some View {
         HStack(spacing: 8) {
             Text("Show results by").font(AppTypography.metadata).foregroundStyle(.secondary)
-            Menu {
-                Button("Automatic") { model.spec.resultSorts = nil; model.spec.showInRankOrder = nil }
-                    .help("The order the sorts give, except that a per-release-year cap shows its results by release year, oldest first.")
-                Button("The sort order") { model.spec.resultSorts = nil; model.spec.showInRankOrder = true }
-                    .help("Show the results in the order the sorts above ranked them, even with a per-release-year cap.")
-                Divider()
-                ForEach(QueryFieldGroup.allCases, id: \.self) { group in
-                    let fields = model.registry.fields(for: model.spec.target, in: group).filter { $0.type != .tags }
-                    if !fields.isEmpty {
-                        Section(group.title) {
-                            ForEach(fields, id: \.id) { field in
-                                Button(field.name) {
-                                    model.spec.showInRankOrder = nil
-                                    model.spec.resultSorts = [QuerySort(key: .field(QueryFieldRef.starting(field)), direction: field.id == "releaseYear" || field.type == .text ? .ascending : .descending)]
-                                }
-                                .help(field.help)
-                            }
-                        }
-                    }
+            QueryFieldPicker(
+                registry: model.registry, target: model.spec.target, filter: { $0.type != .tags },
+                shortcuts: [
+                    .init(title: "Automatic", help: "The order the sorts give, except that a per-release-year cap shows its results by release year, oldest first.") {
+                        model.spec.resultSorts = nil; model.spec.showInRankOrder = nil
+                    },
+                    .init(title: "The sort order", help: "Show the results in the order the sorts above ranked them, even with a per-release-year cap.") {
+                        model.spec.resultSorts = nil; model.spec.showInRankOrder = true
+                    },
+                ],
+                onPick: { field in
+                    model.spec.showInRankOrder = nil
+                    model.spec.resultSorts = [QuerySort(key: .field(QueryFieldRef.starting(field)), direction: field.id == "releaseYear" || field.type == .text ? .ascending : .descending)]
                 }
-            } label: { Text(resultOrderTitle) }
-                .menuStyle(.borderlessButton).fixedSize().font(AppTypography.metadata)
+            ) { Text(resultOrderTitle) }
+                .fixedSize().font(AppTypography.metadata)
                 .help("The order the results appear in. The sorts above decide which results are kept (for example, the most played album of each release year); this only puts the kept ones in order.")
             if let first = model.spec.resultSorts?.first, case .field = first.key {
                 Button {
@@ -809,9 +795,16 @@ struct QueryView: View {
     private var columnsSection: some View {
         DisclosureGroup("Columns (\(model.spec.columns.count))") {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(QueryFieldGroup.allCases, id: \.self) { group in
-                    let fields = model.registry.fields(for: model.spec.target, in: group).filter { !$0.comparesPeriods }
-                    if !fields.isEmpty {
+                TextField("Find a column", text: $columnSearch)
+                    .textFieldStyle(.roundedBorder)
+                let sections = QueryFieldSearch.sections(registry: model.registry, target: model.spec.target, query: columnSearch) { !$0.comparesPeriods }
+                if sections.isEmpty {
+                    Text("No columns match.").font(AppTypography.metadata).foregroundStyle(.secondary).padding(.top, 4)
+                }
+                ForEach(sections, id: \.group) { section in
+                    let group = section.group
+                    let fields = section.fields
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(group.title).font(AppTypography.supportingDense).foregroundStyle(.tertiary).padding(.top, 4)
                         ForEach(fields, id: \.id) { field in
                             Toggle(field.name, isOn: Binding(
@@ -1347,21 +1340,10 @@ struct QueryConditionRow: View {
     }
 
     private var fieldMenu: some View {
-        Menu {
-            ForEach(QueryFieldGroup.allCases, id: \.self) { group in
-                let fields = registry.fields(for: target, in: group)
-                if !fields.isEmpty {
-                    Section(group.title) {
-                        ForEach(fields, id: \.id) { candidate in Button(candidate.name) { setField(candidate) }.help(candidate.help) }
-                    }
-                }
-            }
-        } label: {
+        QueryFieldPicker(registry: registry, target: target, onPick: setField) {
             Text(field?.name ?? condition.field.id).fontWeight(.medium)
                 .lineLimit(1)
-                .help(field?.help ?? "")
         }
-        .menuStyle(.borderlessButton)
         .help(field?.help ?? "")
     }
 

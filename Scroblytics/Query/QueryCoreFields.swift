@@ -121,6 +121,34 @@ extension QueryFieldRegistry {
         }
     }
 
+    /// The album a track belongs to for album-level fields: the album it was most often scrobbled under (the value the per-album cap uses),
+    /// as the key `albumPlayCounts` and `albumPlayRanks` are filed under. nil when the track has no album.
+    private static func trackAlbumKey(_ entity: QueryEntity, _ run: QueryRun) -> String? {
+        guard let album = run.universe.aggregates[entity.id]?.album else { return nil }
+        return albumKey(artist: entity.id.artist, album: album)
+    }
+
+    private static func albumKey(artist: String, album: String) -> String { artist + "\u{1F}" + album }
+
+    /// Plays of every album (one exact album name by one artist) over `scope` (nil = the query's period).
+    private static func albumPlayCounts(_ run: QueryRun, scope: QueryScope?) -> [String: Int] {
+        run.memoized("albumPlayCounts.\(scope?.cacheKey ?? "-")") {
+            var counts: [String: Int] = [:]
+            for s in run.scopedScrobbles(scope) where !s.albumName.isEmpty {
+                counts[albumKey(artist: s.artistName, album: s.albumName), default: 0] += 1
+            }
+            return counts
+        }
+    }
+
+    /// 1-based rank of each album by plays over `scope` among ALL albums there (plays desc, then artist, then album), like `artistPlayRanks`.
+    private static func albumPlayRanks(_ run: QueryRun, scope: QueryScope?) -> [String: Int] {
+        run.memoized("albumPlayRanks.\(scope?.cacheKey ?? "-")") {
+            let ordered = albumPlayCounts(run, scope: scope).sorted { a, b in a.value != b.value ? a.value > b.value : a.key < b.key }
+            return Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($1.key, $0 + 1) })
+        }
+    }
+
     /// Number of distinct, non-empty album names seen for each artist across the whole library.
     private static func artistDiscographySizes(_ run: QueryRun) -> [String: Int] {
         run.memoized("artistDiscographySizes") {
@@ -225,6 +253,13 @@ extension QueryFieldRegistry {
                        help: "The artist an album, track or play belongs to.") { _, _, entities in
                 Dictionary(uniqueKeysWithValues: entities.map { ($0.id, .value(.text($0.artist))) })
             },
+            QueryField(id: "trackAlbum", name: "Album", group: .identity, type: .text, targets: [.track],
+                       help: "The album this track was most often scrobbled under (the one “At most N per album” and Album’s plays use). No value for a track with no album.") { run, _, entities in
+                let aggregates = run.universe.aggregates
+                return Dictionary(uniqueKeysWithValues: entities.map { entity in
+                    (entity.id, aggregates[entity.id]?.album.map { .value(.text($0)) } ?? .missing)
+                })
+            },
             QueryField(id: "artistDiscographySize", name: "Artist discography size", group: .context, type: .numeric, targets: all,
                        help: "The number of distinct albums by this item’s artist in your whole scrobble library. Album-less scrobbles are ignored.") { run, _, entities in
                 let sizes = artistDiscographySizes(run)
@@ -294,6 +329,24 @@ extension QueryFieldRegistry {
                        scopedCompute: { run, _, scope, entities in
                 let ranks = artistPlayRanks(run, scope: scope)
                 return Dictionary(uniqueKeysWithValues: entities.map { ($0.id, ranks[$0.artist].map { .value(.number(Double($0))) } ?? .missing) })
+            }),
+            QueryField(id: "albumPlays", name: "Album’s plays", group: .volume, type: .numeric, targets: [.track],
+                       column: .standard(for: .numeric, style: .integer, width: 100),
+                       help: "Plays of the album this track was most often scrobbled under, in the period or in this column’s own date scope. The album is the one the “At most N per album” cap uses; an edition name counts as its own album. No value for a track with no album.",
+                       scopedCompute: { run, _, scope, entities in
+                let counts = albumPlayCounts(run, scope: scope)
+                return Dictionary(uniqueKeysWithValues: entities.map { entity in
+                    (entity.id, trackAlbumKey(entity, run).flatMap { counts[$0] }.map { .value(.number(Double($0))) } ?? .missing)
+                })
+            }),
+            QueryField(id: "albumPlayRank", name: "Album’s play rank", group: .ranking, type: .numeric, targets: [.track],
+                       column: .standard(for: .numeric, style: .integer, width: 110),
+                       help: "Where the track’s album ranks among all your albums by plays in the period, or in this column’s own date scope (1 = most played; ties break by artist, then album). “Album’s play rank ≤ 100” = tracks on your top 100 albums. No value for a track with no album.",
+                       scopedCompute: { run, _, scope, entities in
+                let ranks = albumPlayRanks(run, scope: scope)
+                return Dictionary(uniqueKeysWithValues: entities.map { entity in
+                    (entity.id, trackAlbumKey(entity, run).flatMap { ranks[$0] }.map { .value(.number(Double($0))) } ?? .missing)
+                })
             }),
             spanField,
             activeField(id: "activeDays", name: "Active days", unit: .day, word: "calendar days"),

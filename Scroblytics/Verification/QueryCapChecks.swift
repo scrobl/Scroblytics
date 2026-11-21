@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 #if DEBUG
 /// `SCROBLYTICS_QUERYCAP_CHECK=1` (with `SCROBLYTICS_STORE_PATH` on a scratch path): the diversity caps ("at most N per
@@ -16,11 +17,70 @@ enum QueryCapChecks {
         dateOperatorChecks(check)
         breakdownChecks(check)
         engineChecks(check)
+        fieldSearchChecks(check)
         modelChecks(check)
         askChecks(check)
         historyScopeChecks(check)
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    /// `SCROBLYTICS_QUERYCAP_REALDUMP=<N>` (with `SCROBLYTICS_STORE_PATH` on a COPY of the store and `SCROBLYTICS_OFFLINE=1`): runs "most
+    /// played track of each of the top N albums" through the real Query engine over that library and prints one line per row
+    /// (rank | artist | album | album plays | track | track plays), to compare with an independent SQL recount. Reads only.
+    static func runRealDumpIfRequested(container: ModelContainer) {
+        guard let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_QUERYCAP_REALDUMP"], let topN = Int(raw) else { return }
+        HeadlessTask.run("QueryCapRealDump") {
+            let plays = QueryIdentity.canonicalizingArtists(
+                try container.mainContext.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
+            )
+            var spec = QuerySpec(target: .track)
+            spec.groups = [[QueryCondition("albumPlayRank", .lessThanOrEqual, [.number(Double(topN))])]]
+            spec.sorts = [QuerySort(key: .field(QueryFieldRef("plays")), direction: .descending)]
+            spec.columns = [QueryFieldRef("albumPlayRank"), QueryFieldRef("albumPlays"), QueryFieldRef("plays")]
+            spec.groupLimit = QueryGroupLimit(perAlbum: 1)
+            spec.showInRankOrder = true
+            let validated = try spec.validate(against: .standard)
+            let run = QueryRun(target: .track, asOf: Date(), scrobbles: plays, allTimeScrobbles: plays)
+            let result = QueryEngine.evaluate(validated, run: run)
+            func number(_ cell: QueryCell?) -> Int {
+                if case .value(.number(let value))? = cell { return Int(value) }
+                return -1
+            }
+            let keys = validated.columns.map(\.cacheKey)
+            let lines = result.rows.map { row -> (Int, String) in
+                let rank = number(row.cells[keys[0]])
+                return (rank, "\(rank) | \(row.entity.id.artist) | \(result.entityInfo[row.entity.id]?.album ?? "") | \(number(row.cells[keys[1]])) | \(row.entity.id.name) | \(number(row.cells[keys[2]]))")
+            }
+            for line in lines.sorted(by: { $0.0 < $1.0 }) { print(line.1) }
+            print("ROWS \(lines.count)")
+            HeadlessTask.finish(0)
+        }
+    }
+
+    // MARK: - Searching the field lists
+
+    private static func fieldSearchChecks(_ report: (String, Bool, String) -> Void) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") { report(label, ok, detail) }
+        let registry = QueryFieldRegistry.standard
+        func names(_ query: String, _ target: QueryTarget = .track, filter: (QueryField) -> Bool = { _ in true }) -> [String] {
+            QueryFieldSearch.sections(registry: registry, target: target, query: query, filter: filter).flatMap { $0.fields.map(\.name) }
+        }
+        let everything = QueryFieldGroup.allCases.flatMap { registry.fields(for: .track, in: $0).map(\.name) }
+        check("an empty search lists every track field", names("") == everything && !everything.isEmpty, "\(names("").count) vs \(everything.count)")
+        check("whitespace alone lists every field", names("   ") == everything)
+        check("a search is case-insensitive", names("ALBUM’S PLAY RANK").contains("Album’s play rank") && names("album’s play rank") == names("ALBUM’S PLAY RANK"))
+        check("every word must match (“album plays” finds Album’s plays, not Plays alone)", names("album plays").contains("Album’s plays") && !names("album plays").contains("Plays"), "\(names("album plays"))")
+        check("the track Album field is found by typing album", names("album").contains("Album"), "\(names("album"))")
+        check("accents are ignored", names("album’s play rank") == names("album’s plày rànk"))
+        check("a group title matches its fields (“rank” finds Play rank and the Rank & momentum group)", names("rank").contains("Play rank") && names("rank").contains("Plays change"), "\(names("rank"))")
+        check("nothing matches nonsense", names("zzzqqq").isEmpty)
+        check("the filter still applies to the matches (no tag fields in a sort list)", !names("", filter: { $0.type != .tags }).contains { name in
+            registry.fields(for: .track, in: .tags).map(\.name).contains(name)
+        })
+        check("the track Album field is a track field only", !names("album", .artist).contains("Album") && !names("album", .album).contains("Album"))
+        let album = registry.fields(for: .track, in: .identity).first { $0.id == "trackAlbum" }
+        check("the track Album field is a text field in the Name group", album?.type == .text)
     }
 
     // MARK: - Made-up library
@@ -507,6 +567,37 @@ enum QueryCapChecks {
             check("the overall limit applies after the cap", names(limited) == Array(expected(perYear: 1).prefix(2)), "\(names(limited))")
             let none = try run(spec(.track, caps: nil))
             check("without caps nothing is dropped", names(none).count == rows.count)
+
+            // "Most played track of each of my top N albums": Album's play rank ≤ N, at most 1 per album, by plays.
+            // Independent answer: total each album's plays, rank them (plays, then artist, then album), keep the first row of each top-N album.
+            var totals: [String: Int] = [:]
+            for row in rows { totals[row.artist + "\u{1F}" + row.album, default: 0] += row.plays }
+            let rankedAlbums = totals.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
+            for topN in [1, 2, 3, rankedAlbums.count] {
+                let wanted = Set(rankedAlbums.prefix(topN))
+                var seen: Set<String> = []
+                var expectedTracks: [String] = []
+                for row in rows {
+                    let key = row.artist + "\u{1F}" + row.album
+                    guard wanted.contains(key), seen.insert(key).inserted else { continue }
+                    expectedTracks.append(row.track)
+                }
+                var recipe = spec(.track, caps: QueryGroupLimit(perAlbum: 1))
+                recipe.groups = [[QueryCondition("albumPlayRank", .lessThanOrEqual, [.number(Double(topN))])]]
+                let result = try run(recipe)
+                check("top \(topN) album(s), 1 track each, match the independent answer", names(result) == expectedTracks, "\(names(result)) vs \(expectedTracks)")
+                check("…and keep exactly one track per album (\(min(topN, rankedAlbums.count)))", names(result).count == min(topN, rankedAlbums.count))
+            }
+
+            // The track Album field: the album each track was scrobbled under, usable as a column and a condition.
+            var albumSpec = spec(.track, caps: nil)
+            albumSpec.columns = [QueryFieldRef("trackAlbum")]
+            albumSpec.groups = [[QueryCondition("trackAlbum", .contains, [.text("one")])]]
+            let albumResult = try run(albumSpec)
+            check("“Album contains one” keeps exactly the tracks of the albums named …One", Set(names(albumResult)) == ["a1 x", "a1 y", "b1 x", "b1 y"], "\(names(albumResult))")
+            let albumOf = Dictionary(uniqueKeysWithValues: library.flatMap { album in album.tracks.map { ($0.0, album.name) } })
+            let key = try albumSpec.validate(against: .standard).columns[0].cacheKey
+            check("the Album column shows each track’s album", albumResult.rows.allSatisfy { $0.cells[key] == .value(.text(albumOf[$0.entity.name] ?? "?")) })
             check("a track whose year is still being looked up is reported as pending", one.pending.contains { $0.field == "Release year" && $0.count > 0 },
                   "\(one.pending.map { "\($0.field)=\($0.count)" })")
 

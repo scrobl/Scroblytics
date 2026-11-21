@@ -155,6 +155,7 @@ struct ScroblyticsApp: App {
         LayoutSnapshots.runHeadlessIfRequested(container: modelContainer)
         LovedAuditChecks.runHeadlessIfRequested(container: modelContainer)
         QueryCapChecks.runHeadlessIfRequested()
+        QueryCapChecks.runRealDumpIfRequested(container: modelContainer)
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)

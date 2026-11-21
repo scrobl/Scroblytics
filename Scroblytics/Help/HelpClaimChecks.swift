@@ -152,6 +152,41 @@ enum HelpClaimChecks {
             check("playRank “shared” gives equal plays one rank (1, 2, 2, 4)", [number(shared["rk-x"]), number(shared["rk-y"]), number(shared["rk-z"]), number(shared["rk-w"])] == [1, 2, 2, 4], "\(shared)")
         }
 
+        // Album-level fields on tracks.
+        do {
+            func n(_ track: String, _ artist: String, _ album: String, _ count: Int) -> [ScrobbleSnapshot] {
+                (0..<count).map { play(track, date(2025, 5, 1 + $0), artist: artist, album: album) }
+            }
+            let plays = n("al-1", "Artist A", "Album X", 3) + n("al-2", "Artist A", "Album X", 2) + n("al-3", "Artist A", "Album Y", 4)
+                + n("al-4", "Artist B", "Album Z", 4) + n("al-5", "Artist A", "", 6)
+                + n("al-6", "Artist A", "Album Same", 1) + n("al-7", "Artist B", "Album Same", 1)
+            let albumName = values(QueryFieldRef("trackAlbum"), plays: plays, asOf: asOf)
+            check("trackAlbum is the album the track was scrobbled under", albumName["al-1"] == .value(.text("Album X")) && albumName["al-4"] == .value(.text("Album Z")), "\(albumName)")
+            check("trackAlbum has no value for a track with no album", albumName["al-5"] == .missing)
+            var onTwo = plays
+            onTwo += n("al-8", "Artist A", "Album Y", 2) + n("al-8", "Artist A", "Album X", 3)
+            let mostOften = values(QueryFieldRef("trackAlbum"), plays: onTwo, asOf: asOf)
+            check("trackAlbum is the album it was most often scrobbled under", mostOften["al-8"] == .value(.text("Album X")), "\(mostOften["al-8"] as Any)")
+            let albumPlays = values(QueryFieldRef("albumPlays"), plays: plays, asOf: asOf)
+            check("albumPlays counts every play of the track’s album (5, 5, 4, 4)", [number(albumPlays["al-1"]), number(albumPlays["al-2"]), number(albumPlays["al-3"]), number(albumPlays["al-4"])] == [5, 5, 4, 4], "\(albumPlays)")
+            check("albumPlays has no value for a track with no album", albumPlays["al-5"] == .missing)
+            check("albumPlays treats the same album name by two artists as two albums", [number(albumPlays["al-6"]), number(albumPlays["al-7"])] == [1, 1], "\(albumPlays)")
+            let albumRank = values(QueryFieldRef("albumPlayRank"), plays: plays, asOf: asOf)
+            check("albumPlayRank ranks albums by plays, ties by artist then album (1, 1, 2, 3)", [number(albumRank["al-1"]), number(albumRank["al-2"]), number(albumRank["al-3"]), number(albumRank["al-4"])] == [1, 1, 2, 3], "\(albumRank)")
+            check("albumPlayRank has no value for a track with no album", albumRank["al-5"] == .missing)
+            check("albumPlayRank continues through the albums with fewer plays (4, 5)", [number(albumRank["al-6"]), number(albumRank["al-7"])] == [4, 5], "\(albumRank)")
+            var topTwo = QuerySpec(target: .track)
+            topTwo.groups = [[QueryCondition("albumPlayRank", .lessThanOrEqual, [.number(2)])]]
+            if let validated = try? topTwo.validate(against: .standard) {
+                let sorted = plays.sorted { $0.playedAt < $1.playedAt }
+                let run = QueryRun(target: .track, asOf: asOf, calendar: calendar, scrobbles: sorted, allTimeScrobbles: sorted)
+                let names = Set(QueryEngine.evaluate(validated, run: run).rows.map(\.entity.id.name))
+                check("“Album’s play rank ≤ 2” keeps the tracks of the two most played albums", names == ["al-1", "al-2", "al-3"], "\(names)")
+            } else {
+                check("“Album’s play rank ≤ 2” is a valid condition", false)
+            }
+        }
+
         // Comparison fields.
         do {
             let may = QueryScope.absolute(from: date(2025, 5, 1, 0), to: date(2025, 5, 31, 23, 59))

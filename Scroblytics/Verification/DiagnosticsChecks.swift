@@ -234,7 +234,12 @@ enum DiagnosticsChecks {
             let described = describeSyncError(sqliteError(13))
             check("the sync error text for a full disk says so in plain words and keeps the codes", described.contains("disk is full") && described.contains("SQLite 13"), described)
             check("…and contains no path or name", !described.contains("/") && !described.contains(NSUserName()))
-            check("Last.fm errors keep their own wording", describeSyncError(LastfmAPIError.api(code: 10, message: "x")).contains("doesn’t recognise this API key"))
+            // The wording depends on which key the saved account uses, so pin that instead of reading this Mac's real Keychain item.
+            let ownKeyAccount = try? LastfmCredentialsStore.encodedForStorage(LastfmCredentials(username: "user", apiKey: String(repeating: "a", count: 32), apiSecret: nil, sessionKey: nil))
+            LastfmCredentialsStore.useRawReaderForTesting { (errSecSuccess, ownKeyAccount) }
+            _ = LastfmCredentialsStore.load()
+            let ownKeyText = describeSyncError(LastfmAPIError.api(code: 10, message: "x"))
+            check("Last.fm errors keep their own wording", ownKeyText.contains("doesn’t recognise this API key"), ownKeyText)
             check("the 'couldn't count' answer is an error with plain words", StoreProblem.describe(StoreUnreadableError()) != nil)
             check("a real count is never the 'not found' value", ((try? container.mainContext.checkedCount(FetchDescriptor<Scrobble>())) ?? NSNotFound) != NSNotFound)
             var broken = inputs

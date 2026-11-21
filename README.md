@@ -25,7 +25,7 @@ them in plain English, and tidy up the details that Last.fm itself can't. It has
 
   <img width="60%" alt="Ask" src="https://github.com/user-attachments/assets/e4af6426-7196-431d-b8a4-fcf95fcfbba3" />
 
-- **Query.** The same engine by hand: combine about 70 fields (plays, rank movement, release year, tempo, loved status and more)
+- **Query.** The same engine by hand: combine more than 100 fields (plays, rank movement, release year, tempo, loved status and more)
   with conditions, sorting, per-artist, per-album and per-release-year caps, and date scopes.
 
   <img width="60%" alt="Query" src="https://github.com/user-attachments/assets/dc5ea294-c50e-4ddb-87f9-2165b6bddd04" />

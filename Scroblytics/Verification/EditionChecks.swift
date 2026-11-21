@@ -460,6 +460,31 @@ enum EditionChecks {
                 }
             }
 
+            // MARK: Searching the Music library: one row per release
+            do {
+                typealias Raw = AppleMusicMatcher.RawCandidate
+                func songs(_ album: String, _ titles: [String], disc: Int = 1) -> [Raw] {
+                    titles.enumerated().map { Raw(title: $0.element, album: album, trackNumber: $0.offset + 1, discNumber: disc, seconds: 200) }
+                }
+                let regular = songs(standard, ["One", "Two", "Three"])
+                let anniversary = songs(deluxe, ["One (25th Anniversary Version)", "Two (25th Anniversary Version)", "Three (25th Anniversary Version)"])
+                    + songs(deluxe, ["Live One", "Live Two"], disc: 2)
+                let both = AppleMusicMatcher.groupIntoEditions(regular + anniversary, targetAlbum: standard, observedTitles: [])
+                check("Music search: the plain album and its anniversary edition are two choices, not one merged list", both.count == 2, "\(both.map { "\($0.album) \($0.tracks.count)" })")
+                check("…each with only its own tracks (3 and 5, never 8)", Set(both.map(\.tracks.count)) == [3, 5], "\(both.map { "\($0.album) \($0.tracks.count)" })")
+                check("…and the plain album's row holds none of the anniversary edition's tracks",
+                      both.first { $0.album == standard }?.tracks.allSatisfy { !$0.title.contains("Anniversary") && !$0.title.contains("Live") } == true)
+                check("…and the edition's row holds none of the plain album's own titles",
+                      both.first { $0.album == deluxe }?.tracks.allSatisfy { track in !regular.contains { $0.title == track.title } } == true)
+                let named = AppleMusicMatcher.groupIntoEditions(anniversary + regular, targetAlbum: standard, observedTitles: [])
+                check("with nothing played to go on, the edition named like the album ranks first", named.first?.album == standard, "\(named.map(\.album))")
+                let bonusPlayed = AppleMusicMatcher.groupIntoEditions(regular + anniversary, targetAlbum: standard, observedTitles: ["Live One", "Live Two"])
+                check("the edition holding the tracks you played ranks first, whatever the name asked for", bonusPlayed.first?.album == deluxe && bonusPlayed.first?.observedMatches == 2, "\(bonusPlayed.map { "\($0.album) \($0.observedMatches)" })")
+                let twice = AppleMusicMatcher.groupIntoEditions(regular + regular + regular.map { Raw(title: $0.title, album: standard.uppercased() + "  ", trackNumber: $0.trackNumber, discNumber: 1, seconds: 200) }, targetAlbum: standard, observedTitles: [])
+                check("two copies of one release (even with different case or spacing) are still one edition with its tracks listed once", twice.count == 1 && twice[0].tracks.count == 3, "\(twice.map { "\($0.album) \($0.tracks.count)" })")
+                check("a search that finds only one album gives one edition", AppleMusicMatcher.groupIntoEditions(anniversary, targetAlbum: deluxe, observedTitles: []).count == 1)
+            }
+
             cleanUp()
             HeadlessTask.finish(failures)
         }

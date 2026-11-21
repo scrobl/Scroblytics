@@ -310,7 +310,7 @@ enum AppleMusicMatcher {
 
     // MARK: - Parsing / grouping (`parseRawCandidates` / `groupIntoEditions` / `toAlbumTracks`)
 
-    private struct RawCandidate {
+    struct RawCandidate {
         let title: String
         let album: String
         let trackNumber: Int?
@@ -335,17 +335,27 @@ enum AppleMusicMatcher {
         return out
     }
 
-    private static func groupIntoEditions(_ candidates: [RawCandidate], targetAlbum: String, observedTitles: [String]) -> [Edition] {
+    /// One album name as Music holds it, compared without case or spacing differences only. Edition words are kept: "Album" and
+    /// "Album (25th Anniversary Edition)" are two releases with their own tracklists, so they must not share a row.
+    static func exactAlbumKey(_ name: String) -> String {
+        name.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
+    }
+
+    /// Groups the songs Music returned by the exact album they are on, so each release of the album (the plain one, the anniversary
+    /// edition…) is its own choice with its own tracks. Two copies of the same release (an explicit and a clean one) have the same name
+    /// and still form one edition, which `toAlbumTracks` de-duplicates.
+    static func groupIntoEditions(_ candidates: [RawCandidate], targetAlbum: String, observedTitles: [String]) -> [Edition] {
         var groups: [String: [RawCandidate]] = [:]
         var groupsOrdered: [String] = []
         for c in candidates {
-            let key = TextNormalization.normalizeAlbumName(c.album)
+            let key = exactAlbumKey(c.album)
             if groups[key] == nil { groupsOrdered.append(key) }
             groups[key, default: []].append(c)
         }
 
         let observedNorm = Set(observedTitles.map(TextNormalization.normalizeTrackTitleFolded).filter { !$0.isEmpty })
         let normTarget = TextNormalization.normalizeAlbumName(targetAlbum)
+        let exactTarget = exactAlbumKey(targetAlbum)
 
         var editions: [Edition] = []
         for key in groupsOrdered {
@@ -357,6 +367,9 @@ enum AppleMusicMatcher {
 
         editions.sort { a, b in
             if a.observedMatches != b.observedMatches { return a.observedMatches > b.observedMatches }
+            let aNamed = exactAlbumKey(a.album) == exactTarget
+            let bNamed = exactAlbumKey(b.album) == exactTarget
+            if aNamed != bNamed { return aNamed }
             let aExact = TextNormalization.normalizeAlbumName(a.album) == normTarget
             let bExact = TextNormalization.normalizeAlbumName(b.album) == normTarget
             if aExact != bExact { return aExact }

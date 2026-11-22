@@ -73,7 +73,8 @@ final class AlbumDetailModel {
     }
 
     func bind(identity: AlbumIdentity, context: ModelContext) {
-        self.identity = identity
+        // The person's own spellings (capitalization and spacing), so the page shows and re-queries the same names as every list.
+        self.identity = NameCorrections.current.corrected(identity)
         self.context = context
         weatherLean = .unavailable
         appleMusic = nil

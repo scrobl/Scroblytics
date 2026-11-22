@@ -110,7 +110,7 @@ struct GoalsView: View {
         .onChange(of: state.goals) { _, _ in scheduleReload(after: .milliseconds(300)) }
         .onChange(of: openGoalID) { _, _ in scheduleReload() }
         .onChange(of: openRequest.goalID) { _, _ in consumeOpenRequest() }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in scheduleReload() }
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in scheduleReload() }
     }
 
     // MARK: - Header
@@ -797,7 +797,7 @@ struct GoalsView: View {
         do {
             let stored = try modelContext.fetch(FetchDescriptor<LovedTrackEntry>())
             let loves = stored.map { GoalLove(key: $0.cacheKey, artist: $0.artist, track: $0.track, lovedAt: $0.lovedAt) }
-            let plays = try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
+            let plays = try await ScrobbleHistoryCache.shared.displaySnapshots(container: modelContainer)
             let presence = goal.inAppleLibraryOnly ? LibraryPresenceSnapshot.load(context: modelContext) : nil
             let tags = goal.criteria.tags.isEmpty ? EntityTagsSnapshot.empty : EntityTagsEngine.loadSnapshot(context: modelContext)
             let origins = goal.criteria.countries.isEmpty ? QueryOriginSnapshot.empty : QueryOriginSnapshot.load(context: modelContext)

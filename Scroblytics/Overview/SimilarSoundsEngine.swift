@@ -90,7 +90,7 @@ enum SimilarSoundsEngine {
         seeds: [RecommendationSeed], context: ModelContext, client: some SimilaritySourcing
     ) async throws -> (candidates: [RecommendedCandidate], seedResults: [RecommendationSeedResult]) {
         let container = context.container
-        let allScrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        let allScrobbles = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
         return try await run(seeds: seeds, scrobbles: allScrobbles, client: client)
     }
 

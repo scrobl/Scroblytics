@@ -96,7 +96,7 @@ struct FadingFavoritesView: View {
                 Task { await applySortAndSlice() }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             scrobbles = nil
             candidates = nil
             Task { await recomputeCandidates() }

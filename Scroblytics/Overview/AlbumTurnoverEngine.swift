@@ -1080,7 +1080,7 @@ enum AlbumTurnoverEngine {
 @ModelActor
 actor AlbumTurnoverDataReader {
     func fetchSortedSnapshots() throws -> [ScrobbleSnapshot] {
-        try modelContext.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot)
+        QueryIdentity.applyingNameCorrections(try modelContext.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])).map(\.snapshot))
     }
 
     func loadSnapshot() -> AlbumTurnoverEngine.Snapshot {

@@ -414,7 +414,9 @@ enum ImageResolutionEngine {
     static func resolvedTrackArtwork(
         artist: String, track: String, scrobbles: [ScrobbleSnapshot], lookup: [String: String]
     ) -> (album: String?, imageURL: String?) {
-        let matches = scrobbles.filter { $0.artistName == artist && $0.trackName == track }
+        var matches = scrobbles.filter { $0.artistName == artist && $0.trackName == track }
+        // With a name corrected for capitalization or spacing, the plays may be stored under Last.fm's spelling.
+        if matches.isEmpty { matches = scrobbles.filter { NameKeys.same($0.artistName, artist) && NameKeys.same($0.trackName, track) } }
         let album = Dictionary(grouping: matches, by: \.albumName).max { $0.value.count < $1.value.count }?.key
         let fallback = matches.first { $0.albumName == (album ?? "") && $0.imageURL != nil }?.imageURL
         let target = ImageTarget(kind: .track, artist: artist, album: album, track: track)
@@ -438,10 +440,7 @@ enum ImageResolutionEngine {
             )
             overrideDescriptor.fetchLimit = 1
             if try context.fetch(overrideDescriptor).first != nil { return true }
-            let identityKey = TextNormalization.albumIdentityKey(artist: target.artist, album: target.album ?? "")
-            var descriptor = FetchDescriptor<Album>(predicate: #Predicate { $0.identityKey == identityKey })
-            descriptor.fetchLimit = 1
-            return try context.fetch(descriptor).first?.customImageFilename != nil
+            return ReleaseDateEngine.albumRow(context: context, artist: target.artist, album: target.album ?? "")?.customImageFilename != nil
         case .track:
             let identityKey = TextNormalization.lovedKey(artist: target.artist, track: target.track ?? "")
             var descriptor = FetchDescriptor<Track>(predicate: #Predicate { $0.identityKey == identityKey })
@@ -547,10 +546,7 @@ enum ImageResolutionEngine {
             descriptor.fetchLimit = 1
             return (try? context.fetch(descriptor).first?.imageResolvedAt) != nil
         case .album:
-            let identityKey = TextNormalization.albumIdentityKey(artist: target.artist, album: target.album ?? "")
-            var descriptor = FetchDescriptor<Album>(predicate: #Predicate { $0.identityKey == identityKey })
-            descriptor.fetchLimit = 1
-            return (try? context.fetch(descriptor).first?.imageResolvedAt) != nil
+            return ReleaseDateEngine.albumRow(context: context, artist: target.artist, album: target.album ?? "")?.imageResolvedAt != nil
         case .track:
             return true
         }
@@ -569,8 +565,14 @@ enum ImageResolutionEngine {
         let descriptor = FetchDescriptor<Scrobble>(
             predicate: #Predicate { $0.artistName == artist && $0.trackName == track }
         )
+        var rows = try context.fetch(descriptor)
+        if rows.isEmpty {
+            // The name may be one the person corrected (capitalization or spacing); the plays are stored under Last.fm's spelling.
+            let loose = FetchDescriptor<Scrobble>(predicate: #Predicate { $0.artistName.localizedStandardContains(artist) && $0.trackName.localizedStandardContains(track) })
+            rows = try context.fetch(loose).filter { NameKeys.same($0.artistName, artist) && NameKeys.same($0.trackName, track) }
+        }
         let album = Dictionary(
-            grouping: try context.fetch(descriptor).filter { !$0.albumName.isEmpty },
+            grouping: rows.filter { !$0.albumName.isEmpty },
             by: \.albumName
         )
         .max { lhs, rhs in lhs.value.count < rhs.value.count }?
@@ -591,7 +593,16 @@ enum ImageResolutionEngine {
             sortBy: [SortDescriptor(\.playedAt, order: .reverse)]
         )
         descriptor.fetchLimit = 50
-        return try context.fetch(descriptor)
+        var rows = try context.fetch(descriptor)
+        if rows.isEmpty {
+            // A name the person corrected (capitalization or spacing): the plays are stored under Last.fm's spelling.
+            let loose = FetchDescriptor<Scrobble>(
+                predicate: #Predicate { $0.artistName.localizedStandardContains(artist) && $0.albumName.localizedStandardContains(album) },
+                sortBy: [SortDescriptor(\.playedAt, order: .reverse)]
+            )
+            rows = try context.fetch(loose).filter { NameKeys.same($0.artistName, artist) && NameKeys.same($0.albumName, album) }
+        }
+        return rows
             .compactMap(\.imageURL)
             .first { !TextNormalization.isLastfmPlaceholderImage($0) }
             .flatMap(URL.init(string:))

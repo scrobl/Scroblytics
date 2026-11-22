@@ -35,9 +35,9 @@ struct TimelineResponsiveLayout {
 @ModelActor
 actor ScrobbleSnapshotReader {
     func fetchSortedSnapshots() throws -> [ScrobbleSnapshot] {
-        try modelContext.fetch(
+        QueryIdentity.applyingNameCorrections(try modelContext.fetch(
             FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])
-        ).map(\.snapshot)
+        ).map(\.snapshot))
     }
 
     /// The same, with each artist in one spelling (the library's most-played), as Query, Trends, Timeline and the Tools
@@ -118,7 +118,7 @@ struct TimelineView: View {
         }
         .task(id: isActive) { await loadIfNeeded() }
         .onChange(of: settings.metric) { requestReload() }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in requestReload() }
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .weekStartDidChange)) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in
@@ -251,7 +251,7 @@ struct TimelineView: View {
         let metric = settings.metric
         do {
             let container = modelContainer
-            let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+            let scrobbles = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
             // Both helpers are main-actor isolated, so they run here rather than
             // inside the background reader.
             let snapshot = TimelineDataSnapshot(

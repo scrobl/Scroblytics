@@ -51,6 +51,11 @@ actor ScrobbleHistoryCache {
     private var canonicalCache: [ScrobbleSnapshot]?
     private var loading: Task<(snapshots: [ScrobbleSnapshot], stamp: Stamp), Error>?
     private var canonicalizing: Task<[ScrobbleSnapshot], Never>?
+    /// The version of the name corrections each canonical copy (kept, and being made) was built with.
+    private var canonicalBookVersion = -1
+    private var displayCache: [ScrobbleSnapshot]?
+    private var displayBookVersion = -1
+    private var canonicalizingBookVersion = -1
 
     init(
         loader: @escaping Loader = { try ScrobbleHistoryLoader(modelContainer: $0).load() },
@@ -76,23 +81,41 @@ actor ScrobbleHistoryCache {
         if generation == startedAt {
             sortedCache = loaded.snapshots
             canonicalCache = nil
+            displayCache = nil
             stamp = loaded.stamp
         }
         return loaded.snapshots
     }
 
-    /// The same plays with each artist in one spelling (`QueryIdentity.canonicalizingArtists`), worked out once and kept.
+    /// The same plays with each artist in one spelling (`QueryIdentity.canonicalizingArtists`) and the person's own name corrections
+    /// applied, worked out once and kept. The copy is tied to the version of the corrections it was made with, so saving or resetting a
+    /// correction makes the next request rebuild it.
     func canonicalSnapshots(container: ModelContainer) async throws -> [ScrobbleSnapshot] {
         let sorted = try await snapshots(container: container)
+        let book = NameCorrections.current
         // `snapshots` has just checked the stamp, and a re-read clears this copy, so what is kept here belongs to `sorted`.
-        if let canonicalCache { return canonicalCache }
-        if let canonicalizing { return await canonicalizing.value }
+        if let canonicalCache, canonicalBookVersion == book.version { return canonicalCache }
+        if let canonicalizing, canonicalizingBookVersion == book.version { return await canonicalizing.value }
         let startedAt = generation
-        let task = Task.detached(priority: .userInitiated) { QueryIdentity.canonicalizingArtists(sorted) }
+        let task = Task.detached(priority: .userInitiated) { QueryIdentity.canonicalizingArtists(sorted, book: book) }
         canonicalizing = task
+        canonicalizingBookVersion = book.version
         let result = await task.value
-        canonicalizing = nil
-        if generation == startedAt { canonicalCache = result }
+        if canonicalizingBookVersion == book.version { canonicalizing = nil }
+        if generation == startedAt { canonicalCache = result; canonicalBookVersion = book.version }
+        return result
+    }
+
+    /// The plays as Last.fm has them, with only the person's name corrections applied (no artist-spelling merge): for the screens that
+    /// read plays without merging artists but must show the same names as the rest of the app. Kept per version of the corrections.
+    func displaySnapshots(container: ModelContainer) async throws -> [ScrobbleSnapshot] {
+        let sorted = try await snapshots(container: container)
+        let book = NameCorrections.current
+        if book.isEmpty { return sorted }
+        if let displayCache, displayBookVersion == book.version { return displayCache }
+        let result = QueryIdentity.applyingNameCorrections(sorted, book: book)
+        displayCache = result
+        displayBookVersion = book.version
         return result
     }
 
@@ -102,6 +125,7 @@ actor ScrobbleHistoryCache {
         stamp = nil
         sortedCache = nil
         canonicalCache = nil
+        displayCache = nil
     }
 
     /// Drops the cache whenever the app announces that plays were added or changed.

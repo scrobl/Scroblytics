@@ -154,6 +154,32 @@ extension HelpContent {
             ]
         ),
         HelpArticle(
+            id: "name-corrections",
+            title: "Correcting names",
+            summary: "Show an artist, album or track name with the capitalization and spacing you prefer, on this Mac only.",
+            blocks: [
+                .paragraph("Last.fm sometimes spells a name oddly: an album its artist titles “Midnight Garden” can come back as “MidNight GARDEN”, a track as “Song TWO”. **Correct Name…** lets you choose how a name is **shown** in Scroblytics. Only capitalization and spacing can change, so the corrected name is always the same name. Nothing is changed on Last.fm, and your saved plays keep Last.fm’s spelling."),
+                .heading("How to correct a name"),
+                .bullets([
+                    "Right-click an artist, album or track anywhere (Top Charts, Library, Overview, Tools…) or use its “…” button, and choose **Correct Name…**.",
+                    "On an artist, album or track page, click the pencil beside the title.",
+                    "Type the spelling you want under **Show as**. The sheet lists the spellings Last.fm has, with their plays. **Save** is available once your spelling differs from what is shown and still reads as the same name; a different word, an inserted space or a missing letter is refused, with the reason.",
+                    "**Reset to Last.fm’s spelling** takes a correction back.",
+                ]),
+                .heading("What it changes"),
+                .bullets([
+                    "The name everywhere it is shown: Top Charts and Library, Overview, Trends, Timeline, Query and Ask results, the artist, album and track pages, Tools, share cards and collages.",
+                    "Two spellings that differ only by capitalization or spacing become one row, with their plays added together. Top Charts already did this for albums and tracks that differ only by case, showing the first spelling it met; a correction decides which one is shown, and makes the other screens agree.",
+                    "A correction on an album applies to that album by that artist (and to tracks credited to the artist with guests). An album with “(Deluxe Edition)” or another edition name in its title is a different album and keeps its own name; correct each one. A track correction applies to every album that track is on.",
+                    "Query finds names by their text without regard to capitalization, so a saved query that names an album still works.",
+                ]),
+                .heading("What it does not change"),
+                .paragraph("Last.fm, the plays in your database, a backup of your history, and everything Scroblytics sends to Last.fm or looks up (tags, loves, scrobbles, release dates, Apple Music matching). Those keep using Last.fm’s spelling, which Last.fm and Apple Music treat as the same name. Playlists exported to Apple Music find their tracks the same way as before."),
+                .heading("Backup"),
+                .paragraph("Your corrections are part of a Scroblytics backup and come back with a restore (an older backup without them leaves yours alone). They are stored only on this Mac and are never sent anywhere."),
+            ]
+        ),
+        HelpArticle(
             id: "artist-origin",
             title: "Where artists are from",
             summary: "The city, state or region and country each artist was born or formed in, from MusicBrainz, and how to correct it.",

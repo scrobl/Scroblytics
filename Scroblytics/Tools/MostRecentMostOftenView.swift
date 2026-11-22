@@ -95,7 +95,7 @@ struct MostRecentMostOftenView: View {
             ToolFilterSettingsStore.save(newValue, toolId: Self.toolId, context: modelContext)
             Task { await recompute() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             scrobbles = nil
             Task { await recompute() }
         }

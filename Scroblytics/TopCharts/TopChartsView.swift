@@ -116,7 +116,7 @@ struct TopChartsView: View {
         .onChange(of: settings.selectedRangeId) { showsChartRace = false; requestReload() }
         .onChange(of: settings.compareMode) { requestReload() }
         .onChange(of: settings.compareCustomDate) { requestReload() }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             cache.removeAll()
             TopChartsEngine.invalidatePoolCache()
             ChartRaceEngine.invalidateCache()

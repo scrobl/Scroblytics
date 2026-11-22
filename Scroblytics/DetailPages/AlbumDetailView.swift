@@ -9,6 +9,16 @@ struct AlbumDetailView: View {
     let navigation: DetailNavigationCoordinator
 
     @Environment(\.modelContext) private var modelContext
+    /// Bumped when the person's name corrections change, so the page shows and loads under the new spelling.
+    @State private var nameRevision = 0
+    @State private var renamedTo: String?
+    @State private var correctingName = false
+    private var shown: AlbumIdentity {
+        _ = nameRevision
+        var current = NameCorrections.current.corrected(identity)
+        if let renamedTo { current = AlbumIdentity(artist: current.artist, name: renamedTo, imageURL: current.imageURL) }
+        return current
+    }
     @State private var model = AlbumDetailModel()
     @State private var showingFixSheet = false
     @State private var showingReleaseDateEdit = false
@@ -31,7 +41,7 @@ struct AlbumDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                DetailBreadcrumbBar(navigation: navigation, artist: ArtistIdentity(name: identity.artist), album: nil, current: identity.name)
+                DetailBreadcrumbBar(navigation: navigation, artist: ArtistIdentity(name: shown.artist), album: nil, current: shown.name)
 
                 ChartControlsPanel(settings: settings, rangeOptions: rangeOptions, currentRange: range) {
                     // The table below carries its own "Tracks" heading; this row is only the list / grid switch.
@@ -41,12 +51,13 @@ struct AlbumDetailView: View {
                 }
 
                 DetailHeaderCard(
-                    entity: .album, name: identity.name, subtitle: identity.artist, tertiary: nil,
-                    imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
+                    entity: .album, name: shown.name, subtitle: shown.artist, tertiary: nil,
+                    imageURL: shown.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
                     // Only offered once the album's match group exists: it is built from this album's scrobbles, so an album
                     // with none (or one whose turnover is still loading) has nothing to fix yet.
                     onFixAlbumMatch: model.currentGroup == nil ? nil : { showingFixSheet = true },
+                    onCorrectName: { correctingName = true },
                     facts: model.facts(onEditReleaseDate: { showingReleaseDateEdit = true }, onFixAlbumMatch: { showingFixSheet = true })
                         + AppleMusicDetailsLookup.facts(model.appleMusic, entity: "album")
                         + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
@@ -54,7 +65,7 @@ struct AlbumDetailView: View {
                 ) {
                     EntityTagsSectionView(
                         communityTags: model.communityTags, yourTags: model.yourTags, entity: .album,
-                        artist: identity.artist, album: identity.name, track: nil,
+                        artist: shown.artist, album: shown.name, track: nil,
                         modelContext: modelContext,
                         onTagsUpdated: { model.tagsWereUpdated($0) }
                     )
@@ -63,13 +74,13 @@ struct AlbumDetailView: View {
                 if settings.isGridView(for: .track, context: .detail) {
                     // The artwork grid is the same as before: only the tracks played in the period.
                     EntitySubListView(
-                        entity: .track, artist: identity.artist, album: identity.name,
+                        entity: .track, artist: shown.artist, album: shown.name,
                         range: range, compareRange: compareRange, metric: settings.metric,
                         isGridView: true, origin: navigation.origin, rangeID: settings.selectedRangeId
                     )
                 } else {
                     AlbumTrackTable(
-                        artist: identity.artist, album: identity.name, range: range, compareRange: compareRange,
+                        artist: shown.artist, album: shown.name, range: range, compareRange: compareRange,
                         metric: settings.metric, turnover: model.turnoverState, albumReleaseDate: model.releaseDate
                     )
                 }
@@ -77,11 +88,16 @@ struct AlbumDetailView: View {
             .padding()
         }
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
-        .navigationTitle(identity.name)
-        .task(id: identity.id) {
+        .navigationTitle(shown.name)
+        .onReceive(NotificationCenter.default.publisher(for: .nameCorrectionsDidChange)) { _ in nameRevision += 1 }
+        .sheet(isPresented: $correctingName) {
+            NameCorrectionSheet(subject: NameCorrectionSubject(kind: .album, artist: shown.artist, name: shown.name)) { renamedTo = $0; nameRevision += 1 }
+        }
+        .task(id: "\(identity.id)#\(nameRevision)") {
+            let loadID = "\(identity.id)#\(nameRevision)"
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { await model.loadAppleMusic(); return }
-            model.bind(identity: identity, context: modelContext)
+            if model.isLoaded(for: loadID) { await model.loadAppleMusic(); return }
+            model.bind(identity: shown, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
             let rangeID = settings.selectedRangeId
@@ -96,7 +112,7 @@ struct AlbumDetailView: View {
             async let lean: Void = model.loadWeatherLean(range: current)
             async let music: Void = model.loadAppleMusic()
             _ = await (turnover, stats, tags, time, release, ranks, lean, music)
-            if !Task.isCancelled { model.markLoaded(identity.id) }
+            if !Task.isCancelled { model.markLoaded(loadID) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
         .onChange(of: settings.compareMode) { reloadForRange() }
@@ -118,7 +134,7 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $showingFixSheet) {
             if let group = model.currentGroup {
                 AlbumMatchFixView(
-                    group: group, openedFrom: identity.name, modelContext: modelContext, client: model.makeClient(),
+                    group: group, openedFrom: shown.name, modelContext: modelContext, client: model.makeClient(),
                     onResolved: { Task { await model.loadTurnover() } }
                 )
             } else {
@@ -135,7 +151,7 @@ struct AlbumDetailView: View {
         }
         .sheet(isPresented: $showingReleaseDateEdit) {
             ReleaseDateEditView(
-                target: .album(artist: identity.artist, album: identity.name),
+                target: .album(artist: shown.artist, album: shown.name),
                 detectedDate: model.releaseDateOverride() == nil ? model.releaseDate : nil,
                 currentOverride: model.releaseDateOverride(),
                 modelContext: modelContext,

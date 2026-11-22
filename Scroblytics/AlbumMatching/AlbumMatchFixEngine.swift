@@ -29,10 +29,8 @@ enum AlbumMatchFixEngine {
     /// here means something unexpected (a stale group, a sync gap) — worth
     /// surfacing, not silently papering over with a fabricated row.
     static func findAlbum(context: ModelContext, group: AlbumGroup) throws -> Album {
-        let key = TextNormalization.albumIdentityKey(artist: group.artist, album: group.displayName)
-        var descriptor = FetchDescriptor<Album>(predicate: #Predicate { $0.identityKey == key })
-        descriptor.fetchLimit = 1
-        guard let album = try context.fetch(descriptor).first else {
+        // Found across artist-capitalization differences: the group may carry a name the person corrected.
+        guard let album = ReleaseDateEngine.albumRow(context: context, artist: group.artist, album: group.displayName) else {
             throw FixError.albumNotFound(artist: group.artist, album: group.displayName)
         }
         return album

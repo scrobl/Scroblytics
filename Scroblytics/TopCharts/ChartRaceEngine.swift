@@ -67,7 +67,7 @@ private actor ChartRaceDataReader {
             predicate: #Predicate<Scrobble> { $0.playedAt >= from && $0.playedAt <= to },
             sortBy: [SortDescriptor(\.playedAt)]
         )
-        return try modelContext.fetch(descriptor).map(\.snapshot)
+        return QueryIdentity.applyingNameCorrections(try modelContext.fetch(descriptor).map(\.snapshot))
     }
 }
 

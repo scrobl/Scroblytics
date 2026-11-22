@@ -36,29 +36,33 @@ enum AppleMusicPlaylistBuilder {
         perEntityLimit: Int = 50,
         totalLimit: Int = 1_000
     ) async throws -> [AppleMusicPlaylistTrack] {
+        // The plays as Last.fm has them (what is sent to Music) and the same plays with the person's name corrections applied (what the
+        // chart entries are named by). Both arrays are in the same order, so a play found by its corrected name is read back raw.
         let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        let shownAs = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
         let durations = DurationEngine.loadSnapshot(context: context).secondsLookup
         return await Task.detached(priority: .userInitiated) {
-            let inRange = scrobbles.filter { $0.playedAt >= range.from && $0.playedAt <= range.to }
+            let inRange = scrobbles.indices.filter { scrobbles[$0].playedAt >= range.from && scrobbles[$0].playedAt <= range.to }
             var output: [AppleMusicPlaylistTrack] = []
             var exportedKeys = Set<String>()
 
             for entry in entries where output.count < totalLimit {
-                let matching = inRange.filter { scrobble in
+                let matching: [ScrobbleSnapshot] = inRange.filter { index in
+                    let scrobble = shownAs[index]
                     switch entity {
                     case .artist:
-                        return scrobble.artistName == entry.name
+                        return NameKeys.same(scrobble.artistName, entry.name)
                     case .album:
                         guard let artist = entry.artist else { return false }
-                        return scrobble.albumName == entry.name
+                        return NameKeys.same(scrobble.albumName, entry.name)
                             && TextNormalization.trackMatchesArtistContext(
                                 trackArtist: scrobble.artistName,
                                 context: artist
                             )
                     case .track:
-                        return scrobble.trackName == entry.name && scrobble.artistName == entry.artist
+                        return NameKeys.same(scrobble.trackName, entry.name) && NameKeys.same(scrobble.artistName, entry.artist ?? "")
                     }
-                }
+                }.map { scrobbles[$0] }
 
                 struct Candidate {
                     var track: AppleMusicPlaylistTrack

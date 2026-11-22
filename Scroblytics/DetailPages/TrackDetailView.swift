@@ -8,6 +8,16 @@ struct TrackDetailView: View {
     let navigation: DetailNavigationCoordinator
 
     @Environment(\.modelContext) private var modelContext
+    /// Bumped when the person's name corrections change, so the page shows and loads under the new spelling.
+    @State private var nameRevision = 0
+    @State private var renamedTo: String?
+    @State private var correctingName = false
+    private var shown: TrackIdentity {
+        _ = nameRevision
+        var current = NameCorrections.current.corrected(identity)
+        if let renamedTo { current = TrackIdentity(artist: current.artist, name: renamedTo, album: current.album, imageURL: current.imageURL, scopedAlbum: current.scopedAlbum) }
+        return current
+    }
     @State private var model = TrackDetailModel()
     @State private var showingDurationEdit = false
     @State private var showingBPMEdit = false
@@ -31,30 +41,31 @@ struct TrackDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 DetailBreadcrumbBar(
                     navigation: navigation,
-                    artist: ArtistIdentity(name: identity.artist),
-                    album: identity.album.map { AlbumIdentity(artist: identity.artist, name: $0) },
-                    current: identity.name
+                    artist: ArtistIdentity(name: shown.artist),
+                    album: shown.album.map { AlbumIdentity(artist: shown.artist, name: $0) },
+                    current: shown.name
                 )
 
                 ChartFilterBarSection(settings: settings, rangeOptions: rangeOptions, currentRange: range)
 
                 // Opened from an album's track list: that album's plays, with a way to every album's.
-                if let album = identity.scopedAlbum {
+                if let album = shown.scopedAlbum {
                     TrackAlbumScopeBar(
-                        album: album, song: identity.name, onlyThisAlbum: $model.onlyThisAlbum,
+                        album: album, song: shown.name, onlyThisAlbum: $model.onlyThisAlbum,
                         plays: model.stats?.plays ?? 0, otherAlbums: model.otherAlbumPlays
                     )
                 }
 
                 DetailHeaderCard(
-                    entity: .track, name: identity.name, subtitle: identity.artist, tertiary: identity.album,
-                    imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
+                    entity: .track, name: shown.name, subtitle: shown.artist, tertiary: shown.album,
+                    imageURL: shown.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     // A single track's time listened is its length times its plays; no separate lookup is needed.
                     timeListenedSeconds: model.resolvedDuration.map { $0 * (model.stats?.plays ?? 0) },
                     // The yearly ranks are the song's across every album, so they step aside while one album is shown.
                     yearlyTopRanks: model.activeAlbum == nil ? model.yearlyTopRanks : [],
                     onToggleLoved: { Task { await model.toggleLoved(range: range) } },
                     isTogglingLoved: model.isTogglingLoved,
+                    onCorrectName: { correctingName = true },
                     facts: model.facts(
                         onEditReleaseDate: { showingReleaseDateEdit = true },
                         onEditDuration: { showingDurationEdit = true },
@@ -65,7 +76,7 @@ struct TrackDetailView: View {
                 ) {
                     EntityTagsSectionView(
                         communityTags: model.communityTags, yourTags: model.yourTags, entity: .track,
-                        artist: identity.artist, album: identity.album, track: identity.name,
+                        artist: shown.artist, album: shown.album, track: shown.name,
                         modelContext: modelContext,
                         onTagsUpdated: { model.tagsWereUpdated($0) }
                     )
@@ -82,12 +93,17 @@ struct TrackDetailView: View {
             .padding()
         }
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
-        .navigationTitle(identity.name)
-        .task(id: identity.id) {
+        .navigationTitle(shown.name)
+        .onReceive(NotificationCenter.default.publisher(for: .nameCorrectionsDidChange)) { _ in nameRevision += 1 }
+        .sheet(isPresented: $correctingName) {
+            NameCorrectionSheet(subject: NameCorrectionSubject(kind: .track, artist: shown.artist, name: shown.name)) { renamedTo = $0; nameRevision += 1 }
+        }
+        .task(id: "\(identity.id)#\(nameRevision)") {
+            let loadID = "\(identity.id)#\(nameRevision)"
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
             // The weather may have changed meanwhile (a trip added, a download finished): that alone is read again.
-            if model.isLoaded(for: identity.id) { await model.loadWeather(); await model.loadWeatherLean(range: range); await model.loadAppleMusic(); return }
-            model.bind(identity: identity, context: modelContext)
+            if model.isLoaded(for: loadID) { await model.loadWeather(); await model.loadWeatherLean(range: range); await model.loadAppleMusic(); return }
+            model.bind(identity: shown, context: modelContext)
             model.loadOldestScrobbleDate()
             let current = range
             model.loadStats(range: current)
@@ -101,7 +117,7 @@ struct TrackDetailView: View {
             async let lean: Void = model.loadWeatherLean(range: current)
             async let music: Void = model.loadAppleMusic()
             _ = await (ranks, tags, duration, release, weather, lean, music)
-            if !Task.isCancelled { model.markLoaded(identity.id) }
+            if !Task.isCancelled { model.markLoaded(loadID) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
         .onChange(of: settings.compareMode) { reloadForRange() }
@@ -122,14 +138,14 @@ struct TrackDetailView: View {
         }
         .sheet(isPresented: $showingBPMEdit) {
             TrackBPMEditView(
-                artist: identity.artist, track: identity.name,
+                artist: shown.artist, track: shown.name,
                 detected: model.overrideBPM == nil ? model.resolvedBPM : nil, currentOverride: model.overrideBPM,
                 modelContext: modelContext, onSaved: { model.loadBPM() }
             )
         }
         .sheet(isPresented: $showingDurationEdit) {
             TrackDurationEditView(
-                artist: identity.artist, track: identity.name, album: model.primaryAlbum ?? identity.album,
+                artist: shown.artist, track: shown.name, album: model.primaryAlbum ?? shown.album,
                 detectedSeconds: model.overrideSeconds == nil ? model.resolvedDuration : nil,
                 currentOverrideSeconds: model.overrideSeconds, modelContext: modelContext,
                 onSaved: { Task { await model.loadDuration() } }
@@ -137,7 +153,7 @@ struct TrackDetailView: View {
         }
         .sheet(isPresented: $showingReleaseDateEdit) {
             ReleaseDateEditView(
-                target: .track(artist: identity.artist, track: identity.name),
+                target: .track(artist: shown.artist, track: shown.name),
                 detectedDate: model.releaseDateOverride() == nil ? model.releaseDate : nil,
                 currentOverride: model.releaseDateOverride(),
                 modelContext: modelContext,

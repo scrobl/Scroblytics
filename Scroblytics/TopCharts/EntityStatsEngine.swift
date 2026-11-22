@@ -51,12 +51,14 @@ private actor EntityStatsDataReader {
         album: String,
         range: DateRange
     ) throws -> [ScrobbleSnapshot] {
+        // The database narrows by a loose, case-insensitive match; the exact test (capitalization and spacing ignored) is here, so the
+        // plays are found whichever spelling of the album's name the page was opened with.
         let descriptor = FetchDescriptor<Scrobble>(predicate: #Predicate<Scrobble> {
-            $0.albumName == album
+            $0.albumName.localizedStandardContains(album)
         })
         return try modelContext.fetch(descriptor)
             .filter {
-                TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist)
+                NameKeys.same($0.albumName, album) && TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist)
             }
             .map(\.snapshot)
     }
@@ -83,10 +85,10 @@ enum EntityStatsEngine {
 
     static func fetchAlbumStats(context: ModelContext, artist: String, album: String, range: DateRange) throws -> EntityStats {
         let descriptor = FetchDescriptor<Scrobble>(predicate: #Predicate<Scrobble> {
-            $0.albumName == album
+            $0.albumName.localizedStandardContains(album)
         })
         let candidates = try context.fetch(descriptor)
-        let matched = candidates.filter { TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist) }
+        let matched = candidates.filter { NameKeys.same($0.albumName, album) && TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist) }
         return summarize(matched, loved: false, range: range)
     }
 
@@ -95,13 +97,13 @@ enum EntityStatsEngine {
         let artistKey = TextNormalization.artistIdentityKey(artist)
         let descriptor = FetchDescriptor<Scrobble>(
             predicate: #Predicate<Scrobble> {
-                $0.artistName.localizedStandardContains(artist) && $0.trackName == track
+                $0.artistName.localizedStandardContains(artist) && $0.trackName.localizedStandardContains(track)
             }
         )
         let loved = LovedTracksEngine.isLoved(context: context, artist: artist, track: track)
         // With an `album`, only the plays under that exact album name, the way an album page counts its own plays.
         return try summarize(
-            context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && (album == nil || $0.albumName == album) },
+            context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && NameKeys.same($0.trackName, track) && (album == nil || NameKeys.same($0.albumName, album ?? "")) },
             loved: loved, range: range
         )
     }
@@ -117,11 +119,11 @@ enum EntityStatsEngine {
         let artistKey = TextNormalization.artistIdentityKey(artist)
         let descriptor = FetchDescriptor<Scrobble>(
             predicate: #Predicate<Scrobble> {
-                $0.artistName.localizedStandardContains(artist) && $0.trackName == track && $0.playedAt >= from && $0.playedAt <= to
+                $0.artistName.localizedStandardContains(artist) && $0.trackName.localizedStandardContains(track) && $0.playedAt >= from && $0.playedAt <= to
             },
             sortBy: [SortDescriptor(\.playedAt, order: .reverse)]
         )
-        return try context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && (album == nil || $0.albumName == album) }
+        return try context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && NameKeys.same($0.trackName, track) && (album == nil || NameKeys.same($0.albumName, album ?? "")) }
             .map { ScrobbleHistoryEntry(playedAt: $0.playedAt, album: $0.albumName.isEmpty ? nil : $0.albumName) }
     }
 
@@ -149,10 +151,10 @@ enum EntityStatsEngine {
         let from = range.from
         let to = range.to
         let descriptor = FetchDescriptor<Scrobble>(predicate: #Predicate<Scrobble> {
-            $0.albumName == album && $0.playedAt >= from && $0.playedAt <= to
+            $0.albumName.localizedStandardContains(album) && $0.playedAt >= from && $0.playedAt <= to
         })
         let candidates = (try? context.fetch(descriptor)) ?? []
-        let matched = candidates.filter { TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist) }
+        let matched = candidates.filter { NameKeys.same($0.albumName, album) && TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist) }
         return await DurationEngine.timeListenedSeconds(context: context, client: client, scrobbles: matched.map(\.snapshot))
     }
 
@@ -160,8 +162,8 @@ enum EntityStatsEngine {
     @MainActor
     static func fetchTrackTimeListened(context: ModelContext, client: DeezerAPIClient, artist: String, track: String) async -> Int {
         let artistKey = TextNormalization.artistIdentityKey(artist)
-        let descriptor = FetchDescriptor<Scrobble>(predicate: #Predicate<Scrobble> { $0.artistName.localizedStandardContains(artist) && $0.trackName == track })
-        let scrobbles = (try? context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) }.map(\.snapshot)) ?? []
+        let descriptor = FetchDescriptor<Scrobble>(predicate: #Predicate<Scrobble> { $0.artistName.localizedStandardContains(artist) && $0.trackName.localizedStandardContains(track) })
+        let scrobbles = (try? context.fetch(descriptor).filter { matchesArtist($0.artistName, key: artistKey) && NameKeys.same($0.trackName, track) }.map(\.snapshot)) ?? []
         return await DurationEngine.timeListenedSeconds(context: context, client: client, scrobbles: scrobbles)
     }
 

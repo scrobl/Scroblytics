@@ -56,7 +56,7 @@ struct FlaggedTracksView: View {
             ToolFilterSettingsStore.save(value, toolId: Self.toolId, context: modelContext)
         }
         .onChange(of: flaggedTracksStore.revision) { Task { await reload() } }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in Task { await reload() } }
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in Task { await reload() } }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in Task { await reload() } }
         .confirmationDialog("Clear all flagged tracks?", isPresented: $isConfirmingClear, titleVisibility: .visible) {
             Button("Clear All", role: .destructive, action: clearAll)
@@ -131,7 +131,7 @@ struct FlaggedTracksView: View {
         isLoading = true
         await flaggedTracksStore.load(container: modelContainer, force: true)
         do {
-            let scrobbles = try await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)
+            let scrobbles = try await ScrobbleHistoryCache.shared.displaySnapshots(container: modelContainer)
             let flags = flaggedTracksStore.snapshots
             let computedRows = await Task.detached(priority: .utility) {
                 FlaggedTracksEngine.rows(flags: flags, scrobbles: scrobbles)

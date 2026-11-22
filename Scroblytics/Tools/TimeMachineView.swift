@@ -160,7 +160,7 @@ struct TimeMachineView: View {
         }
         .onChange(of: selectedDate) { Task { await recompute() } }
         .onReceive(NotificationCenter.default.publisher(for: .weekStartDidChange)) { _ in Task { await recompute() } }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             scrobbles = nil
             Task { await recompute() }
         }

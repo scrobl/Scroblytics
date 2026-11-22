@@ -82,10 +82,8 @@ final class ImageStore {
             removeCustomFile(entity.customImageFilename)
             entity.customImageFilename = filename
         case .album:
-            let identityKey = TextNormalization.albumIdentityKey(artist: target.artist, album: target.album ?? "")
-            var descriptor = FetchDescriptor<Album>(predicate: #Predicate { $0.identityKey == identityKey })
-            descriptor.fetchLimit = 1
-            guard let entity = try context.fetch(descriptor).first else {
+            // Found across artist-capitalization differences, so a corrected artist name still reaches the stored row.
+            guard let entity = ReleaseDateEngine.albumRow(context: context, artist: target.artist, album: target.album ?? "") else {
                 try? FileManager.default.removeItem(at: Self.customImagesDirectory().appendingPathComponent(filename))
                 throw ImageStoreError.entityNotFound
             }
@@ -138,10 +136,7 @@ final class ImageStore {
             removeCustomFile(entity.customImageFilename)
             entity.customImageFilename = nil
         case .album:
-            let identityKey = TextNormalization.albumIdentityKey(artist: target.artist, album: target.album ?? "")
-            var descriptor = FetchDescriptor<Album>(predicate: #Predicate { $0.identityKey == identityKey })
-            descriptor.fetchLimit = 1
-            guard let entity = try context.fetch(descriptor).first else { throw ImageStoreError.entityNotFound }
+            guard let entity = ReleaseDateEngine.albumRow(context: context, artist: target.artist, album: target.album ?? "") else { throw ImageStoreError.entityNotFound }
             let artworkKey = TextNormalization.albumArtworkIdentityKey(
                 artist: target.artist, album: target.album ?? ""
             )
@@ -194,10 +189,7 @@ final class ImageStore {
             )
             artist.imageResolvedAt = Date()
         case .album:
-            let identityKey = TextNormalization.albumIdentityKey(artist: target.artist, album: target.album ?? "")
-            var descriptor = FetchDescriptor<Album>(predicate: #Predicate { $0.identityKey == identityKey })
-            descriptor.fetchLimit = 1
-            guard let album = try context.fetch(descriptor).first else { throw ImageStoreError.entityNotFound }
+            guard let album = ReleaseDateEngine.albumRow(context: context, artist: target.artist, album: target.album ?? "") else { throw ImageStoreError.entityNotFound }
             album.detectedImageFilename = try stableDetectedFilename(
                 newFilename: filename,
                 data: data,

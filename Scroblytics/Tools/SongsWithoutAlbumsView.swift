@@ -174,7 +174,7 @@ struct SongsWithoutAlbumsView: View {
             guard didLoad else { return }
             ToolFilterSettingsStore.save(new, toolId: Self.toolId, context: modelContext)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             Task { musicRead ? await readMusic() : await loadHistory() }
         }
     }

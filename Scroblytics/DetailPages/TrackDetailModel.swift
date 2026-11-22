@@ -56,7 +56,8 @@ final class TrackDetailModel {
 
     /// Points the model at a track and clears what belonged to the previous one.
     func bind(identity: TrackIdentity, context: ModelContext) {
-        self.identity = identity
+        // The person's own spellings (capitalization and spacing), so the page shows and re-queries the same names as every list.
+        self.identity = NameCorrections.current.corrected(identity)
         self.context = context
         onlyThisAlbum = identity.scopedAlbum != nil
         otherAlbumPlays = []
@@ -219,9 +220,9 @@ final class TrackDetailModel {
         let track = requested.name
         let artistKey = TextNormalization.artistIdentityKey(artist)
         let descriptor = FetchDescriptor<Scrobble>(
-            predicate: #Predicate<Scrobble> { $0.artistName.localizedStandardContains(artist) && $0.trackName == track }
+            predicate: #Predicate<Scrobble> { $0.artistName.localizedStandardContains(artist) && $0.trackName.localizedStandardContains(track) }
         )
-        let scrobbles = (try? context.fetch(descriptor).filter { TextNormalization.artistIdentityKey($0.artistName) == artistKey }.map(\.snapshot)) ?? []
+        let scrobbles = (try? context.fetch(descriptor).filter { TextNormalization.artistIdentityKey($0.artistName) == artistKey && NameKeys.same($0.trackName, track) }.map(\.snapshot)) ?? []
         let album = ReleaseDateEngine.primaryAlbum(scrobbles: scrobbles)
         let date = await ReleaseDateEngine.resolveTrackDateAwaiting(
             context: context, musicBrainz: MusicBrainzAPIClient(), deezer: DeezerAPIClient(),

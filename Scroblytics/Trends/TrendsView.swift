@@ -215,7 +215,7 @@ struct TrendsView: View {
             querySnapshots = nil
             requestReload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             oldestScrobbleDate = nil
             scrobbles = nil
             canonicalScrobbles = nil
@@ -298,7 +298,7 @@ struct TrendsView: View {
             let all: [ScrobbleSnapshot]
             if let scrobbles { all = scrobbles } else {
                 let container = modelContainer
-                all = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+                all = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
                 guard latestRequestID == requestID else { return }
                 scrobbles = all
                 oldestScrobbleDate = all.first?.playedAt

@@ -231,7 +231,7 @@ struct EntityTagsSectionView: View {
 
         if entity == .track, let track {
             let descriptor = FetchDescriptor<Scrobble>()
-            let scrobbles = (try? modelContext.fetch(descriptor).map(\.snapshot)) ?? []
+            let scrobbles = QueryIdentity.applyingNameCorrections((try? modelContext.fetch(descriptor).map(\.snapshot)) ?? [])
             let warning = await AlbumScopeWarningEngine.check(
                 scrobbles: scrobbles, client: DeezerAPIClient(), artist: artist, track: track, album: album
             )

@@ -150,7 +150,7 @@ struct ScrobbleHistoryView: View {
         .task { await loadWeather() }
         .task { await loadArtwork() }
         .onReceive(NotificationCenter.default.publisher(for: .weatherDidUpdate)) { _ in Task { await loadWeather() } }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             Task {
                 await resetAndLoad()
                 await loadTotalCount()

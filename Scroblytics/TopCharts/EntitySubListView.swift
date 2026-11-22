@@ -224,7 +224,7 @@ struct EntitySubListView: View {
             ascendingOverride = nil
             if sort == .trackOrder { Task { await loadTrackOrderIfNeeded() } }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             Task { await load() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { notification in

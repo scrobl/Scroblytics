@@ -235,7 +235,7 @@ enum GoalPlaylistSource {
         guard let goal = state.goals.first(where: { $0.id == goalID }) else { throw SourceError.goalGone }
         let stored = try context.fetch(FetchDescriptor<LovedTrackEntry>())
         let loves = stored.map { GoalLove(key: $0.cacheKey, artist: $0.artist, track: $0.track, lovedAt: $0.lovedAt) }
-        let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        let plays = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
         let presence = goal.inAppleLibraryOnly ? LibraryPresenceSnapshot.load(context: context) : nil
         let tags = goal.criteria.tags.isEmpty ? EntityTagsSnapshot.empty : EntityTagsEngine.loadSnapshot(context: context)
         let origins = goal.criteria.countries.isEmpty ? QueryOriginSnapshot.empty : QueryOriginSnapshot.load(context: context)
@@ -1003,7 +1003,7 @@ enum GoalSummaryLoader {
         guard !goals.isEmpty else { return [:] }
         let stored = try context.fetch(FetchDescriptor<LovedTrackEntry>())
         let loves = stored.map { GoalLove(key: $0.cacheKey, artist: $0.artist, track: $0.track, lovedAt: $0.lovedAt) }
-        let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+        let plays = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
         let presence = goals.contains { $0.inAppleLibraryOnly } ? LibraryPresenceSnapshot.load(context: context) : nil
         let tags = goals.contains { !$0.criteria.tags.isEmpty } ? EntityTagsEngine.loadSnapshot(context: context) : EntityTagsSnapshot.empty
         let origins = goals.contains { !$0.criteria.countries.isEmpty } ? QueryOriginSnapshot.load(context: context) : QueryOriginSnapshot.empty

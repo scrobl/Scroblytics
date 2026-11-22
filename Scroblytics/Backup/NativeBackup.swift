@@ -91,7 +91,7 @@ enum AppSchema {
         SimilarityLookupCacheEntry.self, LovedTrackEntry.self, EntityCommunityTagCacheEntry.self, UserEntityTagCacheEntry.self, PersonalTagSyncState.self,
         TrackReleaseDateCacheEntry.self, PopularityCacheEntry.self, SavedConditionSet.self, AlbumImageOverride.self, LibraryPresenceEntry.self,
         LibraryPresenceCheck.self, LibraryGapDismissal.self, LovedAuditDecision.self, ReleaseYearDecision.self, AlbumEditionMatch.self,
-        TagPlaylistRule.self, AutoPlaylist.self, ArtistOriginEntry.self, ArtistOriginEdit.self, OriginAreaCacheEntry.self,
+        TagPlaylistRule.self, AutoPlaylist.self, ArtistOriginEntry.self, ArtistOriginEdit.self, OriginAreaCacheEntry.self, NameCorrection.self,
     ]
 }
 
@@ -127,6 +127,8 @@ enum NativeBackupFormat {
         /// Your own corrections to where artists are from (and the MusicBrainz artists you picked). Not the looked-up places, which can be fetched again.
         /// Optional for the same reason as above.
         var artistOrigins: [ArtistOriginRecord]?
+        /// Your own capitalization and spacing corrections to artist, album and track names (and the "looks right" marks). Optional for the same reason as above.
+        var nameCorrections: [NameCorrectionRecord]?
         /// The Apple Music playlists kept up to date (what each is made from, not its tracks). Optional for the same reason as above.
         var autoPlaylists: [AutoPlaylistRecord]?
         /// The weather home place and the trips (where you were, for the weather). Optional for the same reason as above: restoring an
@@ -193,6 +195,13 @@ enum NativeBackupFormat {
         /// False = reviewed and kept merged. Absent in archives written before it existed, which means true.
         var countsSeparately: Bool? = nil
     }
+    struct NameCorrectionRecord: Codable {
+        let kind: String
+        let artist: String
+        let original: String
+        let display: String?
+        let status: String
+    }
     struct ArtistOriginRecord: Codable {
         let artist: String
         let city: String?; let region: String?; let country: String?; let countryCode: String?
@@ -232,6 +241,7 @@ enum NativeBackupEngine {
         var weatherTrips = 0
         var autoPlaylists = 0
         var artistOrigins = 0
+        var nameCorrections = 0
 
         var description: String {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
@@ -243,6 +253,7 @@ enum NativeBackupEngine {
             if weatherTrips > 0 { text += " · \(weatherTrips) weather trips" }
             if autoPlaylists > 0 { text += " · \(autoPlaylists) automatic playlists" }
             if artistOrigins > 0 { text += " · \(artistOrigins) artist origin edits" }
+            if nameCorrections > 0 { text += " · \(nameCorrections) name corrections" }
             return text
         }
     }
@@ -333,6 +344,7 @@ enum NativeBackupEngine {
         try restoreAlbumEditionMatches(archive.albumEditionMatches, context: context, save: false)
         try restoreAutoPlaylists(archive.autoPlaylists, context: context, save: false)
         try restoreArtistOrigins(archive.artistOrigins, context: context, save: false)
+        try restoreNameCorrections(archive.nameCorrections, context: context, save: false)
         restoreWeatherLocations(archive.weatherLocations)
 
         UserDefaults.standard.set(archive.theme, forKey: AppearancePreference.storageKey)
@@ -340,6 +352,7 @@ enum NativeBackupEngine {
         if let appSettings { appSettings.theme = archive.theme } else { context.insert(AppSettings(theme: archive.theme)) }
         try restoreImages(archive.images)
         try context.save()
+        reloadNameCorrections(context: context)
     }
 
     /// Puts back the weather home place and trips. `nil` (an archive from before they were backed up) leaves the current ones alone. The
@@ -444,6 +457,36 @@ enum NativeBackupEngine {
         if save { try context.save() }
     }
 
+    /// Replaces the name corrections with the archive's; `nil` (an older archive) leaves the current ones alone.
+    static func restoreNameCorrections(_ records: [NativeBackupFormat.NameCorrectionRecord]?, context: ModelContext, save: Bool = true) throws {
+        guard let records else { return }
+        for item in try context.fetch(FetchDescriptor<NameCorrection>()) { context.delete(item) }
+        var seen = Set<String>()
+        for record in records {
+            guard let kind = NameCorrectionKind(rawValue: record.kind), let status = NameCorrectionStatus(rawValue: record.status) else { continue }
+            let key: String
+            let name = kind == .artist ? record.artist : record.original
+            switch kind {
+            case .artist: key = NameKeys.artist(record.artist)
+            case .album: key = NameKeys.album(artist: record.artist, album: record.original)
+            case .track: key = NameKeys.track(artist: record.artist, title: record.original)
+            }
+            guard seen.insert(key).inserted else { continue }
+            context.insert(NameCorrection(
+                key: key, kind: kind, artistKey: NameKeys.fold(record.artist), nameKey: NameKeys.fold(name), artist: record.artist,
+                original: record.original, display: record.display, status: status
+            ))
+        }
+        if save { try context.save() }
+    }
+
+    /// Rebuilds the in-memory corrections from the database and tells the screens, after a restore.
+    static func reloadNameCorrections(context: ModelContext) {
+        let rows = (try? context.fetch(FetchDescriptor<NameCorrection>())) ?? []
+        NameCorrections.install(rows.compactMap(NameCorrectionSnapshot.init(row:)))
+        NotificationCenter.default.post(name: .nameCorrectionsDidChange, object: nil)
+    }
+
     /// Replaces the origin corrections with the archive's; `nil` (an older archive) leaves the current ones alone.
     static func restoreArtistOrigins(_ records: [NativeBackupFormat.ArtistOriginRecord]?, context: ModelContext, save: Bool = true) throws {
         guard let records else { return }
@@ -510,6 +553,9 @@ enum NativeBackupEngine {
             NativeBackupFormat.AlbumEditionMatchRecord(artist: $0.artist, title: $0.title, matchMode: $0.matchResolutionMode?.rawValue, canonicalArtist: $0.canonicalArtist, canonicalAlbum: $0.canonicalAlbum, manualTracklist: $0.manualTracklist, countsSeparately: $0.countsSeparately)
         }
         let autoPlaylists = try autoPlaylistRecords(context: context)
+        let nameCorrections = try context.fetch(FetchDescriptor<NameCorrection>()).map {
+            NativeBackupFormat.NameCorrectionRecord(kind: $0.kind, artist: $0.artist, original: $0.original, display: $0.display, status: $0.status)
+        }
         let originEdits = try context.fetch(FetchDescriptor<ArtistOriginEdit>()).map {
             NativeBackupFormat.ArtistOriginRecord(artist: $0.artist, city: $0.overrideCity, region: $0.overrideRegion, country: $0.overrideCountry, countryCode: $0.overrideCountryCode, chosenMBID: $0.chosenMBID, confirmed: $0.confirmed)
         }
@@ -518,7 +564,7 @@ enum NativeBackupEngine {
         let username = try context.fetch(FetchDescriptor<SyncState>()).first?.username
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         let theme = UserDefaults.standard.string(forKey: AppearancePreference.storageKey) ?? AppearancePreference.dark.rawValue
-        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, releaseYearDecisions: yearDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, artistOrigins: originEdits, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
+        return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, releaseYearDecisions: yearDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, artistOrigins: originEdits, nameCorrections: nameCorrections, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
     }
 
     private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
@@ -535,7 +581,7 @@ enum NativeBackupEngine {
     }
 
     private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
-        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, releaseYearDecisions: archive.releaseYearDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0, artistOrigins: archive.artistOrigins?.count ?? 0)
+        Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, releaseYearDecisions: archive.releaseYearDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0, artistOrigins: archive.artistOrigins?.count ?? 0, nameCorrections: archive.nameCorrections?.count ?? 0)
     }
 
     private static func findOrCreateArtist(named name: String, context: ModelContext) throws -> Artist {

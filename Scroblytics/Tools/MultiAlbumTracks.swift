@@ -288,7 +288,7 @@ enum MultiAlbumTracksEngine {
 @ModelActor
 actor MultiAlbumTracksReader {
     func load(mode: MultiAlbumTrackMatchMode) throws -> [MultiAlbumTrackGroup] {
-        let scrobbles = try modelContext.fetch(FetchDescriptor<Scrobble>()).map(\.snapshot)
+        let scrobbles = QueryIdentity.applyingNameCorrections(try modelContext.fetch(FetchDescriptor<Scrobble>()).map(\.snapshot))
         let lookup = try ImageResolutionEngine.imageLookup(context: modelContext)
         return MultiAlbumTracksEngine.groups(scrobbles: scrobbles, mode: mode, imageLookup: lookup)
     }

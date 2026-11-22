@@ -664,7 +664,7 @@ struct ContentView: View {
         monitor.start()
         func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
         // The most played artist, album and track in the copy, to open.
-        let history = (try? await ScrobbleHistoryCache.shared.snapshots(container: modelContainer)) ?? []
+        let history = (try? await ScrobbleHistoryCache.shared.displaySnapshots(container: modelContainer)) ?? []
         var albums: [String: (artist: String, album: String, track: String, count: Int)] = [:]
         for play in history where !play.albumName.isEmpty && !play.trackName.isEmpty {
             let key = play.artistName + "\u{0}" + play.albumName

@@ -101,7 +101,7 @@ struct TheClimbView: View {
             ToolFilterSettingsStore.save(options, toolId: Self.toolId, context: modelContext)
             Task { await recompute() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             scrobbles = nil
             Task { await recompute() }
         }

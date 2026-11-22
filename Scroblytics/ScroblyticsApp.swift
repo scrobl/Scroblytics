@@ -147,6 +147,8 @@ struct ScroblyticsApp: App {
     var modelContainer: ModelContainer { Self.opened.container }
 
     init() {
+        // The person's own name corrections, before anything is shown.
+        NameCorrections.load(container: Self.opened.container)
         #if DEBUG
         TestProfileChecks.runHeadlessIfRequested()
         TestProfileLauncherChecks.runHeadlessIfRequested(container: modelContainer)
@@ -155,6 +157,8 @@ struct ScroblyticsApp: App {
         LayoutSnapshots.runHeadlessIfRequested(container: modelContainer)
         LovedAuditChecks.runHeadlessIfRequested(container: modelContainer)
         QueryCapChecks.runHeadlessIfRequested()
+        NameCorrectionChecks.runHeadlessIfRequested(container: modelContainer)
+        NameCorrectionChecks.runRealIfRequested(container: modelContainer)
         QueryCapChecks.runRealDumpIfRequested(container: modelContainer)
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()

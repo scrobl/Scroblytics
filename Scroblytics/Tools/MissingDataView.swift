@@ -159,7 +159,7 @@ struct MissingDataView: View {
         .onChange(of: options.rowLimit) { _, _ in
             ToolFilterSettingsStore.save(options, toolId: Self.toolId, context: modelContext)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             scrobbles = nil
             Task { await recompute() }
         }

@@ -186,12 +186,14 @@ private actor TopChartsDataReader {
         if let album {
             let descriptor = FetchDescriptor<Scrobble>(
                 predicate: #Predicate<Scrobble> {
-                    $0.albumName == album && $0.playedAt >= from && $0.playedAt <= to
+                    $0.albumName.localizedStandardContains(album) && $0.playedAt >= from && $0.playedAt <= to
                 },
                 sortBy: [SortDescriptor(\.playedAt)]
             )
+            // Loose match in the database, exact (capitalization and spacing ignored) here: the page may have been opened with the spelling
+            // the person chose rather than the one Last.fm has.
             rows = try modelContext.fetch(descriptor).filter {
-                TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist)
+                NameKeys.same($0.albumName, album) && TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist)
             }
         } else {
             let artistKey = TextNormalization.artistIdentityKey(artist)
@@ -457,7 +459,7 @@ enum TopChartsEngine {
         func scoped(_ pool: [RankableScrobble]) -> [RankableScrobble] {
             pool.filter { scrobble in
                 let matchesArtist = album == nil
-                    ? scrobble.artist == artist
+                    ? NameKeys.same(scrobble.artist, artist)
                     : TextNormalization.trackMatchesArtistContext(trackArtist: scrobble.artist, context: artist)
                 guard matchesArtist else { return false }
                 return album.map { scrobble.album == $0 } ?? true
@@ -545,7 +547,7 @@ enum TopChartsEngine {
                     limit: Int.max,
                     includePeak: false
                 )
-                if let match = entries.first(where: { $0.name == name && $0.artist == artist }),
+                if let match = entries.first(where: { NameKeys.same($0.name, name) && NameKeys.same($0.artist ?? "", artist ?? "") }),
                    match.rank <= 25 {
                     results.append(YearlyRank(year: year, rank: match.rank))
                 }
@@ -578,7 +580,7 @@ enum TopChartsEngine {
             let range = DateRange(from: start, to: end)
 
             let entries = try await fetchRankings(context: context, entity: entity, range: range, limit: Int.max, includePeak: false)
-            guard let match = entries.first(where: { $0.name == name && $0.artist == artist }), match.rank <= 25 else { continue }
+            guard let match = entries.first(where: { NameKeys.same($0.name, name) && NameKeys.same($0.artist ?? "", artist ?? "") }), match.rank <= 25 else { continue }
             results.append(YearlyRank(year: year, rank: match.rank))
         }
         return results.sorted { $0.year > $1.year }
@@ -604,13 +606,17 @@ enum TopChartsEngine {
         let canonicalArtistNames = TextNormalization.canonicalArtistNames(
             (currentPool + (comparePool ?? [])).map(\.artist)
         )
+        // The person's own name corrections (capitalization and spacing) are applied in the same pass, by Last.fm's spelling of the
+        // artist, and win over the most-played spelling.
+        let nameCorrections = NameCorrectionApplier()
         func canonicalized(_ pool: [RankableScrobble]) -> [RankableScrobble] {
             pool.map { scrobble in
                 let key = TextNormalization.artistIdentityKey(scrobble.artist)
+                let (album, track) = nameCorrections.albumAndTrack(artist: scrobble.artist, album: scrobble.album, track: scrobble.track)
                 return RankableScrobble(
-                    artist: canonicalArtistNames[key] ?? scrobble.artist.trimmingCharacters(in: .whitespacesAndNewlines),
-                    album: scrobble.album,
-                    track: scrobble.track,
+                    artist: nameCorrections.artist(scrobble.artist) ?? canonicalArtistNames[key] ?? scrobble.artist.trimmingCharacters(in: .whitespacesAndNewlines),
+                    album: album,
+                    track: track,
                     imageURL: scrobble.imageURL,
                     playedAt: scrobble.playedAt
                 )

@@ -9,6 +9,10 @@ import SwiftUI
 enum LayoutSnapshots {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_NAMECORRECTION"] {
+            snapshotNameCorrection(into: folder, container: container)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_KEYMODE"] {
             snapshotKeyMode(into: folder, container: container)
             return
@@ -1027,6 +1031,43 @@ enum LayoutSnapshots {
                     }
                 }
             }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_NAMECORRECTION=<folder>`: the Correct Name sheet for an album with one spelling, for an artist-credited
+    /// track with two spellings and an existing correction, and with a refused change, light and dark. Made-up names only.
+    @MainActor
+    private static func snapshotNameCorrection(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render(_ name: String, _ model: NameCorrectionModel) async {
+                for dark in [true, false] {
+                    let view = NameCorrectionSheet(model: model).background(Color(nsColor: .windowBackgroundColor)).modelContainer(container).environment(\.colorScheme, dark ? .dark : .light)
+                    let host = NSHostingView(rootView: view)
+                    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    window.contentView = host
+                    for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(120)); host.layoutSubtreeIfNeeded() }
+                    let size = host.fittingSize
+                    host.frame = NSRect(x: 0, y: 0, width: 480, height: max(size.height, 200))
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(dark ? "dark" : "light").png"))
+                    }
+                }
+            }
+            await render("album-one-spelling", .sample(
+                subject: NameCorrectionSubject(kind: .album, artist: "Artist A", name: "AlbumOne"), text: "Albumone",
+                spellings: [("AlbumOne", 192)], hasCorrection: false))
+            await render("track-two-spellings-corrected", .sample(
+                subject: NameCorrectionSubject(kind: .track, artist: "Artist A", name: "Song Two"), text: "Song Two",
+                spellings: [("Song TWO", 31), ("Song two", 4)], hasCorrection: true))
+            await render("album-refused", .sample(
+                subject: NameCorrectionSubject(kind: .album, artist: "Artist A", name: "AlbumOne"), text: "Album One",
+                spellings: [("AlbumOne", 192)], hasCorrection: false))
+            print("[LayoutSnapshots] name correction sheet snapshots written to \(folder)")
             exit(0)
         }
     }

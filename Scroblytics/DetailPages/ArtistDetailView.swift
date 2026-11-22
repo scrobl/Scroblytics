@@ -8,6 +8,16 @@ struct ArtistDetailView: View {
     let navigation: DetailNavigationCoordinator
 
     @Environment(\.modelContext) private var modelContext
+    /// Bumped when the person's name corrections change, so the page shows and loads under the new spelling.
+    @State private var nameRevision = 0
+    @State private var renamedTo: String?
+    @State private var correctingName = false
+    private var shown: ArtistIdentity {
+        _ = nameRevision
+        var current = NameCorrections.current.corrected(identity)
+        if let renamedTo { current = ArtistIdentity(name: renamedTo, imageURL: current.imageURL) }
+        return current
+    }
     @State private var model = ArtistDetailModel()
     @State private var subListEntity: TopChartsEntity = .album
     @State private var showingOriginEdit = false
@@ -30,7 +40,7 @@ struct ArtistDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                DetailBreadcrumbBar(navigation: navigation, artist: nil, album: nil, current: identity.name)
+                DetailBreadcrumbBar(navigation: navigation, artist: nil, album: nil, current: shown.name)
 
                 ChartControlsPanel(settings: settings, rangeOptions: rangeOptions, currentRange: range) {
                     EntityPresentationRow(selectorWidth: 200, isGridView: settings.binding(for: subListEntity, context: .detail)) {
@@ -42,23 +52,24 @@ struct ArtistDetailView: View {
                 }
 
                 DetailHeaderCard(
-                    entity: .artist, name: identity.name, subtitle: nil, tertiary: nil,
-                    imageURL: identity.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
+                    entity: .artist, name: shown.name, subtitle: nil, tertiary: nil,
+                    imageURL: shown.imageURL, stats: model.stats, errorMessage: model.errorMessage, metric: settings.metric,
                     timeListenedSeconds: model.timeListenedSeconds, yearlyTopRanks: model.yearlyTopRanks,
+                    onCorrectName: { correctingName = true },
                     facts: [ArtistOriginFact.tile(model.origin, lookupsOn: ArtistOriginStore.shared.enabled, onEdit: { showingOriginEdit = true })]
                         + AppleMusicDetailsLookup.facts(model.appleMusic, entity: "artist") + (EntityWeatherLean.fact(for: model.weatherLean).map { [$0] } ?? []),
                     sharePeriodLabel: periodLabel
                 ) {
                     EntityTagsSectionView(
                         communityTags: model.communityTags, yourTags: model.yourTags, entity: .artist,
-                        artist: identity.name, album: nil, track: nil,
+                        artist: shown.name, album: nil, track: nil,
                         modelContext: modelContext,
                         onTagsUpdated: { model.tagsWereUpdated($0) }
                     )
                 }
 
                 EntitySubListView(
-                    entity: subListEntity, artist: identity.name, album: nil,
+                    entity: subListEntity, artist: shown.name, album: nil,
                     range: range, compareRange: compareRange, metric: settings.metric,
                     isGridView: settings.isGridView(for: subListEntity, context: .detail), origin: navigation.origin,
                     rangeID: settings.selectedRangeId
@@ -68,11 +79,16 @@ struct ArtistDetailView: View {
             .padding()
         }
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
-        .navigationTitle(identity.name)
-        .task(id: identity.id) {
+        .navigationTitle(shown.name)
+        .onReceive(NotificationCenter.default.publisher(for: .nameCorrectionsDidChange)) { _ in nameRevision += 1 }
+        .sheet(isPresented: $correctingName) {
+            NameCorrectionSheet(subject: NameCorrectionSubject(kind: .artist, artist: shown.name, name: shown.name)) { renamedTo = $0; nameRevision += 1 }
+        }
+        .task(id: "\(identity.id)#\(nameRevision)") {
+            let loadID = "\(identity.id)#\(nameRevision)"
             // Reappearing (a tab switched back to) is not a reason to blank the page and load it all again.
-            if model.isLoaded(for: identity.id) { await model.loadAppleMusic(); await model.loadOrigin(); return }
-            model.bind(identity: identity, context: modelContext)
+            if model.isLoaded(for: loadID) { await model.loadAppleMusic(); await model.loadOrigin(); return }
+            model.bind(identity: shown, context: modelContext)
             model.loadOldestScrobbleDate()
             model.loadStats(range: range)
             async let ranks: Void = model.loadYearlyTopRanks()
@@ -82,7 +98,7 @@ struct ArtistDetailView: View {
             async let music: Void = model.loadAppleMusic()
             async let origin: Void = model.loadOrigin()
             _ = await (ranks, tags, time, lean, music, origin)
-            if !Task.isCancelled { model.markLoaded(identity.id) }
+            if !Task.isCancelled { model.markLoaded(loadID) }
         }
         .onChange(of: settings.selectedRangeId) { reloadForRange() }
         .onChange(of: settings.compareMode) { reloadForRange() }
@@ -94,7 +110,7 @@ struct ArtistDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .appleMusicDetailsDidUpdate)) { _ in Task { await model.loadAppleMusic() } }
         .onReceive(NotificationCenter.default.publisher(for: .artistOriginDidUpdate)) { _ in Task { await model.loadOrigin() } }
         .sheet(isPresented: $showingOriginEdit) {
-            ArtistOriginEditView(artist: identity.name, container: modelContext.container, onChanged: { Task { await model.loadOrigin() } })
+            ArtistOriginEditView(artist: shown.name, container: modelContext.container, onChanged: { Task { await model.loadOrigin() } })
         }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await model.loadTimeListened(range: range) }

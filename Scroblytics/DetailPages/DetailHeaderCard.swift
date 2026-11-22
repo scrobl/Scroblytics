@@ -26,6 +26,8 @@ struct DetailHeaderCard<Tags: View>: View {
     var isTogglingLoved = false
     /// Albums only: adds "Fix album match…" to the artwork's right-click menu.
     var onFixAlbumMatch: (() -> Void)? = nil
+    /// Adds a pencil beside the title that opens "Correct Name…" (capitalization and spacing, shown on this Mac only).
+    var onCorrectName: (() -> Void)? = nil
     /// The page's own facts, under the headline numbers.
     var facts: [DetailFact] = []
     /// A weather fact the page does not show but the Share card can include (a track's).
@@ -115,6 +117,12 @@ struct DetailHeaderCard<Tags: View>: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(name).font(AppTypography.entityTitle).lineLimit(3)
+                if let onCorrectName {
+                    Button(action: onCorrectName) { Image(systemName: "pencil").font(.system(size: 12)) }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .help("Correct this name’s capitalization or spacing…")
+                        .accessibilityLabel("Correct name")
+                }
                 PopularityMarker(entity: entity, name: name, artist: subtitle, font: .system(size: 13))
                 if let onToggleLoved, let stats {
                     lovedHeartButton(loved: stats.loved, action: onToggleLoved)

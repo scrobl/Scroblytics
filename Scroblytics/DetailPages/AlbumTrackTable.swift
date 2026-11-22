@@ -125,7 +125,7 @@ struct AlbumTrackTable: View {
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
             Task { await loadLengths() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             Task { await load() }
         }
         .onReceive(NotificationCenter.default.publisher(for: DurationEngine.progressNotification)) { _ in
@@ -351,7 +351,7 @@ struct AlbumTrackTable: View {
         let container = modelContext.container
         let artist = artist, album = album
         let names: [String: PlayedName] = (try? await offMain {
-            let plays = try await ScrobbleHistoryCache.shared.snapshots(container: container)
+            let plays = try await ScrobbleHistoryCache.shared.displaySnapshots(container: container)
             return AlbumTrackRows.playedNames(from: plays, artist: artist, album: album)
         }) ?? [:]
         guard !Task.isCancelled else { return }

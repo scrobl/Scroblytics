@@ -93,12 +93,12 @@ enum EntityWeatherLeanLoader {
     }
 
     static func album(container: ModelContainer, artist: String, album: String, range: DateRange) async -> EntityWeatherLean.Result {
-        await load(container: container, range: range) { $0.albumName == album && TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist) }
+        await load(container: container, range: range) { NameKeys.same($0.albumName, album) && TextNormalization.trackMatchesArtistContext(trackArtist: $0.artistName, context: artist) }
     }
 
     static func track(container: ModelContainer, artist: String, track: String, range: DateRange) async -> EntityWeatherLean.Result {
         let key = TextNormalization.artistIdentityKey(artist)
-        return await load(container: container, range: range) { $0.trackName == track && TextNormalization.artistIdentityKey($0.artistName) == key }
+        return await load(container: container, range: range) { NameKeys.same($0.trackName, track) && TextNormalization.artistIdentityKey($0.artistName) == key }
     }
 
     private static func load(container: ModelContainer, range: DateRange, isEntity: @escaping @Sendable (ScrobbleSnapshot) -> Bool) async -> EntityWeatherLean.Result {

@@ -109,9 +109,9 @@ actor ChartToppersReader {
         period: CollagePeriod,
         yearRange: Int
     ) throws -> [ChartTopperPeriod] {
-        let rows = try modelContext.fetch(
+        let rows = QueryIdentity.applyingNameCorrections(try modelContext.fetch(
             FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])
-        ).map(\.snapshot)
+        ).map(\.snapshot))
         let durations = DurationEngine.loadSnapshot(context: modelContext).secondsLookup
         let releaseDates = ReleaseDateEngine.loadSnapshot(context: modelContext)
         let imageLookup = try ImageResolutionEngine.imageLookup(context: modelContext)
@@ -147,9 +147,9 @@ actor CollagePeriodReader {
         period: CollagePeriod,
         limit: Int
     ) throws -> [CollageItem] {
-        let rows = try modelContext.fetch(
+        let rows = QueryIdentity.applyingNameCorrections(try modelContext.fetch(
             FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])
-        ).map(\.snapshot)
+        ).map(\.snapshot))
         let durations = DurationEngine.loadSnapshot(context: modelContext).secondsLookup
         let releaseDates = ReleaseDateEngine.loadSnapshot(context: modelContext)
         let imageLookup = try ImageResolutionEngine.imageLookup(context: modelContext)

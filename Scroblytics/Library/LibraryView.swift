@@ -102,7 +102,7 @@ struct LibraryView: View {
         .onChange(of: settings.compareMode) { requestReload() }
         .onChange(of: settings.compareCustomDate) { requestReload() }
         .onChange(of: settings.metric) { requestReload() }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in
             oldestScrobbleDate = nil
             requestReload()
         }

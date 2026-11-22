@@ -90,6 +90,7 @@ struct EntityContextMenuModifier: ViewModifier {
     @State private var isPointerOverBadge = false
     @State private var isRevealed = false
     @State private var hideTask: Task<Void, Never>?
+    @State private var correctingSubject: NameCorrectionSubject?
     @FocusState private var badgeHasFocus: Bool
 
     /// The items, built once for right-click and for the "…" badge or button, so the two can never differ.
@@ -106,7 +107,8 @@ struct EntityContextMenuModifier: ViewModifier {
             resyncMessage: $resyncMessage,
             isResyncing: $isResyncing,
             imageRefreshMessage: $imageRefreshMessage,
-            isRefreshingImage: $isRefreshingImage
+            isRefreshingImage: $isRefreshingImage,
+            correctingSubject: $correctingSubject
         )
         .onAppear(perform: refreshState)
     }
@@ -187,6 +189,7 @@ struct EntityContextMenuModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         presented(content)
+            .sheet(item: $correctingSubject) { subject in NameCorrectionSheet(subject: subject) }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -267,6 +270,20 @@ private struct EntityContextMenuItems: View {
     @Binding var isResyncing: Bool
     @Binding var imageRefreshMessage: String?
     @Binding var isRefreshingImage: Bool
+    @Binding var correctingSubject: NameCorrectionSubject?
+
+    /// What "Correct Name…" is about, or nil where it doesn't apply (an album credited to "Various Artists" has no single artist to file it under).
+    private var correctionSubject: NameCorrectionSubject? {
+        switch target.kind {
+        case .artist: return NameCorrectionSubject(kind: .artist, artist: target.artist, name: target.artist)
+        case .album:
+            guard let album = target.album, !album.isEmpty, !TextNormalization.isCompilationArtist(target.artist) else { return nil }
+            return NameCorrectionSubject(kind: .album, artist: target.artist, name: album)
+        case .track:
+            guard let track = target.track, !track.isEmpty else { return nil }
+            return NameCorrectionSubject(kind: .track, artist: target.artist, name: track)
+        }
+    }
 
     var body: some View {
         if let onOpen {
@@ -299,6 +316,11 @@ private struct EntityContextMenuItems: View {
 
         if target.kind == .album, let onFixAlbumMatch {
             Button("Fix Album Match…", action: onFixAlbumMatch)
+            Divider()
+        }
+
+        if let subject = correctionSubject {
+            Button("Correct Name…") { correctingSubject = subject }
             Divider()
         }
 

@@ -350,7 +350,7 @@ struct OverviewView: View {
     @State private var needsReload = false
 
     /// Fires when synced data, the week-start setting or the Last.fm account changes: the page must recompute.
-    private static let dataChanged = NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)
+    private static let dataChanged = NotificationCenter.historyOrNamesChanged
         .merge(with: NotificationCenter.default.publisher(for: .weekStartDidChange))
         .merge(with: NotificationCenter.default.publisher(for: .lastfmCredentialsDidChange))
     @State private var isReloading = false

@@ -100,7 +100,7 @@ struct MilestonesView: View {
             .navigationDestination(for: TrackIdentity.self) { TrackDetailView(identity: $0, settings: settings, navigation: navigation) }
         }
         .task(id: isActive) { await loadIfNeeded() }
-        .onReceive(NotificationCenter.default.publisher(for: .scrobbleSyncDidComplete)) { _ in requestReload() }
+        .onReceive(NotificationCenter.historyOrNamesChanged) { _ in requestReload() }
         .onReceive(NotificationCenter.default.publisher(for: .imageDidChange)) { _ in requestReload() }
     }
 

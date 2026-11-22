@@ -9,6 +9,10 @@ import SwiftUI
 enum LayoutSnapshots {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_NAMECORRECTIONSTOOL"] {
+            snapshotNameCorrectionsTool(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_NAMECORRECTION"] {
             snapshotNameCorrection(into: folder, container: container)
             return
@@ -1031,6 +1035,61 @@ enum LayoutSnapshots {
                     }
                 }
             }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_NAMECORRECTIONSTOOL=<folder>`: the rows of the Name Corrections tool (one of each reason, a long name, and the
+    /// corrected and looks-right lists), light and dark, at three widths. Made-up names only.
+    @MainActor
+    private static func snapshotNameCorrectionsTool(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: scheme == "dark" ? .darkAqua : .aqua)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                }
+            }
+            typealias Finding = NameCorrectionFinder.Finding
+            typealias Spelling = NameCorrectionFinder.Spelling
+            let findings = [
+                Finding(kind: .track, artist: "Artist A", spellings: [Spelling(name: "Song two", plays: 31), Spelling(name: "Song TWO", plays: 4)], suggestion: "Song two", reason: .variants, key: "a"),
+                Finding(kind: .album, artist: "Artist A", spellings: [Spelling(name: "MidNight Garden", plays: 192)], suggestion: "Midnight Garden", reason: .oddCapitals, key: "b"),
+                Finding(kind: .track, artist: "Artist With A Very Long Name & Another Artist Entirely", spellings: [Spelling(name: "A VERY LONG TRACK TITLE THAT GOES ON AND ON FOR QUITE SOME TIME (LIVE AT THE OLD BARN)", plays: 12)], suggestion: "A Very Long Track Title That Goes on and on for Quite Some Time (Live at the Old Barn)", reason: .allCaps, key: "c"),
+                Finding(kind: .artist, artist: "Band X", spellings: [Spelling(name: "Band X", plays: 300), Spelling(name: "BAND X", plays: 2)], suggestion: "Band X", reason: .variants, key: "d"),
+                Finding(kind: .album, artist: "Artist B", spellings: [Spelling(name: "Padded  Title ", plays: 1)], suggestion: "Padded Title", reason: .spacing, key: "e"),
+            ]
+            let corrected = NameCorrectionSnapshot(key: "f", kind: .album, artistKey: "artist a", nameKey: "albumone", artist: "Artist A", original: "AlbumOne", display: "Albumone", status: .corrected)
+            let right = NameCorrectionSnapshot(key: "g", kind: .track, artistKey: "artist a", nameKey: "x", artist: "Artist A", original: "DeVotchKa Tune", display: nil, status: .looksRight)
+            for scheme in ["dark", "light"] {
+                for width in [900, 620, 420] as [CGFloat] {
+                    let review = LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(findings) { NameCorrectionFindingRow(finding: $0, isBusy: false, onApply: {}, onEdit: {}, onLooksRight: {}, onOpen: {}); Divider() }
+                    }
+                    .padding(.horizontal, 12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(16)
+                    await render(review, width: width, scheme: scheme, name: "review")
+                    let decided = VStack(alignment: .leading, spacing: 0) {
+                        NameCorrectionDecisionRow(row: corrected, isBusy: false, onEdit: {}, onReset: {}); Divider()
+                        NameCorrectionDecisionRow(row: right, isBusy: false, onEdit: {}, onReset: {})
+                    }
+                    .padding(.horizontal, 12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(16)
+                    await render(decided, width: width, scheme: scheme, name: "decided")
+                }
+            }
+            print("[LayoutSnapshots] name corrections tool snapshots written to \(folder)")
             exit(0)
         }
     }

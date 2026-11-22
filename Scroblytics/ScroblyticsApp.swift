@@ -159,6 +159,7 @@ struct ScroblyticsApp: App {
         QueryCapChecks.runHeadlessIfRequested()
         NameCorrectionChecks.runHeadlessIfRequested(container: modelContainer)
         NameCorrectionChecks.runRealIfRequested(container: modelContainer)
+        NameCorrectionChecks.runFinderIfRequested(container: modelContainer)
         QueryCapChecks.runRealDumpIfRequested(container: modelContainer)
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()

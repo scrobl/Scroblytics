@@ -163,6 +163,7 @@ extension HelpContent {
                 .bullets([
                     "Right-click an artist, album or track anywhere (Top Charts, Library, Overview, Tools…) or use its “…” button, and choose **Correct Name…**.",
                     "On an artist, album or track page, click the pencil beside the title.",
+                    "Or let [Name Corrections](help://tool-name-corrections) find them: it lists names that look oddly capitalized or spaced, with a suggestion to apply, edit or dismiss.",
                     "Type the spelling you want under **Show as**. The sheet lists the spellings Last.fm has, with their plays. **Save** is available once your spelling differs from what is shown and still reads as the same name; a different word, an inserted space or a missing letter is refused, with the reason.",
                     "**Reset to Last.fm’s spelling** takes a correction back.",
                 ]),

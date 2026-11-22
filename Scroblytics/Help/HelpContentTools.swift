@@ -23,6 +23,7 @@ extension HelpContent {
                     ["[Multi-Album Tracks](help://tool-multi-album)", "Songs appearing on several albums", "Nothing"],
                     ["[Missing Data](help://tool-missing-data)", "Items lacking dates, images, lengths or a match", "Optional: Music app"],
                     ["[Flagged Tracks](help://tool-flagged)", "Your hand-picked list", "Nothing"],
+                    ["[Name Corrections](help://tool-name-corrections)", "Names Last.fm spells oddly, to show your way (capitalization and spacing)", "Nothing"],
                     ["[Duplicate Scrobbles](help://tool-duplicate-scrobbles)", "Plays of a song closer together than Last.fm allows, to delete on Last.fm", "Nothing; Music app permission for the Apple Music comparison; a Last.fm account to open the song there"],
                     ["[Loved Status Audit](help://tool-loved-audit)", "Last.fm loves vs Apple Music favorites", "Music app permission"],
                     ["[Release Year Audit](help://tool-release-year-audit)", "Albums whose release year differs from Apple Music’s", "Music app permission"],
@@ -224,6 +225,32 @@ extension HelpContent {
             summary: "A hand-picked list of tracks.",
             blocks: [
                 .paragraph("Right-click a track anywhere and choose **Flag Track**. This tool lists them with a filter, Sort (Recently Flagged, Most Played, Recently Played, Artist, Track), a “Loved only” toggle, **Remove Flag** per row, **Clear All** (asks first, cannot be undone) and export to an Apple Music playlist (turn on **Keep this playlist updated after each sync** in its dialog and it follows the list as you flag and unflag: [Auto-Updating Playlists](help://tool-auto-playlists)). Flags live only on your Mac and are included in [backups](help://data-backup). The Query field **Flagged** matches by artist and title regardless of album."),
+            ]
+        ),
+        HelpArticle(
+            id: "tool-name-corrections",
+            title: "Name Corrections",
+            summary: "Names Last.fm spells oddly, with a suggestion to apply, edit or dismiss.",
+            blocks: [
+                .paragraph("Last.fm takes names as they were submitted, so the same album can come back as “Midnight Garden” in one play and “MidNight GARDEN” in another. This tool looks through your history for names that look wrong and suggests a fix for each. A correction changes only how the name is **shown** on this Mac, and only its capitalization and spacing; see [Correcting names](help://name-corrections) for what it changes and what it doesn’t."),
+                .heading("What it looks for"),
+                .bullets([
+                    "**Different spellings**: the same artist, album or track spelled more than one way in your plays (“Song TWO” and “Song two”). Applying one counts all the plays together under it. The suggestion is the spelling without other problems, or the most played.",
+                    "**Extra spaces**: a leading, trailing or doubled space.",
+                    "**Odd capitals**: a capital inside a word (“MidNight”), for albums and tracks. Names with Mc, Mac or O’ in front, and words styled that way on purpose (iPhone), are left alone.",
+                    "**ALL CAPS**: an album or track written entirely in capitals, with four or more letters. Suggested as Title Case, which you can change with **Edit…**.",
+                    "Artists are only checked for different spellings and extra spaces: how an artist styles their name (deadmau5, KISS) is usually on purpose.",
+                ]),
+                .heading("What you can do"),
+                .bullets([
+                    "**Apply** saves the suggestion. The name changes everywhere at once, and the row leaves the list.",
+                    "**Edit…** opens the Correct Name sheet to type the spelling you want instead.",
+                    "**Looks Right** keeps Last.fm’s spelling and stops listing the name. Marks are listed under **Looks Right**, where **Put Back** lists the name again.",
+                    "**Corrected** lists every correction you have made, with **Edit…** and **Reset** (back to Last.fm’s spelling).",
+                    "The chevron opens the artist, album or track page.",
+                    "**Names** and **Why** narrow the list to artists, albums or tracks and to one kind of problem.",
+                ]),
+                .callout(.note, "Nothing here is sent anywhere, works offline, and changes nothing on Last.fm. Corrections and marks are part of a [backup](help://data-backup)."),
             ]
         ),
         HelpArticle(

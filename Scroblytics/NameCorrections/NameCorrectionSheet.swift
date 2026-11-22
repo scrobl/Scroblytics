@@ -121,7 +121,7 @@ final class NameCorrectionModel {
             case .unchanged: shown = original
             case .rejected(let message): errorMessage = message; return nil
             }
-            try await NameCorrections.save(container: container, kind: subject.kind, artist: rawArtist, original: original, display: shown)
+            try await NameCorrections.save(container: container, kind: subject.kind, artist: rawArtist, original: original, display: shown, keepIfSame: spellings.count > 1)
             return shown
         } catch {
             errorMessage = error.localizedDescription

@@ -66,6 +66,27 @@ enum NameCorrectionChecks {
         }
     }
 
+    /// `SCROBLYTICS_NAMECORRECTION_FINDER=<N>` (with `SCROBLYTICS_STORE_PATH` on a COPY of a real library and `SCROBLYTICS_OFFLINE=1`): runs the
+    /// finder over that library and prints how many names it found by kind and reason, how long it took, and the first N findings.
+    @MainActor
+    static func runFinderIfRequested(container: ModelContainer) {
+        guard let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_NAMECORRECTION_FINDER"], let count = Int(raw) else { return }
+        Task { @MainActor in
+            let plays = try await ScrobbleHistoryLoader(modelContainer: container).load().snapshots
+            let started = Date()
+            let findings = NameCorrectionFinder.find(plays: plays, handled: [])
+            print("FINDER \(plays.count) plays, \(findings.count) findings in \(String(format: "%.2f", Date().timeIntervalSince(started))) s")
+            for kind in NameCorrectionKind.allCases {
+                let row = NameCorrectionFinder.Reason.allCases.map { reason in "\(reason.label) \(findings.filter { $0.kind == kind && $0.reason == reason }.count)" }
+                print("  \(kind.rawValue): \(row.joined(separator: ", "))")
+            }
+            for finding in findings.prefix(count) {
+                print("  [\(finding.kind.rawValue)/\(finding.reason.rawValue)] \(finding.spellings.map { "\($0.name) (\($0.plays))" }.joined(separator: " | ")) -> \(finding.suggestion)\(finding.kind == .artist ? "" : "  by \(finding.artist)")")
+            }
+            HeadlessTask.finish(0)
+        }
+    }
+
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
         guard ProcessInfo.processInfo.environment["SCROBLYTICS_NAMECORRECTION_CHECK"] != nil else { return }
@@ -88,7 +109,7 @@ enum NameCorrectionChecks {
             check("a case change is accepted", NameCorrectionRules.validate(original: "AlbumOne", proposed: "Albumone") == .ok("Albumone"))
             check("spacing is tidied", NameCorrectionRules.validate(original: "Album One", proposed: "  Album   One ") == .unchanged)
             check("typing the same name is no change", NameCorrectionRules.validate(original: "Album One", proposed: "Album One") == .unchanged)
-            check("a spelling change is refused", { if case .rejected = NameCorrectionRules.validate(original: "Rendezvous", proposed: "Rendez Vous") { return true } else { return false } }())
+            check("a spelling change is refused", { if case .rejected = NameCorrectionRules.validate(original: "Midnight", proposed: "Mid Night") { return true } else { return false } }())
             check("a different word is refused", { if case .rejected = NameCorrectionRules.validate(original: "Album One", proposed: "Album Two") { return true } else { return false } }())
             check("an empty name is refused", { if case .rejected = NameCorrectionRules.validate(original: "Album One", proposed: "   ") { return true } else { return false } }())
 
@@ -154,10 +175,10 @@ enum NameCorrectionChecks {
             NameCorrections.install([row(.album, artist: "Artist A", original: "AlbumOne", display: "Albumone")])
             let range = DateRange(from: t0, to: t0.addingTimeInterval(86_400))
             let albums = TopChartsEngine.fetchRankings(scrobbles: plays, entity: .album, range: range, limit: 50, includePeak: false)
-            let rendezvousLike = albums.filter { $0.name.lowercased() == "albumone" }
-            check("Top Charts shows the two spellings as one album", rendezvousLike.count == 1 && rendezvousLike[0].name == "Albumone", "\(albums.map(\.name))")
+            let albumLike = albums.filter { $0.name.lowercased() == "albumone" }
+            check("Top Charts shows the two spellings as one album", albumLike.count == 1 && albumLike[0].name == "Albumone", "\(albums.map(\.name))")
             // Top Charts already counts an edition's plays under its plain album (3 + 2 + 1 collab-credited + 1 "(Deluxe Edition)" bonus play).
-            check("…with the plays of both spellings added together", rendezvousLike.first?.playcount == 7, "\(rendezvousLike.map(\.playcount))")
+            check("…with the plays of both spellings added together", albumLike.first?.playcount == 7, "\(albumLike.map(\.playcount))")
             NameCorrections.install([])
             let before = TopChartsEngine.fetchRankings(scrobbles: plays, entity: .album, range: range, limit: 50, includePeak: false)
             // Top Charts already merges spellings of an album that differ only by case, showing the first one it meets; the correction decides which.
@@ -232,6 +253,45 @@ enum NameCorrectionChecks {
                 NameCorrections.install([])
             }
 
+            // MARK: The finder (made-up names)
+            do {
+                var found: [ScrobbleSnapshot] = []
+                func add(_ artist: String, _ album: String, _ track: String, _ count: Int) { for _ in 0..<count { found.append(play(artist, album, track)) } }
+                add("Artist A", "MidNight Garden", "Plain One", 10)
+                add("Artist A", "Fine Album", "Plain Two", 5)
+                add("Artist A", "Fine Album", "Song TWO", 3)
+                add("Artist A", "Fine Album", "Song two", 4)
+                add("Artist A", "Fine Album", "Padded  Title ", 2)
+                add("Artist A", "LOUD ALBUM NAME", "Plain Three", 3)
+                add("Band X", "Fine Album", "Plain Four", 3)
+                add("BAND X", "Fine Album", "Plain Four", 2)
+                add("ALLCAPS BAND", "Fine Album", "Plain Five", 2)
+                add("deadmau5", "Fine Album", "Plain Six", 2)
+                add("Artist A", "McDonald Songs", "O'Brien Hits", 2)
+                add("Artist A", "iPhone Tunes", "The MacArthur Tapes", 2)
+                let findings = NameCorrectionFinder.find(plays: found, handled: [])
+                func finding(_ kind: NameCorrectionKind, _ name: String) -> NameCorrectionFinder.Finding? { findings.first { $0.kind == kind && $0.spellings.contains { $0.name == name } } }
+                check("an album with a capital inside a word is found, with the suggestion", finding(.album, "MidNight Garden")?.reason == .oddCapitals && finding(.album, "MidNight Garden")?.suggestion == "Midnight Garden", "\(findings.map { "\($0.kind) \($0.original) -> \($0.suggestion) (\($0.reason))" })")
+                let variants = finding(.track, "Song TWO")
+                check("two spellings of a track are one finding, suggesting the most played", variants?.reason == .variants && variants?.suggestion == "Song two" && variants?.spellings.count == 2 && variants?.plays == 7)
+                check("…and it merges spellings, so it must be saved even when it equals the most-used one", variants?.mergesSpellings == true)
+                check("a doubled and trailing space is found", finding(.track, "Padded  Title ")?.reason == .spacing && finding(.track, "Padded  Title ")?.suggestion == "Padded Title")
+                check("an all-capitals album is found and title-cased", finding(.album, "LOUD ALBUM NAME")?.reason == .allCaps && finding(.album, "LOUD ALBUM NAME")?.suggestion == "Loud Album Name")
+                check("two spellings of an artist are found", finding(.artist, "Band X")?.reason == .variants && finding(.artist, "Band X")?.spellings.count == 2)
+                check("an artist written in capitals or styled is not flagged (their styling is usually meant)", finding(.artist, "ALLCAPS BAND") == nil && finding(.artist, "deadmau5") == nil)
+                check("Mc, O' and brand shapes are not flagged", finding(.album, "McDonald Songs") == nil && finding(.track, "O'Brien Hits") == nil && finding(.album, "iPhone Tunes") == nil && finding(.track, "The MacArthur Tapes") == nil)
+                check("clean names are not flagged", finding(.album, "Fine Album") == nil && finding(.track, "Plain Two") == nil)
+                check("every suggestion is the same name apart from capitalization and spacing", findings.allSatisfy { f in NameKeys.fold(f.suggestion) == NameKeys.fold(f.original) })
+                check("findings come in order: spellings first, then spacing, odd capitals, ALL CAPS", findings.map(\.reason.rank) == findings.map(\.reason.rank).sorted())
+                let handled = Set([finding(.album, "MidNight Garden")?.key ?? ""])
+                check("a name already corrected or marked right is not listed again", NameCorrectionFinder.find(plays: found, handled: handled).allSatisfy { $0.key != finding(.album, "MidNight Garden")?.key })
+                check("Title Case keeps small words down and Roman numerals up", NameCorrectionFinder.titleCased("THE LORD OF THE RINGS PART II") == "The Lord of the Rings Part II", NameCorrectionFinder.titleCased("THE LORD OF THE RINGS PART II"))
+                check("odd capitals are lower-cased after the first letter only", NameCorrectionFinder.fixOddCapitals("MidNight And MoonLight") == "Midnight And Moonlight")
+                check("dotted acronyms are kept as written when title-casing", NameCorrectionFinder.titleCased("A.M. RADIO") == "A.M. Radio" && NameCorrectionFinder.titleCased("U.F.O.F.") == "U.F.O.F.", NameCorrectionFinder.titleCased("A.M. RADIO"))
+                check("an ALL CAPS name whose title case is the same name is not listed", NameCorrectionFinder.find(plays: [play("Artist A", "U.F.O.F.", "Plain")] + [play("Artist A", "U.F.O.F.", "Plain")], handled: []).allSatisfy { $0.original != "U.F.O.F." })
+                check("ALL CAPS needs four letters", !NameCorrectionFinder.isAllCaps("R.E.M.") && NameCorrectionFinder.isAllCaps("LOUD"))
+            }
+
             // MARK: The store and the backup record
             let store = NameCorrectionStore(modelContainer: container)
             do {
@@ -251,6 +311,20 @@ enum NameCorrectionChecks {
                 try await store.set(kind: .album, artist: "Artist A", original: "AlbumOne", display: "AlbumOne")
                 let afterOwnSpelling = try await store.all()
                 check("typing Last.fm's own spelling back removes the correction", afterOwnSpelling.count == 2)
+                try await store.set(kind: .album, artist: "Artist A", original: "AlbumOne", display: "AlbumOne", keepIfSame: true)
+                let kept = try await store.all()
+                check("…unless other spellings exist, where it is kept to count them together", kept.count == 3 && kept.contains { $0.kind == .album && $0.display == "AlbumOne" })
+                try await store.reset(kind: .album, artist: "Artist A", original: "AlbumOne")
+                try await store.markLooksRight(kind: .track, artist: "Artist A", original: "ANOTHER SONG")
+                let marked = try await store.all()
+                check("'Looks right' is saved as a mark with no spelling", marked.contains { $0.kind == .track && $0.status == .looksRight && $0.display == nil })
+                check("a mark corrects nothing", NameCorrectionBook(rows: marked).track(artist: "Artist A", title: "ANOTHER SONG") == nil)
+                try await store.markLooksRight(kind: .track, artist: "Artist A", original: "Song TWO")
+                let stillCorrected = try await store.all()
+                check("marking a corrected name leaves its correction alone", stillCorrected.contains { $0.kind == .track && $0.original == "Song TWO" && $0.status == .corrected })
+                try await store.reset(kind: .track, artist: "Artist A", original: "ANOTHER SONG")
+                let unmarked = try await store.all()
+                check("putting a name back removes the mark", unmarked.count == 2, "\(unmarked.count)")
                 try await store.reset(kind: .track, artist: "Artist A", original: "Song TWO")
                 let afterReset = try await store.all()
                 check("reset removes a correction", afterReset.map(\.kind) == [.artist])

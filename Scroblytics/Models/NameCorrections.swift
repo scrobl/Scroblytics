@@ -298,12 +298,15 @@ actor NameCorrectionStore {
 
     /// Saves the spelling to show for a name. `artist` is Last.fm's artist spelling (for an album with no single artist pass ""),
     /// `original` Last.fm's spelling of the name. Throws when the text changes more than capitalization and spacing.
-    func set(kind: NameCorrectionKind, artist: String, original: String, display proposed: String) throws {
+    /// `keepIfSame`: the spelling equals Last.fm's most-used one but other spellings exist, so the correction is kept to count them together.
+    func set(kind: NameCorrectionKind, artist: String, original: String, display proposed: String, keepIfSame: Bool = false) throws {
         let verdict = NameCorrectionRules.validate(original: original, proposed: proposed)
         let display: String
         switch verdict {
         case .rejected(let reason): throw NameCorrectionError.rejected(reason)
-        case .unchanged: try reset(kind: kind, artist: artist, original: original); return
+        case .unchanged:
+            guard keepIfSame else { try reset(kind: kind, artist: artist, original: original); return }
+            display = NameKeys.tidy(proposed)
         case .ok(let tidied): display = tidied
         }
         let k = Self.keys(kind: kind, artist: artist, name: kind == .artist ? artist : original)
@@ -316,6 +319,14 @@ actor NameCorrectionStore {
         } else {
             modelContext.insert(NameCorrection(key: k.key, kind: kind, artistKey: k.artistKey, nameKey: k.nameKey, artist: artist, original: original, display: display, status: .corrected))
         }
+        try modelContext.save()
+    }
+
+    /// Marks a name as reviewed and right as Last.fm has it, so the finder stops listing it. Leaves an existing correction alone.
+    func markLooksRight(kind: NameCorrectionKind, artist: String, original: String) throws {
+        let k = Self.keys(kind: kind, artist: artist, name: kind == .artist ? artist : original)
+        if try row(forKey: k.key) != nil { return }
+        modelContext.insert(NameCorrection(key: k.key, kind: kind, artistKey: k.artistKey, nameKey: k.nameKey, artist: artist, original: original, display: nil, status: .looksRight))
         try modelContext.save()
     }
 
@@ -332,9 +343,16 @@ actor NameCorrectionStore {
 extension NameCorrections {
     /// Saves a correction, then rebuilds the book and tells every screen. `onMain` work only: the store runs off the main actor.
     @MainActor
-    static func save(container: ModelContainer, kind: NameCorrectionKind, artist: String, original: String, display: String) async throws {
+    static func save(container: ModelContainer, kind: NameCorrectionKind, artist: String, original: String, display: String, keepIfSame: Bool = false) async throws {
         let store = NameCorrectionStore(modelContainer: container)
-        try await store.set(kind: kind, artist: artist, original: original, display: display)
+        try await store.set(kind: kind, artist: artist, original: original, display: display, keepIfSame: keepIfSame)
+        try await reload(store: store)
+    }
+
+    @MainActor
+    static func markLooksRight(container: ModelContainer, kind: NameCorrectionKind, artist: String, original: String) async throws {
+        let store = NameCorrectionStore(modelContainer: container)
+        try await store.markLooksRight(kind: kind, artist: artist, original: original)
         try await reload(store: store)
     }
 

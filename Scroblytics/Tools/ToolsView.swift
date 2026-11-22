@@ -222,6 +222,8 @@ struct ToolsView: View {
             FlaggedTracksView(modelContainer: modelContainer, navigation: navigation)
         case .duplicateScrobbles:
             DuplicateScrobblesView(modelContainer: modelContainer, navigation: navigation, openQuery: openQuery)
+        case .nameCorrections:
+            NameCorrectionsView(modelContainer: modelContainer, navigation: navigation)
         case .rabbitHole:
             RabbitHoleView(modelContainer: modelContainer, navigation: navigation)
         case .artistMap:
@@ -250,7 +252,7 @@ struct ToolsView: View {
 
 /// One card on the landing grid.
 struct ToolDescriptor: Identifiable, Hashable {
-    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, duplicateScrobbles, rabbitHole, artistMap, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, query }
+    enum Kind: Hashable { case mostRecentMostOften, theClimb, fadingFavorites, missingData, lovedStatusAudit, releaseYearAudit, libraryGaps, songsWithoutAlbums, unscrobbledPlays, tagManagement, similarSounds, flaggedTracks, duplicateScrobbles, rabbitHole, artistMap, albumTurnovers, collageGenerator, chartToppers, multiAlbumTracks, timeMachine, trips, goals, autoPlaylists, nameCorrections, query }
     let id: Kind
     let name: String
     let summary: String
@@ -324,6 +326,11 @@ struct ToolDescriptor: Identifiable, Hashable {
             id: .flaggedTracks, name: "Flagged Tracks",
             summary: "Keep a hand-picked collection of tracks to filter, sort, and export.",
             systemImage: "flag.fill", category: "Organize"
+        ),
+        ToolDescriptor(
+            id: .nameCorrections, name: "Name Corrections",
+            summary: "Find artist, album and track names Last.fm spells oddly (MidNight, ALL CAPS, double spaces) and show them your way.",
+            systemImage: "textformat", category: "Organize"
         ),
         ToolDescriptor(
             id: .duplicateScrobbles, name: "Duplicate Scrobbles",

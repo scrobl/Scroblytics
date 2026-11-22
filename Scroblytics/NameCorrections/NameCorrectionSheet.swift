@@ -96,8 +96,8 @@ final class NameCorrectionModel {
 
     var verdict: NameCorrectionRules.Verdict { NameCorrectionRules.validate(original: original, proposed: text) }
 
-    /// Nothing to save: the text is the name as it is shown now.
-    var isUnchangedFromShown: Bool { NameKeys.tidy(text) == NameKeys.tidy(subject.name) }
+    /// Nothing to save: the text is the name exactly as it is shown now (tidying extra spaces out of a shown name is a change).
+    var isUnchangedFromShown: Bool { NameKeys.tidy(text) == subject.name }
 
     var canSave: Bool {
         guard isLoaded, !isWorking, !isUnchangedFromShown else { return false }

@@ -116,7 +116,7 @@ enum NameCorrectionRules {
     enum Verdict: Equatable {
         /// The spelling to save, with its spacing tidied.
         case ok(String)
-        /// Same as Last.fm's spelling (after tidying), so there is nothing to save.
+        /// Exactly Last.fm's spelling, so there is nothing to save.
         case unchanged
         case rejected(String)
     }
@@ -128,7 +128,8 @@ enum NameCorrectionRules {
         guard NameKeys.fold(tidied) == NameKeys.fold(original) else {
             return .rejected("Only capitalization and spacing can be changed here. Last.fm’s spelling stays the same underneath.")
         }
-        return tidied == NameKeys.tidy(original) ? .unchanged : .ok(tidied)
+        // Only the very spelling Last.fm has is "no change": a name with extra spaces tidied up IS a change to save.
+        return tidied == original ? .unchanged : .ok(tidied)
     }
 }
 

@@ -108,6 +108,8 @@ enum NameCorrectionChecks {
             check("kinds never share a key", Set([NameKeys.artist("x"), NameKeys.album(artist: "x", album: "x"), NameKeys.track(artist: "x", title: "x")]).count == 3)
             check("a case change is accepted", NameCorrectionRules.validate(original: "AlbumOne", proposed: "Albumone") == .ok("Albumone"))
             check("spacing is tidied", NameCorrectionRules.validate(original: "Album One", proposed: "  Album   One ") == .unchanged)
+            check("tidying a name's spacing IS a change when the original has extra spaces", NameCorrectionRules.validate(original: "Padded  Title ", proposed: "Padded Title") == .ok("Padded Title"))
+            check("a doubled space is a change to save", NameCorrectionRules.validate(original: "Album  One", proposed: "Album One") == .ok("Album One"))
             check("typing the same name is no change", NameCorrectionRules.validate(original: "Album One", proposed: "Album One") == .unchanged)
             check("a spelling change is refused", { if case .rejected = NameCorrectionRules.validate(original: "Midnight", proposed: "Mid Night") { return true } else { return false } }())
             check("a different word is refused", { if case .rejected = NameCorrectionRules.validate(original: "Album One", proposed: "Album Two") { return true } else { return false } }())
@@ -308,6 +310,13 @@ enum NameCorrectionChecks {
                 do { try await store.set(kind: .album, artist: "Artist A", original: "AlbumOne", display: "Album One") } catch { refused = true }
                 let afterRefusal = try await store.all()
                 check("a spelling change is refused by the store and nothing changes", refused && afterRefusal.count == 3)
+                // A spacing-only correction (what the finder's "Extra spaces" rows apply) is saved, not dropped as "no change".
+                try await store.set(kind: .track, artist: "Artist A", original: "Padded  Title ", display: "Padded Title")
+                let afterSpacing = try await store.all()
+                check("an extra-spaces correction is saved", afterSpacing.contains { $0.kind == .track && $0.display == "Padded Title" }, "\(afterSpacing.map { "\($0.original)=>\($0.display ?? "-")" })")
+                let spaced = QueryIdentity.canonicalizingArtists([play("Artist A", "Fine", "Padded  Title ")], book: NameCorrectionBook(rows: afterSpacing))
+                check("…and the plays then show the tidied name", spaced.first?.trackName == "Padded Title", "\(spaced.first?.trackName ?? "")")
+                try await store.reset(kind: .track, artist: "Artist A", original: "Padded  Title ")
                 try await store.set(kind: .album, artist: "Artist A", original: "AlbumOne", display: "AlbumOne")
                 let afterOwnSpelling = try await store.all()
                 check("typing Last.fm's own spelling back removes the correction", afterOwnSpelling.count == 2)

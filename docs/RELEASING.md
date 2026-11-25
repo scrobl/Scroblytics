@@ -63,7 +63,7 @@ The DMG itself is tested **once per release**, as below, not for every change.
    and also copy the database somewhere safe:
 
    ```bash
-   mkdir -p ~/Desktop/scroblytics-db-backup && cp ~/Library/Application\ Support/default.store* ~/Desktop/scroblytics-db-backup/
+   mkdir -p ~/Desktop/scroblytics-db-backup && cp ~/Library/Application\ Support/Scroblytics/Scroblytics.store* ~/Desktop/scroblytics-db-backup/
    ```
 
    A new version opens your real database, and an older version may not be able to open one a newer version has changed. The copy lets you
@@ -123,7 +123,7 @@ machine on this Mac is enough:
    `scripts/fake-lastfm.py --scenario empty-account --artists-file <names> --similar-latency-ms 300` on this Mac (the names file is one
    artist per line, from the library copy), forward it into the VM with `ssh -R 8793:127.0.0.1:8793`, and launch the profile copy with
    `SCROBLYTICS_LASTFM_BASE_URL=http://127.0.0.1:8793/2.0/`, `SCROBLYTICS_PROFILE_SEED_ACCOUNT=1` and `SCROBLYTICS_OFFLINE=1`, its database
-   at `<home>/Library/Application Support/default.store`. Pass: the log ends with "TOUR done", no stall of 500 ms or more, and no
+   at `<home>/Library/Application Support/Scroblytics/Scroblytics.store`. Pass: the log ends with "TOUR done", no stall of 500 ms or more, and no
    Scroblytics report in `~/Library/Logs/DiagnosticReports`.
 5. When the test is finished, clear the test data from the VM (the imported database and the Keychain item) and shut it down: `ssh … 'sudo shutdown -h now'`, then check `tart list` shows it as `stopped`. Leave it stopped until the next release needs it.
 
@@ -135,8 +135,8 @@ A history of 300,000+ scrobbles is where cost that grows with the library shows 
 30% CPU for hours after an import). Before a release that touches background work or loads, try a big one without waiting for a big
 import:
 
-1. Copy your store (`default.store`, `-shm`, `-wal` from `~/Library/Application Support`) into a scratch folder and run
-   `sqlite3 default.store "PRAGMA wal_checkpoint(TRUNCATE);"`.
+1. Copy your store (`Scroblytics.store`, `-shm`, `-wal` from `~/Library/Application Support/Scroblytics`) into a scratch folder and run
+   `sqlite3 Scroblytics.store "PRAGMA wal_checkpoint(TRUNCATE);"`.
 2. Clone rows with shifted timestamps (`Scrobble` is one flat table, so this keeps everything consistent), for example three copies:
    `INSERT INTO ZSCROBBLE (Z_ENT,Z_OPT,ZLASTCONFIRMEDAT,ZPLAYEDAT,ZALBUMNAME,ZARTISTNAME,ZIMAGEURL,ZTRACKNAME) SELECT Z_ENT,Z_OPT,ZLASTCONFIRMEDAT,ZPLAYEDAT+7,ZALBUMNAME,ZARTISTNAME,ZIMAGEURL,ZTRACKNAME FROM ZSCROBBLE;`
    (repeat with +13, +19), then

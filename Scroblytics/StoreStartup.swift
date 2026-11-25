@@ -81,7 +81,7 @@ enum StoreStartup {
         do {
             return (try ModelContainer(for: schema, configurations: [configuration]), nil)
         } catch {
-            let path = storePath ?? URL.applicationSupportDirectory.appending(path: "default.store").path
+            let path = storePath ?? StoreLocation.url().path
             let failure = StoreStartupFailure.describe(error, storePath: path)
             ActivityLog.record(.startup, "Couldn't open the database (\(failure.cause)): \(failure.details)")
             log.error("Couldn't open the database at \(path, privacy: .public): \(String(describing: error), privacy: .public)")

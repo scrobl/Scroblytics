@@ -31,11 +31,18 @@ case "$provider" in anthropic|openAI|google) [ -n "$key" ] || { echo "No API key
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 support="$HOME/Library/Application Support"
-cp "$support/default.store" "$support/default.store-wal" "$support/default.store-shm" "$work/" 2>/dev/null || cp "$support/default.store" "$work/"
+# The app's own file (Scroblytics/Scroblytics.store); older versions kept it in the shared default.store.
+if [ -f "$support/Scroblytics/Scroblytics.store" ]; then
+  store_src="$support/Scroblytics/Scroblytics.store"
+else
+  store_src="$support/default.store"
+fi
+cp "$store_src" "$store_src-wal" "$store_src-shm" "$work/" 2>/dev/null || cp "$store_src" "$work/"
+store_name="$(basename "$store_src")"
 mkdir -p "$root/.ask-eval"
 out="$root/.ask-eval/${provider}-${model//[^A-Za-z0-9._-]/_}.json"
 echo "Scoring $provider ${model:-} … (this takes a few minutes)"
-SCROBLYTICS_STORE_PATH="$work/default.store" SCROBLYTICS_OFFLINE=1 \
+SCROBLYTICS_STORE_PATH="$work/$store_name" SCROBLYTICS_OFFLINE=1 \
   SCROBLYTICS_ASK_EVALSET="$out" SCROBLYTICS_ASK_PROVIDER="$provider" \
   SCROBLYTICS_ASK_MODEL="$model" SCROBLYTICS_ASK_BASEURL="$baseurl" SCROBLYTICS_ASK_KEY="$key" \
   "$app/Contents/MacOS/Scroblytics" >/dev/null 2>&1 || true

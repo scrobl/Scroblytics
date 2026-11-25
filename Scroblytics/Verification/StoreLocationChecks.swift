@@ -11,6 +11,48 @@ import SwiftData
 /// `SCROBLYTICS_STORELOCATION_REAL=<path to a COPY of a default.store>` runs the copy on that file in a temporary folder and
 /// prints every table's row count, to be compared against an independent `sqlite3` count.
 enum StoreLocationChecks {
+    /// Waits until a table has at least the given number of rows on disk, as seen by a separate connection. SwiftData's save is
+    /// not guaranteed to be visible the instant its container is released, so a fixture holds the container until this passes.
+    @discardableResult
+    static func waitForRows(_ url: URL, table: String, atLeast: Int) -> Bool {
+        for _ in 0..<200 {
+            var database: OpaquePointer?
+            var statement: OpaquePointer?
+            var count = -1
+            if sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+               sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM \(table)", -1, &statement, nil) == SQLITE_OK, sqlite3_step(statement) == SQLITE_ROW {
+                count = Int(sqlite3_column_int64(statement, 0))
+            }
+            sqlite3_finalize(statement)
+            sqlite3_close(database)
+            if count >= atLeast { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return false
+    }
+
+    /// Folds a test database's log into its main file and removes the log files, so it stands alone as after a clean quit.
+    /// A checkpoint can report success while another connection still holds the log, and deleting a log with unwritten rows
+    /// would lose them, so the files are only removed once the log is confirmed empty (retrying while it is busy).
+    @discardableResult
+    static func foldLog(_ url: URL) -> Bool {
+        var database: OpaquePointer?
+        guard sqlite3_open(url.path, &database) == SQLITE_OK else { sqlite3_close(database); return false }
+        defer { sqlite3_close(database) }
+        var settled = false
+        for _ in 0..<100 {
+            var frames: Int32 = -1
+            var written: Int32 = -1
+            if sqlite3_wal_checkpoint_v2(database, nil, SQLITE_CHECKPOINT_TRUNCATE, &frames, &written) == SQLITE_OK, frames <= 0 {
+                settled = true
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if settled { for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) } }
+        return settled
+    }
+
     @MainActor
     static func runHeadlessIfRequested() {
         let environment = ProcessInfo.processInfo.environment
@@ -173,6 +215,49 @@ enum StoreLocationChecks {
                 try? Data(repeating: 0x42, count: 4096).write(to: URL(fileURLWithPath: target.path + ".migrating"))
                 let resolution = StoreLocation.resolve(support: home, defaults: freshDefaults())
                 if case .migrated(_, let rows) = resolution.outcome { check("a copy interrupted earlier is redone", rows >= 1) } else { check("a copy interrupted earlier is redone", false, "\(resolution.outcome)") }
+            }
+
+            // MARK: A cleanly closed database (no log files beside it), the usual state at launch
+            do {
+                let home = newSupport("closed")
+                let source = StoreLocation.legacyURL(support: home)
+                var holder: ModelContainer? = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: source))
+                if let container = holder {
+                    let context = ModelContext(container)
+                    context.insert(SyncState(username: "SomeOne"))
+                    for index in 0..<40 {
+                        context.insert(Scrobble(artistName: "Artist A", albumName: "Album One", trackName: "Track \(index)", imageURL: nil, playedAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)), lastConfirmedAt: Date()))
+                    }
+                    try? context.save()
+                }
+                check("the closed test database's rows are on disk", waitForRows(source, table: "ZSCROBBLE", atLeast: 40))
+                holder = nil
+                let folded = foldLog(source)
+                check("the closed test database stands alone, as after a clean quit", folded && !manager.fileExists(atPath: source.path + "-wal") && !manager.fileExists(atPath: source.path + "-shm"))
+                let beforeClosed = hash(of: source)
+                func sqliteCount(_ url: URL, _ table: String) -> Int {
+                    var database: OpaquePointer?
+                    var statement: OpaquePointer?
+                    var result = -1
+                    if sqlite3_open_v2("\(url.absoluteString)?immutable=1", &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK,
+                       sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM \(table)", -1, &statement, nil) == SQLITE_OK, sqlite3_step(statement) == SQLITE_ROW {
+                        result = Int(sqlite3_column_int64(statement, 0))
+                    }
+                    sqlite3_finalize(statement)
+                    sqlite3_close(database)
+                    return result
+                }
+                let sourceScrobbles = sqliteCount(source, "ZSCROBBLE")
+                print("      (the closed test database holds \(sourceScrobbles) scrobbles before the copy)")
+                let resolution = StoreLocation.resolve(support: home, defaults: freshDefaults())
+                if case .migrated(_, let rows) = resolution.outcome { check("a database with no log files is copied", rows > sourceScrobbles && sourceScrobbles > 0, "rows \(rows), source scrobbles \(sourceScrobbles)") } else { check("a database with no log files is copied", false, "\(resolution.outcome)") }
+                check("…the original is byte for byte unchanged and gained no log files", hash(of: source) == beforeClosed && !manager.fileExists(atPath: source.path + "-wal") && !manager.fileExists(atPath: source.path + "-shm"))
+                check("…no scratch folder is left", !manager.fileExists(atPath: resolution.url.path + ".source") && !manager.fileExists(atPath: resolution.url.path + ".migrating"))
+                if let copy = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: resolution.url)) {
+                    check("…and the copy holds every row the original had", (try? ModelContext(copy).fetchCount(FetchDescriptor<Scrobble>())) == sourceScrobbles && sqliteCount(resolution.url, "ZSCROBBLE") == sourceScrobbles)
+                } else {
+                    check("…and the copy holds every row the original had", false)
+                }
             }
 
             HeadlessTask.finish(failures)

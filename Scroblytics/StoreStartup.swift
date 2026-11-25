@@ -5,7 +5,7 @@ import os
 
 /// Why the database couldn't be opened at launch, in plain words, and what to do about it.
 struct StoreStartupFailure: Sendable {
-    enum Cause: Sendable, Equatable { case diskFull, permission, newerVersion, damaged, other }
+    enum Cause: Sendable, Equatable { case diskFull, permission, newerVersion, damaged, emptied, other }
 
     let cause: Cause
     let headline: String
@@ -47,8 +47,18 @@ struct StoreStartupFailure: Sendable {
         return .other
     }
 
+    /// The words for a database found hollow before opening, carrying the facts found.
+    nonisolated static func describe(emptiedDetails details: String, storePath: String) -> StoreStartupFailure {
+        let described = describe(NSError(domain: "Scroblytics.StoreIntegrity", code: 1), storePath: storePath, forcing: .emptied)
+        return StoreStartupFailure(cause: .emptied, headline: described.headline, advice: described.advice, details: details, storePath: storePath)
+    }
+
     nonisolated static func describe(_ error: Error, storePath: String) -> StoreStartupFailure {
-        let cause = cause(of: error)
+        describe(error, storePath: storePath, forcing: nil)
+    }
+
+    nonisolated private static func describe(_ error: Error, storePath: String, forcing: Cause?) -> StoreStartupFailure {
+        let cause = forcing ?? cause(of: error)
         let headline: String
         let advice: String
         switch cause {
@@ -64,6 +74,9 @@ struct StoreStartupFailure: Sendable {
         case .damaged:
             headline = "The database file looks damaged."
             advice = "Nothing was changed. If you have a backup of your edits (File › Data Management), you can restore it after starting over: quit Scroblytics, move the database file to your Desktop, and open Scroblytics again. Your Last.fm history will be imported again."
+        case .emptied:
+            headline = "Your Scroblytics database has been emptied."
+            advice = "The database file is large but no longer holds your listening history. Its tables were removed, most likely by another program that opened the same file. Scroblytics has not opened it, changed it or started an import. If you have a copy of the file from before (Time Machine, Backblaze or another backup), put it back. Your edits can also be restored from a Scroblytics backup (File › Data Management) after starting over. To start over, use Start Over: the file is kept aside, not deleted, and your history is imported again."
         case .other:
             headline = "Scroblytics couldn’t open its database."
             advice = "Nothing was changed or deleted. Quit and open Scroblytics again. If it keeps happening, copy the details below and share them when you ask for help."
@@ -78,6 +91,22 @@ enum StoreStartup {
     /// Opens the database. When that fails the app still starts, on an empty in-memory stand-in that is never saved, and
     /// shows an explanation instead of crashing. Nothing is ever deleted or moved.
     static func open(schema: Schema, configuration: ModelConfiguration, storePath: String?) -> (container: ModelContainer, failure: StoreStartupFailure?) {
+        // Look at the file first: Core Data would quietly recreate missing tables and start an import over a database that
+        // had just lost its history, so a hollowed-out file is reported instead of opened.
+        let checked = storePath ?? StoreLocation.url().path
+        if case .emptied(let report) = StoreIntegrity.verdict(for: URL(fileURLWithPath: checked)) {
+            let details = "The file is \(report.bytes) bytes with \(report.freePages) of \(report.pages) pages unused, "
+                + (report.scrobbles.map { "and its scrobbles table holds \($0) rows." } ?? "and it has no scrobbles table.")
+                + " Tables found: \(report.tables.sorted().prefix(12).joined(separator: ", "))."
+            let described = StoreStartupFailure.describe(emptiedDetails: details, storePath: checked)
+            ActivityLog.record(.startup, "The database file has no history in it and was not opened: \(details)")
+            log.error("The database at \(checked, privacy: .public) has no history in it; not opened")
+            #if DEBUG
+            FileHandle.standardError.write(Data("STARTUP database emptied path=\(checked) \(details)\n".utf8))
+            #endif
+            let memory = ModelConfiguration(isStoredInMemoryOnly: true)
+            return (try! ModelContainer(for: schema, configurations: [memory]), described)
+        }
         do {
             return (try ModelContainer(for: schema, configurations: [configuration]), nil)
         } catch {
@@ -98,6 +127,7 @@ enum StoreStartup {
 /// Shown instead of the app when the database can't be opened.
 struct StoreErrorView: View {
     let failure: StoreStartupFailure
+    @State private var startOverMessage: String?
 
     var body: some View {
         ScrollView {
@@ -107,6 +137,13 @@ struct StoreErrorView: View {
                 Text(failure.headline).font(.title.bold()).multilineTextAlignment(.center)
                 Text(failure.advice).font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 Text("Scroblytics has not deleted or changed anything.").foregroundStyle(.secondary)
+                if failure.cause == .emptied {
+                    if let startOverMessage {
+                        Text(startOverMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    } else {
+                        Button("Start Over (Keep the File Aside)", action: startOver)
+                    }
+                }
                 HStack(spacing: 12) {
                     Button("Show Database in Finder", action: revealInFinder)
                     Button("Copy Details", action: copyDetails)
@@ -126,6 +163,17 @@ struct StoreErrorView: View {
             .frame(maxWidth: 600)
             .padding(40)
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// Moves the hollow file (and its companions) into the Recovered Databases folder; the next launch starts a new database.
+    private func startOver() {
+        do {
+            let moved = try StoreIntegrity.setAside(URL(fileURLWithPath: failure.storePath))
+            ActivityLog.record(.startup, "Set the emptied database aside; the next launch starts a new one")
+            startOverMessage = "The file was kept in “Recovered Databases” (\(moved.deletingLastPathComponent().path)). Quit and open Scroblytics again to start a new database."
+        } catch {
+            startOverMessage = "The file couldn’t be moved: \(error.localizedDescription). Quit Scroblytics, move the database file somewhere safe in Finder, and open it again."
         }
     }
 

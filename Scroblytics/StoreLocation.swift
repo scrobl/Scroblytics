@@ -78,7 +78,7 @@ enum StoreLocation {
     }
 
     /// Copies one SQLite database to a new file using SQLite's own backup, which reads the write-ahead log too, so
-    /// changes that haven't reached the main file yet come along. The source is opened read-only. The copy is made under a
+    /// changes that haven't reached the main file yet come along. The source is never written to. The copy is made under a
     /// temporary name, checked (integrity and the row count of every table against the source), and only then renamed into place.
     static func copy(from source: URL, to target: URL) -> Result<(tables: Int, rows: Int), CopyFailure> {
         let manager = FileManager.default
@@ -88,8 +88,30 @@ enum StoreLocation {
         }
         removeTemporary()
 
+        // A cleanly closed database has no log files, and SQLite can't open such a file read-only without creating one, so it
+        // is opened as immutable (no log exists to be missed). When a log is waiting it holds changes the main file doesn't
+        // have yet; opening it normally would fold the log into the original, so the files are copied aside first and the
+        // copy is opened. Either way the original is never written to.
+        let scratch = target.deletingLastPathComponent().appending(path: target.lastPathComponent + ".source", directoryHint: .isDirectory)
+        try? manager.removeItem(at: scratch)
+        defer { try? manager.removeItem(at: scratch) }
+        let logSize = (try? manager.attributesOfItem(atPath: source.path + "-wal")[.size] as? Int) ?? nil
         var from: OpaquePointer?
-        guard sqlite3_open_v2(source.path, &from, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let from else {
+        let openedSource: Int32
+        if (logSize ?? 0) > 0 {
+            do {
+                try manager.createDirectory(at: scratch, withIntermediateDirectories: true)
+                for suffix in ["", "-wal", "-shm"] where manager.fileExists(atPath: source.path + suffix) {
+                    try manager.copyItem(atPath: source.path + suffix, toPath: scratch.appending(path: "source.store" + suffix).path)
+                }
+            } catch {
+                return .failure(.failed("the earlier database couldn't be copied aside"))
+            }
+            openedSource = sqlite3_open_v2(scratch.appending(path: "source.store").path, &from, SQLITE_OPEN_READWRITE, nil)
+        } else {
+            openedSource = sqlite3_open_v2("\(source.absoluteString)?immutable=1", &from, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil)
+        }
+        guard openedSource == SQLITE_OK, let from else {
             sqlite3_close(from)
             return .failure(.failed("the earlier database couldn't be opened"))
         }

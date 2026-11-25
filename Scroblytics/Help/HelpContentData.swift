@@ -24,6 +24,13 @@ extension HelpContent {
                     "Everything in the database that came from Last.fm can be rebuilt by syncing again. Things **you** created (corrections, overrides, custom images, flagged tracks, saved queries, tag rules, editions you counted on their own, Library Gaps confirmations, Loved Status Audit and Release Year Audit decisions, artist origin corrections, automatic playlists) are the part worth backing up: see [Backup and restore](help://data-backup).",
                     "To start completely fresh, quit the app and delete the database files and image folders above, and the Keychain items if you also want the credentials gone.",
                 ]),
+                .heading("If the app says your database has been emptied"),
+                .paragraph("The database is a file only Scroblytics should open, but another program on your Mac could open it by mistake and remove the tables it doesn’t know. At launch, before anything is opened, Scroblytics looks at the file. If it is large but holds no listening history, the app doesn’t start an import over it: it explains what it found and changes nothing."),
+                .bullets([
+                    "If you have a copy of the file from before (Time Machine, Backblaze or another backup), quit Scroblytics, put the copy back as `Scroblytics.store` and open the app again.",
+                    "**Start Over (Keep the File Aside)** moves the emptied file into a `Recovered Databases` folder beside it, so a new database starts and your history imports again. Nothing is deleted, and the file can still be used to recover data later.",
+                    "After starting over, restore a Scroblytics backup (**File › Restore Backup…**) to bring back the things you created.",
+                ]),
             ]
         ),
         HelpArticle(

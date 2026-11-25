@@ -26,6 +26,8 @@ enum TestProfileLauncherChecks {
             let realFiles = [
                 support.appending(path: "default.store"),
                 support.appending(path: "default.store-wal"),
+                support.appending(path: "Scroblytics/Scroblytics.store"),
+                support.appending(path: "Scroblytics/Scroblytics.store-wal"),
                 fm.homeDirectoryForCurrentUser.appending(path: "Library/Preferences/\(AppIdentity.bundleID).plist"),
             ]
             func fingerprint(of urls: [URL]) -> [String] {
@@ -73,7 +75,7 @@ enum TestProfileLauncherChecks {
                 } catch { check("starting a running profile twice is refused", true) }
 
                 // Wait for the import into the profile's database.
-                let store = TestProfileLauncher.folder(name).appending(path: "home/Library/Application Support/default.store")
+                let store = TestProfileLauncher.folder(name).appending(path: "home/Library/Application Support/Scroblytics/Scroblytics.store")
                 var scrobbles = 0, artists = 0, lastOutput = ""
                 for _ in 0..<60 {
                     try? await Task.sleep(for: .seconds(1))
@@ -89,11 +91,11 @@ enum TestProfileLauncherChecks {
                 // The profile app must have no handle on the real database or preferences.
                 let lsof = TestProfileLauncher.run("/usr/sbin/lsof", ["-p", String(pid)]).output
                 let realOpen = lsof.split(separator: "\n").filter {
-                    ($0.contains("Library/Application Support/default.store") || $0.contains("Library/Preferences/\(AppIdentity.bundleID).plist"))
+                    ($0.contains("Library/Application Support/default.store") || $0.contains("Library/Application Support/Scroblytics/Scroblytics.store") || $0.contains("Library/Preferences/\(AppIdentity.bundleID).plist"))
                         && !$0.contains(TestProfileLauncher.rootPath) && !$0.contains("/private\(TestProfileLauncher.rootPath)")
                 }
                 check("the profile app never had your real database or preferences open", realOpen.isEmpty, realOpen.first.map(String.init) ?? "")
-                check("it keeps its database in its own folder", lsof.contains("scroblytics-profiles/\(name)/home/Library/Application Support/default.store"), String(lsof.split(separator: "\n").filter { $0.contains("default.store") }.first ?? "no default.store handle"))
+                check("it keeps its database in its own folder", lsof.contains("scroblytics-profiles/\(name)/home/Library/Application Support/Scroblytics/Scroblytics.store"), String(lsof.split(separator: "\n").filter { $0.contains(".store") }.first ?? "no .store handle"))
 
                 // Quit it and confirm the stand-in server is stopped too.
                 NSRunningApplication(processIdentifier: pid)?.terminate()

@@ -171,7 +171,7 @@ enum TestProfile {
 
     /// Where a profile keeps its database: under the (redirected) Application Support folder.
     static var storeURL: URL {
-        URL.applicationSupportDirectory.appending(path: "default.store")
+        StoreLocation.url()
     }
 
     /// The facts `enforce` checks, separated out so the check can be tested with made-up values.
@@ -285,13 +285,13 @@ enum TestProfileChecks {
         let good = TestProfile.Environment(
             profile: "t1", home: "/private/tmp/scroblytics-profiles/t1/home", realHome: "/Users/someone",
             bundleID: "\(AppIdentity.bundleID).profile.t1",
-            storePath: "/private/tmp/scroblytics-profiles/t1/home/Library/Application Support/default.store",
+            storePath: "/private/tmp/scroblytics-profiles/t1/home/Library/Application Support/Scroblytics/Scroblytics.store",
             keychainService: "\(AppIdentity.bundleID).lastfm.profile.t1"
         )
         check("an isolated environment has no problems", TestProfile.problems(in: good).isEmpty)
         TestProfile.problems(in: good).forEach { print("      problem: \($0)") }
         var env = good; env.home = "/tmp/scroblytics-profiles/t1/home"
-        env.storePath = "/tmp/scroblytics-profiles/t1/home/Library/Application Support/default.store"
+        env.storePath = "/tmp/scroblytics-profiles/t1/home/Library/Application Support/Scroblytics/Scroblytics.store"
         check("the /tmp spelling of a profile folder is accepted", TestProfile.problems(in: env).isEmpty)
         env = good; env.home = "/Users/someone"
         check("real home folder is refused", !TestProfile.problems(in: env).isEmpty)
@@ -301,7 +301,7 @@ enum TestProfileChecks {
         check("the real bundle identifier is refused (preferences would be shared)", !TestProfile.problems(in: env).isEmpty)
         env = good; env.bundleID = "\(AppIdentity.bundleID).profile.other"
         check("another profile’s bundle identifier is refused", !TestProfile.problems(in: env).isEmpty)
-        env = good; env.storePath = "/Users/someone/Library/Application Support/default.store"
+        env = good; env.storePath = "/Users/someone/Library/Application Support/Scroblytics/Scroblytics.store"
         check("the real database path is refused", !TestProfile.problems(in: env).isEmpty)
         env = good; env.keychainService = "\(AppIdentity.bundleID).lastfm"
         check("the real Keychain service name is refused", !TestProfile.problems(in: env).isEmpty)

@@ -119,29 +119,41 @@ struct ScroblyticsApp: App {
     /// The database, or an in-memory stand-in plus the reason when it couldn't be opened (`StoreStartup`).
     private static let opened: (container: ModelContainer, failure: StoreStartupFailure?) = {
         let schema = Schema(AppSchema.modelTypes)
+        // Which file to open: a path chosen for a verification run, else the app's own file (copying the earlier shared
+        // `default.store` over first, once, when a person is upgrading).
+        var overridePath: String?
         #if DEBUG
         // Lets a verification run use a COPY of the store (and, with
         // SCROBLYTICS_OFFLINE, skip all network work) so it can run beside a
         // real session without touching or double-syncing the live data.
         // Under a test profile (scripts/first-run-profile.sh) the store lives in the profile's own home folder, and
         // the app stops before opening anything unless preferences, store and Keychain items are all isolated.
-        let storePath = ProcessInfo.processInfo.environment["SCROBLYTICS_STORE_PATH"]
+        overridePath = ProcessInfo.processInfo.environment["SCROBLYTICS_STORE_PATH"]
             ?? (TestProfile.name != nil ? TestProfile.storeURL.path : nil)
-        TestProfile.enforce(storePath: storePath ?? TestProfile.storeURL.path)
-        if TestProfile.name != nil, let storePath {
-            try? FileManager.default.createDirectory(at: URL(fileURLWithPath: storePath).deletingLastPathComponent(), withIntermediateDirectories: true)
+        TestProfile.enforce(storePath: overridePath ?? TestProfile.storeURL.path)
+        if TestProfile.name != nil, let overridePath {
+            try? FileManager.default.createDirectory(at: URL(fileURLWithPath: overridePath).deletingLastPathComponent(), withIntermediateDirectories: true)
         }
-        let configuration = storePath
-            .map { ModelConfiguration(schema: schema, url: URL(fileURLWithPath: $0)) }
-            ?? ModelConfiguration(schema: schema)
-        #else
-        let configuration = ModelConfiguration(schema: schema)
         #endif
-        #if DEBUG
-        return StoreStartup.open(schema: schema, configuration: configuration, storePath: storePath)
-        #else
-        return StoreStartup.open(schema: schema, configuration: configuration, storePath: nil)
-        #endif
+        let storeURL: URL
+        if let overridePath {
+            storeURL = URL(fileURLWithPath: overridePath)
+        } else {
+            let resolution = StoreLocation.resolve()
+            storeURL = resolution.url
+            switch resolution.outcome {
+            case .migrated(let tables, let rows):
+                ActivityLog.record(.startup, "Moved the database to its own file: \(tables) tables and \(rows) rows copied and checked; the earlier file was left in place")
+            case .failed(let reason):
+                ActivityLog.record(.startup, "Couldn't move the database to its own file (\(reason)); using the earlier file and trying again next launch")
+            case .legacyNotOurs:
+                ActivityLog.record(.startup, "Another program's database was found in the shared file and was left alone")
+            case .existing, .fresh:
+                break
+            }
+        }
+        let configuration = ModelConfiguration(schema: schema, url: storeURL)
+        return StoreStartup.open(schema: schema, configuration: configuration, storePath: storeURL.path)
     }()
 
     var modelContainer: ModelContainer { Self.opened.container }
@@ -159,6 +171,7 @@ struct ScroblyticsApp: App {
         RateLimitChecks.runHeadlessIfRequested()
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
+        StoreLocationChecks.runHeadlessIfRequested()
         DetailChecks.runHeadlessIfRequested()
         WeatherChecks.runHeadlessIfRequested()
         KeychainChecks.runHeadlessIfRequested()

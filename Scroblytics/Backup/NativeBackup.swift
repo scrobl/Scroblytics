@@ -5,10 +5,17 @@ import UniformTypeIdentifiers
 
 extension UTType {
     static let scroblyticsBackup = UTType(exportedAs: "com.scroblytics.native-backup", conformingTo: .json)
+
+    /// What a backup file can be recognised as when choosing one to restore. The type is declared in Info.plist, but
+    /// macOS only reads that once it has registered the app, so until then a `.scroblyticsbackup` file has a generated
+    /// type that matches neither entry above. The file-extension type is the fallback that keeps it selectable.
+    static var scroblyticsBackupChoices: [UTType] {
+        [.scroblyticsBackup, .json] + [UTType(filenameExtension: "scroblyticsbackup")].compactMap { $0 }
+    }
 }
 
 struct NativeBackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.scroblyticsBackup, .json] }
+    static var readableContentTypes: [UTType] { UTType.scroblyticsBackupChoices }
 
     var data: Data
 

@@ -436,8 +436,7 @@ private struct TopChartsHeader: View {
                 ChartFilterBar(
                     settings: settings,
                     rangeOptions: rangeOptions,
-                    currentRange: currentRange,
-                    usesTimelineMetricPicker: true
+                    currentRange: currentRange
                 )
                 HStack(spacing: 12) {
                     Picker("Chart type", selection: $entity) {

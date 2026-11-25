@@ -6,9 +6,20 @@ import SwiftUI
 /// `SCROBLYTICS_LAYOUT_SNAPSHOT=<folder>` (with `SCROBLYTICS_STORE_PATH` on a scratch path): renders a screen's controls offscreen at
 /// several window widths into PNG files, so a responsive layout can be looked at without driving the app. Nothing is shown on
 /// screen and nothing is read from or written to the real data.
+/// The selected tab of the Overview header harness (`LayoutSnapshots.snapshotOverviewHeader`).
+@MainActor @Observable private final class OverviewHeaderHarnessState { var tab = 0 }
+
 enum LayoutSnapshots {
     @MainActor
     static func runHeadlessIfRequested(container: ModelContainer) {
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_TIMELINEHEADER"] {
+            snapshotTimelineHeader(into: folder, container: container)
+            return
+        }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_OVERVIEWHEADER"] {
+            snapshotOverviewHeader(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_KEYMODE"] {
             snapshotKeyMode(into: folder, container: container)
             return
@@ -1028,6 +1039,168 @@ enum LayoutSnapshots {
                 }
             }
             exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_TIMELINEHEADER=<folder>`: the real Timeline page (its header with the Metric toggle) at a few widths, dark.
+    @MainActor
+    private static func snapshotTimelineHeader(into folder: String, container: ModelContainer) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            for width in [1300, 800, 520, 380] as [CGFloat] {
+                let view = TimelineView(modelContainer: container, settings: ChartDateSettings(), isActive: true)
+                    .frame(width: width, height: 420)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .modelContainer(container)
+                    .environment(LovedTracksStore()).environment(FlaggedTracksStore()).environment(PopularityStore()).environment(LibraryGapBadgeStore())
+                    .environment(\.colorScheme, .dark)
+                let host = NSHostingView(rootView: view)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: .darkAqua)
+                window.contentView = host
+                for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "timeline-\(Int(width)).png"))
+                }
+            }
+            print("[LayoutSnapshots] timeline header snapshots written to \(folder)")
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_OVERVIEWHEADER=<folder>`: the Overview's real header (the Period, Compare and Metric controls) hosted in the same
+    /// structure as the page, driven through window resizes and a tab hide/show, writing a PNG for each step and measuring the native Metric
+    /// control against its intrinsic width. Exits non-zero if the control is ever narrower than it needs to be (its labels would be cut to "S…").
+    @MainActor
+    private static func snapshotOverviewHeader(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func segmented(in view: NSView) -> [NSSegmentedControl] {
+                var found: [NSSegmentedControl] = []
+                if let control = view as? NSSegmentedControl { found.append(control) }
+                for child in view.subviews { found += segmented(in: child) }
+                return found
+            }
+            var failures = 0
+            @MainActor func report(_ label: String, in host: NSView, png: URL) {
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: png)
+                }
+                // The Metric toggle is the app's own button bar. A native segmented control in the header is what could be left with a stale,
+                // too-small size (labels cut to "S…"), so finding one here is a failure.
+                let controls = segmented(in: host)
+                if controls.isEmpty {
+                    print("PASS  \(label): no native segmented control in the header (host \(Int(host.bounds.width)) pt)")
+                } else {
+                    failures += controls.count
+                    print("FAIL  \(label): \(controls.count) native segmented control(s) in the header, \(Int(controls[0].frame.width)) pt wide, intrinsic \(Int(controls[0].intrinsicContentSize.width))")
+                }
+            }
+            let options = DateRangePresets.build(oldestScrobbleDate: Date(timeIntervalSince1970: 1_500_000_000))
+            let settings = ChartDateSettings()
+            settings.metric = .scrobbles
+            let range = (options.first { $0.id == settings.selectedRangeId } ?? options[0]).range()
+            // The page's own structure: a GeometryReader around a ScrollView holding a LazyVStack (or a plain VStack, for comparison).
+            struct Page: View {
+                let settings: ChartDateSettings
+                let options: [DateRangeOption]
+                let range: DateRange
+                let lazy: Bool
+                var body: some View {
+                    GeometryReader { geometry in
+                        ScrollView {
+                            if lazy {
+                                LazyVStack(alignment: .leading, spacing: 16) { content }
+                            } else {
+                                VStack(alignment: .leading, spacing: 16) { content }
+                            }
+                        }
+                        .frame(width: geometry.size.width)
+                    }
+                }
+                @ViewBuilder private var content: some View {
+                    OverviewHeader(settings: settings, rangeOptions: options, currentRange: range)
+                        .overlay(alignment: .topTrailing) { Button("Share") {}.padding(.top, 6) }
+                    ForEach(0..<6, id: \.self) { index in Text("Card \(index)").frame(maxWidth: .infinity, minHeight: 120).background(.quaternary) }
+                }
+            }
+            struct Tabs: View {
+                @Bindable var state: OverviewHeaderHarnessState
+                let page: Page
+                var body: some View {
+                    TabView(selection: $state.tab) {
+                        NavigationStack { page }.tabItem { Text("Overview") }.tag(0)
+                        Text("Other tab").tabItem { Text("Other") }.tag(1)
+                    }
+                }
+            }
+            for lazy in [true, false] {
+                let kind = lazy ? "lazy" : "plain"
+                let page = Page(settings: settings, options: options, range: range, lazy: lazy)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: .darkAqua)
+                let state = OverviewHeaderHarnessState()
+                let host = NSHostingView(rootView: Tabs(state: state, page: page))
+                window.contentView = host
+                @MainActor func settle() async { for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(120)); host.layoutSubtreeIfNeeded() } }
+                var step = 0
+                @MainActor func shot(_ label: String) async {
+                    await settle()
+                    step += 1
+                    report("\(kind) \(label)", in: host, png: URL(fileURLWithPath: folder).appending(path: "\(kind)-\(String(format: "%02d", step))-\(label.replacingOccurrences(of: " ", with: "-")).png"))
+                }
+                // Start narrow, as the first tab is built before the window has settled, then grow, shrink and grow again.
+                for width in [160, 420, 900, 520, 1100, 380, 900, 1800, 1700, 1650, 1600, 1575, 1550, 1525, 1500, 1450, 1512, 1800, 1560, 1540, 1520, 1800, 1300, 1800] as [CGFloat] {
+                    window.setContentSize(NSSize(width: width, height: 700))
+                    await shot("width \(Int(width))")
+                }
+                // Hide the Overview (switch tab), resize while hidden, show it again.
+                state.tab = 1
+                window.setContentSize(NSSize(width: 560, height: 700))
+                await shot("hidden at 560")
+                window.setContentSize(NSSize(width: 1000, height: 700))
+                state.tab = 0
+                await shot("shown at 1000")
+                // The metric changes (what the toggle does).
+                settings.metric = .timeListened
+                await shot("metric time listened")
+                settings.metric = .scrobbles
+                window.setContentSize(NSSize(width: 700, height: 700))
+                await shot("metric scrobbles 700")
+                // Around the width where the header switches between one row and two, change what the Period and Compare controls say.
+                var sweepSteps = 0
+                for width in [930, 950, 970, 990, 1010, 1030, 1100, 1250] as [CGFloat] {
+                    window.setContentSize(NSSize(width: width, height: 700))
+                    for option in options.prefix(8) {
+                        for mode in ChartCompareMode.allCases {
+                            settings.selectedRangeId = option.id
+                            settings.compareMode = mode
+                            settings.metric = sweepSteps % 2 == 0 ? .scrobbles : .timeListened
+                            sweepSteps += 1
+                            for _ in 0..<2 { try? await Task.sleep(for: .milliseconds(50)); host.layoutSubtreeIfNeeded() }
+                            for _ in segmented(in: host) {
+                                failures += 1
+                                print("FAIL  \(kind) sweep width \(Int(width)) \(option.id) \(mode.rawValue): a native segmented control is back")
+                            }
+                        }
+                    }
+                    // Leave the page and come back at this width.
+                    state.tab = 1
+                    try? await Task.sleep(for: .milliseconds(100))
+                    state.tab = 0
+                    for _ in 0..<3 { try? await Task.sleep(for: .milliseconds(60)); host.layoutSubtreeIfNeeded() }
+                    for _ in segmented(in: host) {
+                        failures += 1
+                        print("FAIL  \(kind) sweep width \(Int(width)) after tab switch: a native segmented control is back")
+                    }
+                }
+                print("      \(kind): swept \(sweepSteps) settings at 8 widths")
+            }
+            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
+            exit(failures == 0 ? 0 : 1)
         }
     }
 

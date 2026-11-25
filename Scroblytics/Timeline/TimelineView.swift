@@ -175,13 +175,9 @@ struct TimelineView: View {
 
     private func headerControls(layout: TimelineResponsiveLayout, onJump: @escaping (Date) -> Void) -> some View {
         HStack {
-            Picker("Metric", selection: $settings.metric) {
-                ForEach(TopChartsMetric.allCases) { metric in
-                    Text(metric.displayName).tag(metric)
-                }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
+            // The app's own button bar, as on every other page (a native segmented control could be left with a stale, too-small size).
+            ChartMetricToggle(metric: $settings.metric)
+                .frame(maxWidth: 360)
 
             if layout.isCompact && yearJumpTargets.count > 1 {
                 Menu("Jump to Year") {

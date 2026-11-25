@@ -159,8 +159,7 @@ struct LibraryView: View {
                 ChartFilterBar(
                     settings: settings,
                     rangeOptions: rangeOptions,
-                    currentRange: currentRange,
-                    usesTimelineMetricPicker: true
+                    currentRange: currentRange
                 )
                 EntityPresentationRow(selectorWidth: 200, isGridView: settings.binding(for: tab.chartsEntity, context: .library)) {
                     Picker("Library section", selection: $tab) {

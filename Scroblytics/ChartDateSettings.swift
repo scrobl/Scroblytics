@@ -227,7 +227,6 @@ struct ChartFilterBar: View {
     let settings: ChartDateSettings
     let rangeOptions: [DateRangeOption]
     let currentRange: DateRange
-    var usesTimelineMetricPicker = false
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -238,8 +237,10 @@ struct ChartFilterBar: View {
                 metricPicker
             }
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    leadingControls
+                // Wraps onto further rows as the window narrows, so Period, Compare and the date keep their full size.
+                ToolControlsFlow(spacing: 12, rowSpacing: 10) {
+                    DateRangeMenu(settings: settings, rangeOptions: rangeOptions)
+                    ChartComparisonControl(settings: settings, currentRange: currentRange, splits: true)
                 }
                 metricPicker
             }
@@ -253,29 +254,17 @@ struct ChartFilterBar: View {
         ChartComparisonControl(settings: settings, currentRange: currentRange)
     }
 
+    /// The Metric toggle is the app's own button bar (`ChartMetricToggle`), on every page, not a native segmented control: an
+    /// `NSSegmentedControl` hosted in SwiftUI could end up with a stale, too-small size (its labels cut to "S…" and "Ti…") on the Overview, and
+    /// the app-drawn bar can't. It also falls back to a menu when there isn't room, rather than squeezing.
     @ViewBuilder
     private var metricPicker: some View {
-        if usesTimelineMetricPicker {
-            Picker("Metric", selection: Binding(
-                get: { settings.metric },
-                set: { settings.metric = $0 }
-            )) {
-                ForEach(TopChartsMetric.allCases) { metric in
-                    Text(metric.displayName).tag(metric)
-                }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.regular)
-            .fixedSize()
-            .layoutPriority(1)
-        } else {
-            ChartMetricToggle(metric: Binding(
-                get: { settings.metric },
-                set: { settings.metric = $0 }
-            ))
-            .frame(maxWidth: 460)
-            .layoutPriority(1)
-        }
+        ChartMetricToggle(metric: Binding(
+            get: { settings.metric },
+            set: { settings.metric = $0 }
+        ))
+        .frame(maxWidth: 360)
+        .layoutPriority(1)
     }
 }
 
@@ -432,38 +421,57 @@ struct ChartComparisonControl: View {
         return minDate...max(minDate, maxDate)
     }
 
+    /// With `splits`, the comparison menu and the custom-date button are separate items, so a `ToolControlsFlow` can wrap them onto their own
+    /// rows on a narrow window instead of squeezing them ("Co…", "Nov 21…").
+    var splits = false
+
+    @ViewBuilder
+    private var compareMenu: some View {
+        Menu {
+            Picker("Comparison", selection: Binding(
+                get: { settings.compareMode },
+                set: { mode in
+                    if mode == .custom {
+                        settings.selectCustomCompareMode(for: currentRange)
+                    } else {
+                        settings.compareMode = mode
+                    }
+                }
+            )) {
+                ForEach(validCompareModes) { mode in
+                    Text(mode.label).tag(mode)
+                }
+                Text(ChartCompareMode.custom.label).tag(ChartCompareMode.custom)
+            }
+        } label: {
+            Label("Compare: \(settings.compareMode.label)", systemImage: "arrow.left.arrow.right")
+        }
+    }
+
+    @ViewBuilder
+    private var customDate: some View {
+        if settings.compareMode == .custom {
+            PopoverDatePicker(
+                "Comparison date",
+                selection: Binding(
+                    get: { settings.compareCustomDate ?? currentRange.from },
+                    set: { settings.compareCustomDate = $0 }
+                ),
+                in: customDateBounds
+            )
+        }
+    }
+
     var body: some View {
         Group {
             if !validCompareModes.isEmpty || settings.compareMode == .custom {
-                HStack(spacing: 8) {
-                    Menu {
-                        Picker("Comparison", selection: Binding(
-                            get: { settings.compareMode },
-                            set: { mode in
-                                if mode == .custom {
-                                    settings.selectCustomCompareMode(for: currentRange)
-                                } else {
-                                    settings.compareMode = mode
-                                }
-                            }
-                        )) {
-                            ForEach(validCompareModes) { mode in
-                                Text(mode.label).tag(mode)
-                            }
-                            Text(ChartCompareMode.custom.label).tag(ChartCompareMode.custom)
-                        }
-                    } label: {
-                        Label("Compare: \(settings.compareMode.label)", systemImage: "arrow.left.arrow.right")
-                    }
-                    if settings.compareMode == .custom {
-                        PopoverDatePicker(
-                            "Comparison date",
-                            selection: Binding(
-                                get: { settings.compareCustomDate ?? currentRange.from },
-                                set: { settings.compareCustomDate = $0 }
-                            ),
-                            in: customDateBounds
-                        )
+                if splits {
+                    compareMenu
+                    customDate
+                } else {
+                    HStack(spacing: 8) {
+                        compareMenu
+                        customDate
                     }
                 }
             }

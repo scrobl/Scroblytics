@@ -69,7 +69,7 @@ struct BackupImportView: View {
             .formStyle(.grouped)
         }
         .frame(minHeight: 420, maxHeight: 560)
-        .fileImporter(isPresented: $isNativeImporterPresented, allowedContentTypes: [.scroblyticsBackup, .json]) { result in
+        .fileImporter(isPresented: $isNativeImporterPresented, allowedContentTypes: UTType.scroblyticsBackupChoices) { result in
             switch result {
             case .success(let url): inspectNativeBackup(at: url)
             case .failure(let error): errorMessage = "Couldn't open that backup: \(error.localizedDescription)"

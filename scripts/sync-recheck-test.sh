@@ -22,7 +22,7 @@ name=recheck
 profiles=/tmp/scroblytics-profiles
 home="$profiles/$name/home"
 log="$home/Library/Application Support/Scroblytics/activity.log"
-store="$home/Library/Application Support/default.store"
+store="$home/Library/Application Support/Scroblytics/Scroblytics.store"
 failures=0
 
 pass() { echo "  PASS  $1"; }

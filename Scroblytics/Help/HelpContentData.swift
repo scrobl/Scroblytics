@@ -9,7 +9,7 @@ extension HelpContent {
             blocks: [
                 .paragraph("Scroblytics is not sandboxed, so these are ordinary folders in your home Library (the **Library** folder is hidden in Finder; use Go › Go to Folder…)."),
                 .table(headers: ["What", "Where"], rows: [
-                    ["Your history and everything the app computes or caches (scrobbles, loved tracks, tags, popularity, durations, tempos, release dates, your edits, saved queries)", "`~/Library/Application Support/default.store` (with its `-shm` and `-wal` companion files)"],
+                    ["Your history and everything the app computes or caches (scrobbles, loved tracks, tags, popularity, durations, tempos, release dates, your edits, saved queries)", "`~/Library/Application Support/Scroblytics/Scroblytics.store` (with its `-shm` and `-wal` companion files). Earlier versions kept it in a shared file named `default.store` beside the Scroblytics folder; the first launch of a newer version copies it over and checks the copy, and leaves the old file in place, so you can delete it once everything looks right"],
                     ["Your own images and downloaded artwork", "`~/Library/Application Support/Scroblytics/CustomImages` and `…/CachedImages`"],
                     ["Hourly weather for your home place and your trips (not for a trip you only typed a name for), only if you turned on **Settings › Weather** (never in a backup: it can be downloaded again)", "`~/Library/Application Support/Scroblytics/Weather`"],
                     ["What your Apple Music library says about each song (date added, genre, tempo tag), only if you turned on **Settings › Sync › Apple Music library details** (never in a backup: it is read again from Music; **Forget What Was Read** deletes it)", "`~/Library/Application Support/Scroblytics/MusicLibrary/library-details.json`"],
@@ -23,6 +23,13 @@ extension HelpContent {
                     "Nothing in the app **deletes your history**. Disconnecting Track Actions only removes the session key (and an own key’s secret) from the Keychain.",
                     "Everything in the database that came from Last.fm can be rebuilt by syncing again. Things **you** created (corrections, overrides, custom images, flagged tracks, saved queries, tag rules, editions you counted on their own, Library Gaps confirmations, Loved Status Audit and Release Year Audit decisions, artist origin corrections, name corrections, automatic playlists) are the part worth backing up: see [Backup and restore](help://data-backup).",
                     "To start completely fresh, quit the app and delete the database files and image folders above, and the Keychain items if you also want the credentials gone.",
+                ]),
+                .heading("If the app says your database has been emptied"),
+                .paragraph("The database is a file only Scroblytics should open, but another program on your Mac could open it by mistake and remove the tables it doesn’t know. At launch, before anything is opened, Scroblytics looks at the file. If it is large but holds no listening history, the app doesn’t start an import over it: it explains what it found and changes nothing."),
+                .bullets([
+                    "If you have a copy of the file from before (Time Machine, Backblaze or another backup), quit Scroblytics, put the copy back as `Scroblytics.store` and open the app again.",
+                    "**Start Over (Keep the File Aside)** moves the emptied file into a `Recovered Databases` folder beside it, so a new database starts and your history imports again. Nothing is deleted, and the file can still be used to recover data later.",
+                    "After starting over, restore a Scroblytics backup (**File › Restore Backup…**) to bring back the things you created.",
                 ]),
             ]
         ),

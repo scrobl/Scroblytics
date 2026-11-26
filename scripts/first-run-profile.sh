@@ -42,7 +42,7 @@ find_app() {
 # Size and modification time of the real data, never contents.
 real_fingerprint() {
   local support="$HOME/Library/Application Support"
-  for f in "$support/default.store" "$support/default.store-wal" "$HOME/Library/Preferences/$real_prefix.plist"; do
+  for f in "$support/default.store" "$support/default.store-wal" "$support/Scroblytics/Scroblytics.store" "$support/Scroblytics/Scroblytics.store-wal" "$HOME/Library/Preferences/$real_prefix.plist"; do
     if [ -e "$f" ]; then stat -f "%N %z bytes, modified %Sm" -t "%Y-%m-%d %H:%M:%S" "$f"; else echo "$f (absent)"; fi
   done
   # Keychain item attributes only (no -g / -w), so no secret is read.

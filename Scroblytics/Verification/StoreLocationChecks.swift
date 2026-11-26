@@ -1,0 +1,289 @@
+import CryptoKit
+import Foundation
+import SQLite3
+import SwiftData
+
+#if DEBUG
+/// `SCROBLYTICS_STORELOCATION_CHECK=1` (with `SCROBLYTICS_STORE_PATH` on a scratch path): the app's own database file and the
+/// one-time copy from the shared `default.store`, on made-up data in temporary folders. Nothing here touches the real
+/// Application Support folder or the real preferences. Exits 0 on success.
+///
+/// `SCROBLYTICS_STORELOCATION_REAL=<path to a COPY of a default.store>` runs the copy on that file in a temporary folder and
+/// prints every table's row count, to be compared against an independent `sqlite3` count.
+enum StoreLocationChecks {
+    /// Waits until a table has at least the given number of rows on disk, as seen by a separate connection. SwiftData's save is
+    /// not guaranteed to be visible the instant its container is released, so a fixture holds the container until this passes.
+    @discardableResult
+    static func waitForRows(_ url: URL, table: String, atLeast: Int) -> Bool {
+        for _ in 0..<200 {
+            var database: OpaquePointer?
+            var statement: OpaquePointer?
+            var count = -1
+            if sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+               sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM \(table)", -1, &statement, nil) == SQLITE_OK, sqlite3_step(statement) == SQLITE_ROW {
+                count = Int(sqlite3_column_int64(statement, 0))
+            }
+            sqlite3_finalize(statement)
+            sqlite3_close(database)
+            if count >= atLeast { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return false
+    }
+
+    /// Folds a test database's log into its main file and removes the log files, so it stands alone as after a clean quit.
+    /// A checkpoint can report success while another connection still holds the log, and deleting a log with unwritten rows
+    /// would lose them, so the files are only removed once the log is confirmed empty (retrying while it is busy).
+    @discardableResult
+    static func foldLog(_ url: URL) -> Bool {
+        var database: OpaquePointer?
+        guard sqlite3_open(url.path, &database) == SQLITE_OK else { sqlite3_close(database); return false }
+        defer { sqlite3_close(database) }
+        var settled = false
+        for _ in 0..<100 {
+            var frames: Int32 = -1
+            var written: Int32 = -1
+            if sqlite3_wal_checkpoint_v2(database, nil, SQLITE_CHECKPOINT_TRUNCATE, &frames, &written) == SQLITE_OK, frames <= 0 {
+                settled = true
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if settled { for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) } }
+        return settled
+    }
+
+    @MainActor
+    static func runHeadlessIfRequested() {
+        let environment = ProcessInfo.processInfo.environment
+        if let real = environment["SCROBLYTICS_STORELOCATION_REAL"] {
+            runReal(copyOf: URL(fileURLWithPath: real))
+        }
+        guard environment["SCROBLYTICS_STORELOCATION_CHECK"] != nil else { return }
+        Task { @MainActor in
+            var failures = 0
+            func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+                print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty || ok ? "" : "  [\(detail)]"))
+                if !ok { failures += 1 }
+            }
+            let manager = FileManager.default
+            let root = manager.temporaryDirectory.appending(path: "scroblytics-storeloc-\(UUID().uuidString)")
+            try? manager.createDirectory(at: root, withIntermediateDirectories: true)
+            defer { try? manager.removeItem(at: root) }
+            var suiteCounter = 0
+            func freshDefaults() -> UserDefaults {
+                suiteCounter += 1
+                let name = "scroblytics.storeloc.check.\(UUID().uuidString)"
+                let defaults = UserDefaults(suiteName: name)!
+                defaults.removePersistentDomain(forName: name)
+                return defaults
+            }
+            func newSupport(_ label: String) -> URL {
+                let url = root.appending(path: label, directoryHint: .isDirectory)
+                try? manager.createDirectory(at: url, withIntermediateDirectories: true)
+                return url
+            }
+            func hash(of url: URL) -> String? {
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            }
+
+            // MARK: Where the file lives
+            let support = newSupport("paths")
+            check("the new file is Scroblytics/Scroblytics.store inside Application Support",
+                  StoreLocation.url(support: support).path == support.appending(path: "Scroblytics/Scroblytics.store").path)
+            check("the earlier file is default.store beside that folder", StoreLocation.legacyURL(support: support).path == support.appending(path: "default.store").path)
+            check("the real location is never the shared default.store name", StoreLocation.url().lastPathComponent != StoreLocation.legacyFileName)
+
+            // MARK: A first run: nothing earlier
+            do {
+                let home = newSupport("fresh")
+                let defaults = freshDefaults()
+                let resolution = StoreLocation.resolve(support: home, defaults: defaults)
+                check("with no earlier file a new one is used", resolution.outcome == .fresh && resolution.url == StoreLocation.url(support: home))
+                check("…its folder exists and no database file was created yet", manager.fileExists(atPath: resolution.url.deletingLastPathComponent().path) && !manager.fileExists(atPath: resolution.url.path))
+                check("…and the decision is remembered", defaults.bool(forKey: StoreLocation.decidedKey))
+            }
+
+            // MARK: Copying a real app database, with data still in its write-ahead log
+            let schema = Schema(AppSchema.modelTypes)
+            let migrateHome = newSupport("migrate")
+            let legacy = StoreLocation.legacyURL(support: migrateHome)
+            var legacyContainer: ModelContainer? = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: legacy))
+            check("a database in the earlier shared file can be created for the test", legacyContainer != nil)
+            if let legacyContainer {
+                let context = ModelContext(legacyContainer)
+                let base = Date(timeIntervalSince1970: 1_700_000_000)
+                for index in 0..<600 {
+                    context.insert(Scrobble(artistName: "Artist \(index % 7)", albumName: "Album \(index % 11)", trackName: "Track \(index)", imageURL: nil, playedAt: base.addingTimeInterval(Double(index) * 60), lastConfirmedAt: base))
+                }
+                context.insert(SyncState(username: "SomeOne"))
+                for index in 0..<25 { context.insert(LovedTrackEntry(cacheKey: "artist a\u{1F}track \(index)", artist: "Artist A", track: "Track \(index)")) }
+                try? context.save()
+            }
+            check("the test database has data waiting in its log, as a live app's would", (try? manager.attributesOfItem(atPath: legacy.path + "-wal")[.size] as? Int).map { ($0 ?? 0) > 0 } ?? false)
+            let before = (main: hash(of: legacy), wal: hash(of: URL(fileURLWithPath: legacy.path + "-wal")))
+            let migrateDefaults = freshDefaults()
+            let migrated = StoreLocation.resolve(support: migrateHome, defaults: migrateDefaults)
+            if case .migrated(let tables, let rows) = migrated.outcome {
+                check("the earlier database is copied", tables > 10 && rows >= 600 + 1 + 25, "tables \(tables), rows \(rows)")
+            } else {
+                check("the earlier database is copied", false, "\(migrated.outcome)")
+            }
+            check("the copy is the new file", migrated.url == StoreLocation.url(support: migrateHome) && manager.fileExists(atPath: migrated.url.path))
+            check("no temporary or log files are left beside it", !manager.fileExists(atPath: migrated.url.path + ".migrating")
+                  && !manager.fileExists(atPath: migrated.url.path + "-wal") && !manager.fileExists(atPath: migrated.url.path + "-shm"))
+            check("the earlier file's contents were not changed", hash(of: legacy) == before.main && hash(of: URL(fileURLWithPath: legacy.path + "-wal")) == before.wal)
+            if let copy = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: migrated.url)) {
+                let context = ModelContext(copy)
+                check("the app opens the copy with its schema", true)
+                check("it has every scrobble, including those that were only in the log", (try? context.fetchCount(FetchDescriptor<Scrobble>())) == 600)
+                check("it has the sync state and loved tracks", (try? context.fetchCount(FetchDescriptor<SyncState>())) == 1 && (try? context.fetchCount(FetchDescriptor<LovedTrackEntry>())) == 25)
+                let sample = (try? context.fetch(FetchDescriptor<Scrobble>(sortBy: [SortDescriptor(\.playedAt)])))?.first
+                check("a row keeps its contents", sample?.trackName == "Track 0" && sample?.artistName == "Artist 0")
+            } else {
+                check("the app opens the copy with its schema", false)
+            }
+            check("the decision is remembered", migrateDefaults.bool(forKey: StoreLocation.decidedKey))
+
+            // New rows go to the new file only
+            if let copy = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: migrated.url)) {
+                let context = ModelContext(copy)
+                context.insert(Scrobble(artistName: "Artist Z", albumName: "Album Z", trackName: "Only In The New File", imageURL: nil, playedAt: Date(), lastConfirmedAt: Date()))
+                try? context.save()
+            }
+            if let legacyContainer {
+                check("the earlier file does not receive new rows", (try? ModelContext(legacyContainer).fetchCount(FetchDescriptor<Scrobble>())) == 600)
+            }
+            legacyContainer = nil
+
+            // A later launch uses the new file and leaves it alone
+            do {
+                let beforeNew = hash(of: migrated.url)
+                let again = StoreLocation.resolve(support: migrateHome, defaults: migrateDefaults)
+                check("a later launch uses the new file", again.outcome == .existing && again.url == migrated.url)
+                check("…and does not copy the earlier file over it", hash(of: migrated.url) == beforeNew)
+            }
+
+            // MARK: Removing the new file to start over does not bring the old data back
+            do {
+                try? manager.removeItem(at: migrated.url)
+                let afterRemoval = StoreLocation.resolve(support: migrateHome, defaults: migrateDefaults)
+                check("with the new file removed, a new one is started, not the old data", afterRemoval.outcome == .fresh && !manager.fileExists(atPath: afterRemoval.url.path))
+            }
+
+            // MARK: A different program's default.store is left alone
+            do {
+                let home = newSupport("foreign")
+                let foreign = StoreLocation.legacyURL(support: home)
+                var database: OpaquePointer?
+                sqlite3_open(foreign.path, &database)
+                sqlite3_exec(database, "CREATE TABLE ZAPIREQUESTMODEL (Z_PK INTEGER PRIMARY KEY, ZKEY VARCHAR); INSERT INTO ZAPIREQUESTMODEL (ZKEY) VALUES ('x');", nil, nil, nil)
+                sqlite3_close(database)
+                let beforeForeign = hash(of: foreign)
+                let defaults = freshDefaults()
+                let resolution = StoreLocation.resolve(support: home, defaults: defaults)
+                check("another program's database is recognised and not copied", resolution.outcome == .legacyNotOurs && !manager.fileExists(atPath: resolution.url.path))
+                check("…it is left exactly as it was", hash(of: foreign) == beforeForeign)
+                check("…and the app uses its own new file", resolution.url == StoreLocation.url(support: home))
+            }
+
+            // MARK: A damaged earlier file does not lose anything: it is used as before and tried again
+            do {
+                let home = newSupport("damaged")
+                let damaged = StoreLocation.legacyURL(support: home)
+                try? Data(repeating: 0x41, count: 5000).write(to: damaged)
+                let defaults = freshDefaults()
+                let resolution = StoreLocation.resolve(support: home, defaults: defaults)
+                if case .failed = resolution.outcome { check("an unreadable earlier file is reported as a failure", true) } else { check("an unreadable earlier file is reported as a failure", false, "\(resolution.outcome)") }
+                check("…the earlier file is still the one opened", resolution.url == damaged)
+                check("…no new or temporary file is left", !manager.fileExists(atPath: StoreLocation.url(support: home).path) && !manager.fileExists(atPath: StoreLocation.url(support: home).path + ".migrating"))
+                check("…the decision is not remembered, so the next launch tries again", !defaults.bool(forKey: StoreLocation.decidedKey))
+            }
+
+            // MARK: A temporary file left by an interrupted copy is cleaned up
+            do {
+                let home = newSupport("interrupted")
+                let source = StoreLocation.legacyURL(support: home)
+                if let container = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: source)) {
+                    let context = ModelContext(container)
+                    context.insert(Scrobble(artistName: "Artist A", albumName: "Album One", trackName: "Track One", imageURL: nil, playedAt: Date(), lastConfirmedAt: Date()))
+                    try? context.save()
+                }
+                let target = StoreLocation.url(support: home)
+                try? manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? Data(repeating: 0x42, count: 4096).write(to: URL(fileURLWithPath: target.path + ".migrating"))
+                let resolution = StoreLocation.resolve(support: home, defaults: freshDefaults())
+                if case .migrated(_, let rows) = resolution.outcome { check("a copy interrupted earlier is redone", rows >= 1) } else { check("a copy interrupted earlier is redone", false, "\(resolution.outcome)") }
+            }
+
+            // MARK: A cleanly closed database (no log files beside it), the usual state at launch
+            do {
+                let home = newSupport("closed")
+                let source = StoreLocation.legacyURL(support: home)
+                var holder: ModelContainer? = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: source))
+                if let container = holder {
+                    let context = ModelContext(container)
+                    context.insert(SyncState(username: "SomeOne"))
+                    for index in 0..<40 {
+                        context.insert(Scrobble(artistName: "Artist A", albumName: "Album One", trackName: "Track \(index)", imageURL: nil, playedAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)), lastConfirmedAt: Date()))
+                    }
+                    try? context.save()
+                }
+                check("the closed test database's rows are on disk", waitForRows(source, table: "ZSCROBBLE", atLeast: 40))
+                holder = nil
+                let folded = foldLog(source)
+                check("the closed test database stands alone, as after a clean quit", folded && !manager.fileExists(atPath: source.path + "-wal") && !manager.fileExists(atPath: source.path + "-shm"))
+                let beforeClosed = hash(of: source)
+                func sqliteCount(_ url: URL, _ table: String) -> Int {
+                    var database: OpaquePointer?
+                    var statement: OpaquePointer?
+                    var result = -1
+                    if sqlite3_open_v2("\(url.absoluteString)?immutable=1", &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK,
+                       sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM \(table)", -1, &statement, nil) == SQLITE_OK, sqlite3_step(statement) == SQLITE_ROW {
+                        result = Int(sqlite3_column_int64(statement, 0))
+                    }
+                    sqlite3_finalize(statement)
+                    sqlite3_close(database)
+                    return result
+                }
+                let sourceScrobbles = sqliteCount(source, "ZSCROBBLE")
+                print("      (the closed test database holds \(sourceScrobbles) scrobbles before the copy)")
+                let resolution = StoreLocation.resolve(support: home, defaults: freshDefaults())
+                if case .migrated(_, let rows) = resolution.outcome { check("a database with no log files is copied", rows > sourceScrobbles && sourceScrobbles > 0, "rows \(rows), source scrobbles \(sourceScrobbles)") } else { check("a database with no log files is copied", false, "\(resolution.outcome)") }
+                check("…the original is byte for byte unchanged and gained no log files", hash(of: source) == beforeClosed && !manager.fileExists(atPath: source.path + "-wal") && !manager.fileExists(atPath: source.path + "-shm"))
+                check("…no scratch folder is left", !manager.fileExists(atPath: resolution.url.path + ".source") && !manager.fileExists(atPath: resolution.url.path + ".migrating"))
+                if let copy = try? ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: resolution.url)) {
+                    check("…and the copy holds every row the original had", (try? ModelContext(copy).fetchCount(FetchDescriptor<Scrobble>())) == sourceScrobbles && sqliteCount(resolution.url, "ZSCROBBLE") == sourceScrobbles)
+                } else {
+                    check("…and the copy holds every row the original had", false)
+                }
+            }
+
+            HeadlessTask.finish(failures)
+        }
+    }
+
+    /// Copies the given file (a COPY of a real `default.store`) to a temporary support folder through the real code and prints
+    /// each table's row count in the copy, for comparison with an independent count.
+    @MainActor
+    private static func runReal(copyOf source: URL) {
+        let manager = FileManager.default
+        let home = manager.temporaryDirectory.appending(path: "scroblytics-storeloc-real-\(UUID().uuidString)")
+        try? manager.createDirectory(at: home, withIntermediateDirectories: true)
+        for suffix in ["", "-wal", "-shm"] {
+            let part = URL(fileURLWithPath: source.path + suffix)
+            if manager.fileExists(atPath: part.path) { try? manager.copyItem(at: part, to: URL(fileURLWithPath: StoreLocation.legacyURL(support: home).path + suffix)) }
+        }
+        let name = "scroblytics.storeloc.real.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        let started = Date()
+        let resolution = StoreLocation.resolve(support: home, defaults: defaults)
+        print("REAL outcome: \(resolution.outcome) in \(String(format: "%.2f", Date().timeIntervalSince(started))) s")
+        print("REAL new file: \(resolution.url.path)")
+        defaults.removePersistentDomain(forName: name)
+        // Leave the folder for the caller's independent sqlite3 count; the caller removes it.
+        HeadlessTask.finish(0)
+    }
+}
+#endif

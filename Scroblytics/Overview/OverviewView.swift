@@ -873,7 +873,7 @@ struct OverviewView: View {
     }
 }
 
-private struct OverviewHeader: View {
+struct OverviewHeader: View {
     let settings: ChartDateSettings
     let rangeOptions: [DateRangeOption]
     let currentRange: DateRange
@@ -883,8 +883,7 @@ private struct OverviewHeader: View {
             ChartFilterBar(
                 settings: settings,
                 rangeOptions: rangeOptions,
-                currentRange: currentRange,
-                usesTimelineMetricPicker: true
+                currentRange: currentRange
             )
         }
     }

@@ -19,7 +19,8 @@ struct ToolsView: View {
     /// the Save As sheet if the user saves it from there.
     let openQuery: (QuerySpec, String, String?) -> Void
 
-    @State private var navigation = DetailNavigationCoordinator(origin: .tools)
+    /// Owned by `ContentView`, so picking the tab can return it to its landing page.
+    let navigation: DetailNavigationCoordinator
     @Environment(AskSimilarRouter.self) private var similarRouter
     @State private var searchText = ""
     @State private var selectedCategory: String?

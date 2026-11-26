@@ -1202,7 +1202,7 @@ enum LayoutSnapshots {
         Task { @MainActor in
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             for width in [1300, 800, 520, 380] as [CGFloat] {
-                let view = TimelineView(modelContainer: container, settings: ChartDateSettings(), isActive: true)
+                let view = TimelineView(modelContainer: container, settings: ChartDateSettings(), isActive: true, navigation: DetailNavigationCoordinator(origin: .timeline))
                     .frame(width: width, height: 420)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .modelContainer(container)

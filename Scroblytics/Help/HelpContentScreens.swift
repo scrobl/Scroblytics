@@ -176,6 +176,7 @@ extension HelpContent {
                     "**Search Library… (⌘F or the toolbar magnifier)** searches artists, albums and tracks across your whole history, ranking exact matches first and then by all-time plays. Choosing a result opens it in Library.",
                     "**Now Playing** shows your current Last.fm track in a shelf at the bottom while one is playing, with a Hide button; the Last.fm mark at its right end is the one chosen in Settings › General › Sharing. **View › Show Now Playing** hides or shows it. The app checks about every 15 seconds while a window is active, backing off up to 2 minutes after failures. Hiding the shelf also stops the checking, and showing it again resumes it. [Offline mode](help://offline-mode) stops it too. The playing track is never saved as a scrobble.",
                     "**Back to Overview** appears in the toolbar after you jump from an Overview card, to return you to it.",
+                    "Choosing a section yourself, with the tabs at the top or from the menu, always opens its first page (for Tools, the list of tools), even if you are already in that section. Pages you had open there are closed, including a Query you haven’t saved. Back, the breadcrumbs, **Back to Overview** and jumps the app makes for you, such as from Search or a Trends chart, work as before.",
                 ]),
             ]
         ),

@@ -430,6 +430,19 @@ enum DetailChecks {
             landing.returnToPredecessor()
             check("a Query opened from the Tools page itself returns to the Tools page", landing.path.isEmpty)
 
+            // Picking a tab: the section's first page, with nothing remembered about how the pages on top were reached.
+            let picked = DetailNavigationCoordinator(origin: .tools)
+            picked.path.append(tripsTool)
+            picked.setOrigin(.tools, label: tripsTool.name)
+            var pickedReturns = 0
+            picked.predecessor = DetailPredecessor(source: "Trends", detail: "x", onReturn: { pickedReturns += 1 })
+            picked.pushOverQuery(ToolDescriptor.all.first { $0.id == .collageGenerator }!)
+            picked.goHome()
+            check("picking a tab empties its stack and forgets the route there", picked.path.isEmpty && picked.predecessor == nil && !picked.isOverQuery && picked.originTitle == "Tools" && pickedReturns == 0, "\(picked.path.count) \(picked.originTitle)")
+            picked.path.append(ArtistIdentity(name: "Artist A"))
+            picked.goBack()
+            check("Back works again from the first page", picked.path.isEmpty)
+
             // A page opened over the Query page (the Collage Generator from its results) returns to it with its navigation as it was.
             let collage = ToolDescriptor.all.first { $0.id == .collageGenerator }!
             let overQuery = DetailNavigationCoordinator(origin: .tools)

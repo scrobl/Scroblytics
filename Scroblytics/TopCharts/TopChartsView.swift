@@ -44,7 +44,8 @@ struct TopChartsView: View {
     @Binding var entity: TopChartsEntity
     let isActive: Bool
 
-    @State private var navigation = DetailNavigationCoordinator(origin: .topCharts)
+    /// Owned by `ContentView`, so picking the tab can return it to its landing page.
+    let navigation: DetailNavigationCoordinator
     @State private var displayedMetric: TopChartsMetric = .scrobbles
     @State private var oldestScrobbleDate: Date?
     @State private var entries: [TopChartEntry] = []

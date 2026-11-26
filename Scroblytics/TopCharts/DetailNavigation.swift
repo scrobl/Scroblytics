@@ -28,6 +28,8 @@ struct DetailPredecessor: Sendable {
 @Observable
 final class DetailNavigationCoordinator {
     private(set) var origin: DetailNavigationOrigin
+    /// The section this stack belongs to, which `goHome()` returns to (`origin` moves while a tool or Query is on top).
+    private let homeOrigin: DetailNavigationOrigin
     /// Overrides the origin crumb's text — a tool names itself ("Loved Status Audit") rather than the whole
     /// "Tools" tab, because the tool is the page a drill-down returns to.
     private(set) var originLabel: String?
@@ -38,6 +40,19 @@ final class DetailNavigationCoordinator {
 
     init(origin: DetailNavigationOrigin) {
         self.origin = origin
+        homeOrigin = origin
+    }
+
+    /// The section's landing page: nothing pushed, and nothing remembered about how the pages on top were reached. Used when the
+    /// person picks the tab itself; Back, breadcrumbs and routes from other screens keep their own behaviour.
+    func goHome() {
+        path = NavigationPath()
+        origin = homeOrigin
+        originLabel = nil
+        originDepth = 0
+        predecessor = nil
+        toolPageBeforeQuery = nil
+        queryUnderneath = nil
     }
 
     func setOrigin(_ origin: DetailNavigationOrigin, label: String? = nil) {

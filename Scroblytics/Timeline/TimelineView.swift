@@ -56,7 +56,8 @@ struct TimelineView: View {
     let isActive: Bool
 
     @Environment(\.modelContext) private var modelContext
-    @State private var navigation = DetailNavigationCoordinator(origin: .timeline)
+    /// Owned by `ContentView`, so picking the tab can return it to its landing page.
+    let navigation: DetailNavigationCoordinator
     @State private var result: TimelineResult?
     @State private var errorMessage: String?
     @State private var isLoading = false

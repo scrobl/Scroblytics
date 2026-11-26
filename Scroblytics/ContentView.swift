@@ -89,7 +89,14 @@ struct ContentView: View {
     @State private var overviewTrendsFocus: TrendsFocus?
     @State private var hasOverviewReturn = false
     @State private var imageResolutionError: String?
+    /// Each section's page stack. They live here so that picking a tab can return that section to its landing page.
+    @State private var overviewNavigation = DetailNavigationCoordinator(origin: .overview)
     @State private var libraryNavigation = DetailNavigationCoordinator(origin: .library)
+    @State private var topChartsNavigation = DetailNavigationCoordinator(origin: .topCharts)
+    @State private var trendsNavigation = DetailNavigationCoordinator(origin: .trends)
+    @State private var milestonesNavigation = DetailNavigationCoordinator(origin: .milestones)
+    @State private var timelineNavigation = DetailNavigationCoordinator(origin: .timeline)
+    @State private var toolsNavigation = DetailNavigationCoordinator(origin: .tools)
     @State private var showingSearch = false
     @State private var showingAsk = false
     @State private var ask = AskModel()
@@ -121,7 +128,7 @@ struct ContentView: View {
     }
 
     private var mainContent: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: tabSelection) {
             OverviewView(
                 settings: chartDateSettings,
                 isActive: selectedTab == .overview,
@@ -146,14 +153,15 @@ struct ContentView: View {
                 openQuery: { spec, detail in
                     beginOverviewRoute(to: .tools)
                     askQueryRequest = QueryHandoff.request(spec: spec, source: "Overview", detail: detail, action: .run, onReturn: { returnToOverview() })
-                }
+                },
+                navigation: overviewNavigation
             )
                 .tabItem { Label("Overview", systemImage: "square.grid.2x2") }
                 .tag(Tab.overview)
             LibraryView(modelContainer: modelContainer, settings: chartDateSettings, isActive: selectedTab == .library, navigation: libraryNavigation)
                 .tabItem { Label("Library", systemImage: "books.vertical.fill") }
                 .tag(Tab.library)
-            TopChartsView(modelContainer: modelContainer, settings: chartDateSettings, entity: $selectedTopChartsEntity, isActive: selectedTab == .topCharts)
+            TopChartsView(modelContainer: modelContainer, settings: chartDateSettings, entity: $selectedTopChartsEntity, isActive: selectedTab == .topCharts, navigation: topChartsNavigation)
                 .tabItem { Label("Top Charts", systemImage: "chart.bar.fill") }
                 .tag(Tab.topCharts)
             TrendsView(
@@ -165,14 +173,15 @@ struct ContentView: View {
                 openQuery: { spec, detail in
                     selectedTab = .tools
                     askQueryRequest = QueryHandoff.request(spec: spec, source: "Trends", detail: detail, action: .run, onReturn: { selectedTab = .trends })
-                }
+                },
+                navigation: trendsNavigation
             )
                 .tabItem { Label("Trends", systemImage: "chart.line.uptrend.xyaxis") }
                 .tag(Tab.trends)
-            MilestonesView(modelContainer: modelContainer, settings: chartDateSettings, isActive: selectedTab == .milestones)
+            MilestonesView(modelContainer: modelContainer, settings: chartDateSettings, isActive: selectedTab == .milestones, navigation: milestonesNavigation)
                 .tabItem { Label("Milestones", systemImage: "trophy.fill") }
                 .tag(Tab.milestones)
-            TimelineView(modelContainer: modelContainer, settings: chartDateSettings, isActive: selectedTab == .timeline)
+            TimelineView(modelContainer: modelContainer, settings: chartDateSettings, isActive: selectedTab == .timeline, navigation: timelineNavigation)
                 .tabItem { Label("Timeline", systemImage: "calendar") }
                 .tag(Tab.timeline)
             ToolsView(
@@ -185,7 +194,8 @@ struct ContentView: View {
                 openQuery: { spec, detail, suggestedName in
                     selectedTab = .tools
                     askQueryRequest = QueryHandoff.request(spec: spec, source: "Tools", detail: detail, action: .edit, suggestedName: suggestedName, onReturn: { selectedTab = .tools })
-                }
+                },
+                navigation: toolsNavigation
             )
                 .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
                 .tag(Tab.tools)
@@ -374,16 +384,45 @@ struct ContentView: View {
         selectedTab = tab
     }
 
-    private func navigate(to destination: WindowCommandState.Destination) {
+    /// What the tab bar writes through. It reports every click, including one on the tab already showing.
+    private var tabSelection: Binding<Tab> {
+        Binding(get: { selectedTab }, set: { selectTab($0) })
+    }
+
+    /// The person picked a tab (clicked it, or chose it from the menu): show that section's landing page. Switches the app makes
+    /// itself (search, Back to Overview, breadcrumbs, opening a chart in Query) set `selectedTab` directly, so each section
+    /// stays where it was for those.
+    private func selectTab(_ tab: Tab) {
         hasOverviewReturn = false
+        // A request left over from an earlier route would put its page straight back.
+        overviewToolRequest = nil
+        overviewSimilarSeeds = []
+        overviewTrendsFocus = nil
+        navigation(for: tab).goHome()
+        selectedTab = tab
+    }
+
+    private func navigation(for tab: Tab) -> DetailNavigationCoordinator {
+        switch tab {
+        case .overview: overviewNavigation
+        case .library: libraryNavigation
+        case .topCharts: topChartsNavigation
+        case .trends: trendsNavigation
+        case .milestones: milestonesNavigation
+        case .timeline: timelineNavigation
+        case .tools: toolsNavigation
+        }
+    }
+
+    private func navigate(to destination: WindowCommandState.Destination) {
         switch destination {
-        case .overview: selectedTab = .overview
-        case .library: selectedTab = .library
-        case .topCharts: selectedTab = .topCharts
-        case .trends: selectedTab = .trends
-        case .milestones: selectedTab = .milestones
-        case .timeline: selectedTab = .timeline
-        case .tools: selectedTab = .tools
+        case .overview: selectTab(.overview)
+        case .library: selectTab(.library)
+        case .topCharts: selectTab(.topCharts)
+        case .trends: selectTab(.trends)
+        case .milestones: selectTab(.milestones)
+        case .timeline: selectTab(.timeline)
+        case .tools: selectTab(.tools)
         }
     }
 

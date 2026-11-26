@@ -309,7 +309,8 @@ struct OverviewView: View {
     /// Opens Query on a spec (a clicked hour or day of the strips below), with a name for it.
     let openQuery: (QuerySpec, String) -> Void
 
-    @State private var navigation = DetailNavigationCoordinator(origin: .overview)
+    /// Owned by `ContentView`, so picking the tab can return it to its landing page.
+    let navigation: DetailNavigationCoordinator
     @State private var oldestScrobbleDate: Date?
     @State private var onThisDayEntries: [OnThisDayEntry] = []
     @State private var longTailStats: LongTailStats?

@@ -37,7 +37,8 @@ struct TrendsView: View {
     @State private var passportInputs: TrendsPassportChart.Inputs?
     @State private var loyaltyInputs: TrendsLoyaltyChart.Inputs?
     @State private var flowInputs: TrendsFlowChart.Inputs?
-    @State private var navigation = DetailNavigationCoordinator(origin: .trends)
+    /// Owned by `ContentView`, so picking the tab can return it to its landing page.
+    let navigation: DetailNavigationCoordinator
     @State private var dataVersion = 0
     @State private var oldestScrobbleDate: Date?
     @State private var errorMessage: String?

@@ -151,10 +151,38 @@ struct ScroblyticsApp: App {
             case .existing, .fresh:
                 break
             }
+            makeSafetyCopy(of: storeURL, after: resolution.outcome)
         }
+        #if DEBUG
+        // A test profile has its own preferences and application support folder, so it runs the same safety copy a real launch does
+        // (a run on a scratch store path does not).
+        if overridePath != nil, TestProfile.name != nil { makeSafetyCopy(of: storeURL, after: .existing) }
+        #endif
         let configuration = ModelConfiguration(schema: schema, url: storeURL)
         return StoreStartup.open(schema: schema, configuration: configuration, storePath: storeURL.path)
     }()
+
+    /// Before the first launch of a new version opens the database, keep a full copy of it (`StoreSafetyCopy`). Not when the file
+    /// was only just copied from the shared `default.store` (that file is itself the copy from before this version).
+    private static func makeSafetyCopy(of storeURL: URL, after outcome: StoreLocation.Outcome) {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        if case .migrated = outcome {
+            UserDefaults.standard.set("\(version) (\(build))", forKey: StoreSafetyCopy.lastBuildKey)
+            return
+        }
+        switch StoreSafetyCopy.prepare(storeURL: storeURL, appFolder: StoreLocation.url().deletingLastPathComponent(), version: version, build: build) {
+        case .made(_, let tables, let rows):
+            ActivityLog.record(.startup, "Saved a safety copy of the database before this version opened it: \(tables) tables and \(rows) rows copied and checked")
+        case .skipped(let reason):
+            ActivityLog.record(.startup, "No safety copy of the database was made before this version opened it: \(reason)")
+        case .failed(let reason):
+            ActivityLog.record(.startup, "The safety copy of the database before this version couldn't be made (\(reason)); continuing without it")
+        case .notNeeded, .noStoreYet:
+            break
+        }
+    }
 
     var modelContainer: ModelContainer { Self.opened.container }
 
@@ -177,6 +205,8 @@ struct ScroblyticsApp: App {
         UpdateChecks.runHeadlessIfRequested()
         DiagnosticsChecks.runHeadlessIfRequested(container: modelContainer)
         StoreLocationChecks.runHeadlessIfRequested()
+        BackupScheduleChecks.runHeadlessIfRequested()
+        BackupScheduleChecks.runRealIfRequested(container: modelContainer)
         StoreIntegrityChecks.runHeadlessIfRequested()
         DetailChecks.runHeadlessIfRequested()
         WeatherChecks.runHeadlessIfRequested()
@@ -590,6 +620,7 @@ private struct AppearanceSettingsView: View {
 
             SharingSettingsSection()
             PrivacySettingsSection()
+            BackupSettingsSection()
             SupportSettingsSection()
 
             UpdateSettingsSection()

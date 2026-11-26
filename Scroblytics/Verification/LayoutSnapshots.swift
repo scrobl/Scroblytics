@@ -68,6 +68,10 @@ enum LayoutSnapshots {
             snapshotScrobblerWatch(into: folder)
             return
         }
+        if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_BACKUP"] {
+            snapshotBackup(into: folder)
+            return
+        }
         if let folder = ProcessInfo.processInfo.environment["SCROBLYTICS_LAYOUT_SNAPSHOT_UPDATES"] {
             snapshotUpdates(into: folder)
             return
@@ -323,6 +327,56 @@ enum LayoutSnapshots {
                     for width in [700, 460] as [CGFloat] {
                         await render(AutoPlaylistRow(list: list, isRefreshing: false, onRefresh: {}, onShow: {}, onMakeAgain: {}, onStop: {}, onToggle: {}).padding(16), width: width, scheme: scheme, name: "row-\(key)-\(Int(width))")
                     }
+                }
+            }
+            exit(0)
+        }
+    }
+
+    /// `SCROBLYTICS_LAYOUT_SNAPSHOT_BACKUP=<folder>`: the backup reminder strip (the three things it can say) at three widths, and the
+    /// Settings › Backup section with automatic backup off and on (with an error), light and dark. Made-up dates, no real preferences.
+    private static func snapshotBackup(into folder: String) {
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            @MainActor func render<V: View>(_ view: V, width: CGFloat, scheme: String, name: String) async {
+                let appearance = scheme == "dark" ? NSAppearance.Name.darkAqua : .aqua
+                let host = NSHostingView(rootView: view.frame(width: width).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme == "dark" ? .dark : .light))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.setContentSize(NSSize(width: width, height: 200))
+                for _ in 0..<4 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded() }
+                window.setContentSize(NSSize(width: width, height: max(host.fittingSize.height, 24)))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appending(path: "\(name)-\(scheme)-\(Int(width)).png"))
+                }
+            }
+            func suite() -> UserDefaults {
+                let name = "scroblytics.snapshot.backup.\(UUID().uuidString)"
+                let defaults = UserDefaults(suiteName: name)!
+                defaults.removePersistentDomain(forName: name)
+                return defaults
+            }
+            let off = BackupScheduler(defaults: suite())
+            let onDefaults = suite()
+            onDefaults.set(true, forKey: BackupPreferences.Key.automaticOn)
+            onDefaults.set("/Volumes/External Drive/Scroblytics Backups", forKey: BackupPreferences.Key.automaticFolder)
+            onDefaults.set("the backup folder can’t be found. Choose it again in Settings.", forKey: BackupPreferences.Key.automaticError)
+            onDefaults.set(Date().addingTimeInterval(-9 * 86_400), forKey: BackupPreferences.Key.lastAt)
+            onDefaults.set("automatic", forKey: BackupPreferences.Key.lastKind)
+            let on = BackupScheduler(defaults: onDefaults)
+            let container = try? ModelContainer(for: Schema(AppSchema.modelTypes), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            for scheme in ["dark", "light"] {
+                for width in [900, 560, 380] as [CGFloat] {
+                    for (key, reminder) in [("never", BackupReminder.neverBackedUp), ("stale", .stale(days: 41)), ("failed", .automaticFailed(reason: "the backup folder can’t be found. Choose it again in Settings."))] {
+                        await render(BackupReminderLine(reminder: reminder, onBackUp: {}, onLater: {}, onTurnOff: {}), width: width, scheme: scheme, name: "strip-\(key)")
+                    }
+                }
+                if let container {
+                    await render(Form { BackupSettingsSection(scheduler: off) }.formStyle(.grouped).modelContainer(container), width: 560, scheme: scheme, name: "settings-off")
+                    await render(Form { BackupSettingsSection(scheduler: on) }.formStyle(.grouped).modelContainer(container), width: 560, scheme: scheme, name: "settings-on")
                 }
             }
             exit(0)

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftData
 import SwiftUI
@@ -108,7 +109,7 @@ enum NativeBackupFormat {
     struct Archive: Codable {
         let format: String
         let formatVersion: Int
-        let createdAt: Date
+        var createdAt: Date
         let appVersion: String
         let username: String?
         var albums: [AlbumRecord]
@@ -221,6 +222,7 @@ enum NativeBackupFormat {
 enum NativeBackupError: LocalizedError {
     case wrongFormat
     case unsupportedVersion(Int)
+    case verificationFailed
 
     var errorDescription: String? {
         switch self {
@@ -228,6 +230,8 @@ enum NativeBackupError: LocalizedError {
             return "This is not a Scroblytics backup."
         case .unsupportedVersion(let version):
             return "This backup uses format version \(version), which this version of Scroblytics cannot restore."
+        case .verificationFailed:
+            return "The backup was written but did not read back the same, so it was not kept."
         }
     }
 }
@@ -250,6 +254,12 @@ enum NativeBackupEngine {
         var artistOrigins = 0
         var nameCorrections = 0
 
+        /// Everything counted, so "is there anything to save" is one comparison.
+        var total: Int {
+            albums + tracks + customImages + flaggedTracks + savedQueries + dismissedLibraryGaps + lovedAuditDecisions + releaseYearDecisions
+                + tagRules + albumEditionMatches + weatherTrips + autoPlaylists + artistOrigins + nameCorrections
+        }
+
         var description: String {
             var text = "\(albums) album edits · \(tracks) track edits · \(customImages) images · \(flaggedTracks) flagged tracks · \(savedQueries) saved queries"
             if dismissedLibraryGaps > 0 { text += " · \(dismissedLibraryGaps) confirmed library gaps" }
@@ -266,11 +276,65 @@ enum NativeBackupEngine {
     }
 
     static func makeDocument(context: ModelContext) throws -> NativeBackupDocument {
-        let archive = try makeArchive(context: context)
+        NativeBackupDocument(data: try encode(try makeArchive(context: context)))
+    }
+
+    /// A backup ready to write.
+    struct EncodedBackup: Sendable {
+        let data: Data
+        let summary: Summary
+        /// False when nothing you created exists yet (an empty file would only be noise).
+        let savesAnything: Bool
+    }
+
+    /// A backup's bytes, checked: the records are encoded, decoded again and every count must match, so a file that can't be restored
+    /// is never counted as a backup. (The pictures are plain bytes inside the file; the caller compares the written file with these
+    /// bytes exactly.) Needs no database, so the automatic backup runs it off the main actor.
+    nonisolated static func encodeVerified(_ archive: NativeBackupFormat.Archive) throws -> EncodedBackup {
+        let data = try encode(archive)
+        var records = archive
+        records.images = [:]
+        let reread = try decode(try encode(records))
+        guard summary(for: reread).description == summary(for: records).description, reread.linerNotes.count == archive.linerNotes.count else {
+            throw NativeBackupError.verificationFailed
+        }
+        return EncodedBackup(data: data, summary: summary(for: archive), savesAnything: hasContent(archive))
+    }
+
+    static func makeVerifiedBackup(context: ModelContext) throws -> EncodedBackup {
+        try encodeVerified(try makeArchive(context: context))
+    }
+
+    /// Whether anything you created exists, without keeping the backup: what decides if a backup reminder is worth showing.
+    static func hasContentWorthSaving(context: ModelContext) -> Bool {
+        guard let archive = try? makeArchive(context: context) else { return false }
+        return hasContent(archive)
+    }
+
+    nonisolated static func hasContent(_ archive: NativeBackupFormat.Archive) -> Bool {
+        summary(for: archive).total > 0 || !archive.linerNotes.isEmpty
+    }
+
+    /// A fingerprint of everything a backup would hold apart from when it was made, so "nothing has changed since the last backup" is
+    /// one comparison. The pictures are hashed too: replacing one changes it.
+    nonisolated static func fingerprint(of archive: NativeBackupFormat.Archive) throws -> String {
+        var records = archive
+        records.createdAt = .distantPast
+        records.images = [:]
+        var hasher = SHA256()
+        hasher.update(data: try encode(records))
+        for name in archive.images.keys.sorted() {
+            hasher.update(data: Data(name.utf8))
+            if let bytes = archive.images[name] { hasher.update(data: bytes) }
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    nonisolated private static func encode(_ archive: NativeBackupFormat.Archive) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return NativeBackupDocument(data: try encoder.encode(archive))
+        return try encoder.encode(archive)
     }
 
     static func inspect(document: NativeBackupDocument) throws -> (NativeBackupFormat.Archive, Summary) {
@@ -325,10 +389,7 @@ enum NativeBackupEngine {
             let artist = try findOrCreateArtist(named: record.artist, context: context)
             artist.customImageFilename = record.filename
         }
-        for record in archive.albumImages {
-            let key = TextNormalization.albumIdentityKey(artist: record.artist, album: record.album)
-            context.insert(AlbumImageOverride(identityKey: key, artist: record.artist, album: record.album, filename: record.filename))
-        }
+        restoreAlbumImageOverrides(archive.albumImages, context: context)
         for record in archive.flaggedTracks {
             context.insert(FlaggedTrack(artist: record.artist, track: record.track, album: record.album, flaggedAt: record.flaggedAt))
         }
@@ -374,6 +435,16 @@ enum NativeBackupEngine {
 
     /// Replaces the Library Gaps confirmations with the archive's. `nil` — an archive from before they were backed
     /// up — leaves the current ones alone rather than wiping them.
+    /// Puts album picture overrides back. The key is the one the app itself files and finds a picture under (`ImageStore`,
+    /// `ImageResolutionEngine`): the exact album name, so editions keep their own pictures. The group key (`albumIdentityKey`) strips
+    /// edition wording, so a picture restored under it was never found again and two editions of one album collapsed into one row.
+    static func restoreAlbumImageOverrides(_ records: [NativeBackupFormat.AlbumImageRecord], context: ModelContext) {
+        for record in records {
+            let key = TextNormalization.albumArtworkIdentityKey(artist: record.artist, album: record.album)
+            context.insert(AlbumImageOverride(identityKey: key, artist: record.artist, album: record.album, filename: record.filename))
+        }
+    }
+
     static func restoreDismissedLibraryGaps(_ records: [NativeBackupFormat.DismissedLibraryGapRecord]?, context: ModelContext, save: Bool = true) throws {
         guard let records else { return }
         for item in try context.fetch(FetchDescriptor<LibraryGapDismissal>()) { context.delete(item) }
@@ -527,7 +598,7 @@ enum NativeBackupEngine {
         if save { try context.save() }
     }
 
-    private static func makeArchive(context: ModelContext) throws -> NativeBackupFormat.Archive {
+    static func makeArchive(context: ModelContext) throws -> NativeBackupFormat.Archive {
         let albums = try context.fetch(FetchDescriptor<Album>()).compactMap { album -> NativeBackupFormat.AlbumRecord? in
             guard album.releaseDateOverride != nil || album.customImageFilename != nil || album.matchResolutionMode != nil else { return nil }
             return .init(artist: album.artist?.name ?? "", title: album.title, releaseDateOverride: album.releaseDateOverride, customImageFilename: album.customImageFilename, matchMode: album.matchResolutionMode?.rawValue, canonicalArtist: album.canonicalArtist, canonicalAlbum: album.canonicalAlbum, manualTracklist: album.manualTracklist)
@@ -574,7 +645,7 @@ enum NativeBackupEngine {
         return .init(format: "Scroblytics Native Backup", formatVersion: NativeBackupFormat.currentVersion, createdAt: Date(), appVersion: appVersion, username: username, albums: albums, tracks: tracks, artistImages: artistImages, albumImages: albumImages, flaggedTracks: flagged, savedConditionSets: conditions, legacySavedQueries: savedQueries, linerNotes: linerNotes, toolFilters: filters, dismissedLibraryGaps: dismissed, lovedAuditDecisions: auditDecisions, releaseYearDecisions: yearDecisions, tagRules: tagRules, albumEditionMatches: editionMatches, artistOrigins: originEdits, nameCorrections: nameCorrections, autoPlaylists: autoPlaylists, weatherLocations: weatherBook, theme: theme, images: images)
     }
 
-    private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
+    nonisolated private static func decode(_ data: Data) throws -> NativeBackupFormat.Archive {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let archive = try decoder.decode(NativeBackupFormat.Archive.self, from: data)
@@ -582,12 +653,12 @@ enum NativeBackupEngine {
         return archive
     }
 
-    private static func validate(_ archive: NativeBackupFormat.Archive) throws {
+    nonisolated private static func validate(_ archive: NativeBackupFormat.Archive) throws {
         guard archive.format == "Scroblytics Native Backup" else { throw NativeBackupError.wrongFormat }
         guard archive.formatVersion == NativeBackupFormat.currentVersion else { throw NativeBackupError.unsupportedVersion(archive.formatVersion) }
     }
 
-    private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
+    nonisolated private static func summary(for archive: NativeBackupFormat.Archive) -> Summary {
         Summary(albums: archive.albums.count, tracks: archive.tracks.count, customImages: archive.images.count, flaggedTracks: archive.flaggedTracks.count, savedQueries: archive.savedConditionSets.count, dismissedLibraryGaps: archive.dismissedLibraryGaps?.count ?? 0, lovedAuditDecisions: archive.lovedAuditDecisions?.count ?? 0, releaseYearDecisions: archive.releaseYearDecisions?.count ?? 0, tagRules: archive.tagRules?.count ?? 0, albumEditionMatches: archive.albumEditionMatches?.filter { $0.countsSeparately != false }.count ?? 0, weatherTrips: archive.weatherLocations?.trips.count ?? 0, autoPlaylists: archive.autoPlaylists?.count ?? 0, artistOrigins: archive.artistOrigins?.count ?? 0, nameCorrections: archive.nameCorrections?.count ?? 0)
     }
 

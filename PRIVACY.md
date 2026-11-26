@@ -38,8 +38,12 @@ comfortable with that. The same information is available inside the app under **
   small file in the Scroblytics folder and included in backups (which are not encrypted). A place you only typed a name for stays on
   your Mac. Only with weather turned on is the weather for a trip requested, for its place (chosen in the city search) and dates, so
   Open-Meteo sees where and when, but never who or what you listened to.
-- **Backups and exports** you create are files you choose the location of. They contain your listening history and are not
-  encrypted, so store them as carefully as you would any personal file. They never contain your keys.
+- **Backups and exports** you create are files you choose the location of. A backup holds what you created in Scroblytics (edits,
+  saved queries, corrections and so on, with your custom pictures and your Last.fm username, but not your listening history); a
+  history export holds your plays. Neither is encrypted, so store them as carefully as you would any personal file. They never contain
+  your keys. The optional **automatic backup** writes the same kind of file into a folder you choose, weekly, and the app keeps a
+  **safety copy** of its database (your history too) for two weeks before the first launch of a new version, in its own folder in
+  Application Support. Both stay on your Mac (or in the folder you picked) and nothing is sent anywhere.
 
 The developer has no access to any of this.
 

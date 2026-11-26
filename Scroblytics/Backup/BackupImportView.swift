@@ -77,7 +77,9 @@ struct BackupImportView: View {
         }
         .fileExporter(isPresented: $isExporterPresented, document: nativeDocument, contentType: .scroblyticsBackup, defaultFilename: nativeBackupFilename) { result in
             switch result {
-            case .success: statusMessage = "Backup created."
+            case .success:
+                statusMessage = "Backup created."
+                BackupScheduler.shared.recordBackup(manual: true)
             case .failure(let error): errorMessage = "Couldn't save the backup: \(error.localizedDescription)"
             }
             nativeDocument = nil

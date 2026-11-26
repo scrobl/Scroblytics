@@ -216,6 +216,7 @@ struct ContentView: View {
                 })
                 OfflineStrip()
                 UpdateStrip()
+                BackupReminderStrip(container: modelContainer)
                 CrashNoticeStrip()
                 BackgroundWorkStrip(store: backgroundWork)
             }

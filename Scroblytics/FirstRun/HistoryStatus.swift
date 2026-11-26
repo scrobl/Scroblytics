@@ -27,6 +27,26 @@ final class HistoryStatus {
         let kind: Kind
         /// Last.fm refused the API key (invalid or suspended). With an own key and a built-in one available, switching is offered.
         let keyRejected: Bool
+        /// What the failure technically was ("Last.fm error 8", "HTTP 500"), for the activity log. Fixed wording and codes only.
+        let technical: String?
+
+        /// A short technical description of an error: Last.fm's error code and its stock message, an HTTP status, or the system's
+        /// network error domain and code. Never includes a URL or anything from the request.
+        static func technicalDetail(of error: Error) -> String? {
+            if let api = error as? LastfmAPIError {
+                switch api {
+                case .api(let code, let message): return message.isEmpty ? "Last.fm error \(code)" : "Last.fm error \(code): \(message)"
+                case .http(let status): return "HTTP status \(status)"
+                case .network(let underlying): return "network error \(technicalDetail(of: underlying) ?? "")"
+                case .decoding: return "response could not be read"
+                case .invalidResponse: return "response not understood"
+                case .malformedField: return "response had an unexpected value"
+                }
+            }
+            if error is CancellationError || error is OfflineError { return nil }
+            let ns = error as NSError
+            return "\(ns.domain) \(ns.code)"
+        }
 
         /// Key, suspended-key and privacy errors can't be cured by retrying; everything else might be.
         init(error: Error) {
@@ -42,12 +62,14 @@ final class HistoryStatus {
                 kind = .retry
             }
             if case .api(let code, _)? = error as? LastfmAPIError { keyRejected = code == 10 || code == 26 } else { keyRejected = false }
+            technical = Self.technicalDetail(of: error)
         }
 
-        init(message: String, kind: Kind, keyRejected: Bool = false) {
+        init(message: String, kind: Kind, keyRejected: Bool = false, technical: String? = nil) {
             self.message = message
             self.kind = kind
             self.keyRejected = keyRejected
+            self.technical = technical
         }
     }
 

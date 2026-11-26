@@ -29,7 +29,7 @@ enum ActivityEvents {
         }
         observe(.scrobbleSyncDidFail) { note in
             guard let failure = note.object as? HistoryStatus.Failure else { return }
-            ActivityLog.record(.sync, "Sync failed (\(failure.kind == .fixAccount ? "needs the account fixed" : "can be retried")): \(failure.message)")
+            ActivityLog.record(.sync, "Sync failed (\(failure.kind == .fixAccount ? "needs the account fixed" : "can be retried")): \(failure.message)\(failure.technical.map { " [\($0)]" } ?? "")")
         }
         observe(.scrobbleSyncDidStop) { _ in ActivityLog.record(.sync, "Sync stopped; what was imported is kept") }
         observe(.firstImportDidFinish) { _ in ActivityLog.record(.sync, "The first import finished") }

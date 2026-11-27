@@ -45,7 +45,7 @@ enum LastfmAccountCheck {
     }
 
     /// Said when the key built into the app is the one being refused (nothing the person typed can fix it).
-    static let builtInKeyRefused = "Last.fm isn’t accepting the key built into Scroblytics right now. That isn’t something you did wrong. Try again later, or use your own API key (Settings › Sync, or “Use my own API key” here), and please tell us through Help › Report a Problem…."
+    static let builtInKeyRefused = "Last.fm isn’t accepting the key built into Scroblytics right now. That isn’t something you did wrong. Try again later, or use an API key of your own from an account with Last.fm Pro (Settings › Sync, or “Use my own API key” here), and please tell us through Help › Report a Problem…."
     /// Said when this build has no built-in key at all (a build made without one).
     static let builtInMissing = "This copy of Scroblytics doesn’t include a Last.fm key. Enter your own API key instead."
 
@@ -56,10 +56,11 @@ enum LastfmAccountCheck {
         if let error = error as? LastfmAPIError {
             switch error {
             case .api(let code, let text):
-                if usingBuiltInKey, code == 10 || code == 26 { return LastfmBuiltInKey.isAvailable ? builtInKeyRefused : builtInMissing }
+                if usingBuiltInKey, error.isKeyRefusal { return LastfmBuiltInKey.isAvailable ? builtInKeyRefused : builtInMissing }
                 switch code {
-                case 10: return "Last.fm doesn’t recognise this API key. Copy it again from last.fm/api/accounts. It must be the API key, not the shared secret. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key from an account without it is refused."
-                case 26: return "Last.fm has suspended this API key. Register a new one at last.fm/api/account/create. Since 1 December 2026 the account that owns a key needs Last.fm Pro."
+                case 10: return "Last.fm doesn’t recognise this API key. Copy it again from last.fm/api/accounts. It must be the API key, not the shared secret."
+                case 26: return "Last.fm has suspended this API key. Register a new one at last.fm/api/account/create."
+                case 33: return "Last.fm needs Last.fm Pro on the account that owns this API key, and that account doesn’t have it. Use a key from an account with Pro\(LastfmBuiltInKey.isAvailable ? ", or Scroblytics’ built-in key" : "")."
                 case 6: return "Last.fm has no user named “\(username)”. Check the spelling: it is the name in your profile address (last.fm/user/…)."
                 case 17: return "Last.fm won’t share this profile’s listening history. In your Last.fm privacy settings, turn off “Hide recent listening information”, then try again."
                 case 29: return "Last.fm is limiting requests right now. Wait a minute and try again."

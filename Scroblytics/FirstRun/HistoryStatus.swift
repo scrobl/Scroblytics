@@ -56,12 +56,13 @@ final class HistoryStatus {
             } else {
                 message = describeSyncError(error)
             }
-            if case .api(let code, _)? = error as? LastfmAPIError, [4, 9, 10, 17, 26].contains(code) {
+            let refused = (error as? LastfmAPIError)?.isKeyRefusal == true
+            if case .api(let code, _)? = error as? LastfmAPIError, refused || [4, 9, 17].contains(code) {
                 kind = .fixAccount
             } else {
                 kind = .retry
             }
-            if case .api(let code, _)? = error as? LastfmAPIError { keyRejected = code == 10 || code == 26 } else { keyRejected = false }
+            keyRejected = refused
             technical = Self.technicalDetail(of: error)
         }
 

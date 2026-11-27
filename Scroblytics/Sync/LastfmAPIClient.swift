@@ -81,8 +81,9 @@ extension LastfmAPIError: LocalizedError {
         switch self {
         case .api(let code, let message):
             switch code {
-            case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync. Since 1 December 2026 Last.fm also only accepts keys whose owner has Last.fm Pro, so a key that used to work stops working if that subscription lapses.\(LastfmBuiltInKey.isAvailable ? " You can switch to Scroblytics’ built-in key there instead." : "")"
-            case 26: return "Last.fm has suspended this API key. Since 1 December 2026 a key also needs its owner to have Last.fm Pro.\(LastfmBuiltInKey.isAvailable ? " You can switch to Scroblytics’ built-in key in Settings › Sync instead." : "")"
+            case 10: return "Last.fm doesn’t recognise this API key. Check it in Settings › Sync.\(LastfmBuiltInKey.isAvailable ? " You can switch to Scroblytics’ built-in key there instead." : "")"
+            case 26: return "Last.fm has suspended this API key.\(LastfmBuiltInKey.isAvailable ? " You can switch to Scroblytics’ built-in key in Settings › Sync instead." : "")"
+            case 33: return "Last.fm needs Last.fm Pro on the account that owns this API key, and that account doesn’t have it. Renew Pro on that account\(LastfmBuiltInKey.isAvailable ? ", or switch to Scroblytics’ built-in key in Settings › Sync" : "")."
             case 29: return "Last.fm is limiting requests from this connection, even after waiting several minutes. Wait a few minutes, then press Retry."
             case 17: return "Last.fm needs a login to show this data. If you hid your recent listening in your Last.fm privacy settings, that is the cause."
             case 4, 9: return "Last.fm rejected the session. Reconnect Track Actions in Settings › Sync."
@@ -103,7 +104,7 @@ func describeSyncError(_ error: Error) -> String {
     if error is CancellationError { return "Cancelled." }
     if let storeProblem = StoreProblem.describe(error) { return storeProblem }
     // A refused key reads differently when it is the one built into the app: the person can't fix that key, only use their own.
-    if case .api(let code, _)? = error as? LastfmAPIError, code == 10 || code == 26, LastfmCredentialsStore.cachedAccount?.usesBuiltInKey == true {
+    if (error as? LastfmAPIError)?.isKeyRefusal == true, LastfmCredentialsStore.cachedAccount?.usesBuiltInKey == true {
         return LastfmBuiltInKey.isAvailable ? LastfmAccountCheck.builtInKeyRefused : LastfmAccountCheck.builtInMissing
     }
     if let described = (error as? LocalizedError)?.errorDescription { return described }
@@ -115,6 +116,26 @@ func describeSyncError(_ error: Error) -> String {
 private let transientLastfmCodes: Set<Int> = [8, 11, 16, 29]
 
 extension LastfmAPIError {
+    /// Last.fm refusing the key itself: 10 (not recognised), 26 (suspended), 33 (the key's owner has no Last.fm Pro). Every request
+    /// made with that key fails the same way, so it says nothing about the artist or song asked for, and asking on is pointless.
+    var isKeyRefusal: Bool {
+        if case .api(let code, _) = self { return [10, 26, 33].contains(code) }
+        return false
+    }
+
+    /// Last.fm saying it doesn't know what was asked for (6 not found, 7 invalid resource). Only this is an answer, which may be
+    /// saved as "nothing found"; every other error is a failure and is thrown, so it is asked again later.
+    var isGenuineMiss: Bool {
+        if case .api(let code, _) = self { return code == 6 || code == 7 }
+        return false
+    }
+
+    /// The short line for the status strip when background lookups stop because the key is refused.
+    var lookupsPausedMessage: String {
+        guard case .api(let code, _) = self else { return "Paused: Last.fm refused the API key. See Settings › Sync." }
+        return "Paused: Last.fm refused the API key (error \(code)). See Settings › Sync."
+    }
+
     /// Last.fm's "rate limit exceeded" (error 29).
     var isRateLimit: Bool {
         if case .api(let code, _) = self { return code == 29 }
@@ -643,9 +664,7 @@ actor LastfmAPIClient {
                 tracks: titles
             ))
         } catch let error as LastfmAPIError {
-            if case .api(let code, _) = error, !transientLastfmCodes.contains(code) {
-                return .noMatch
-            }
+            if error.isGenuineMiss { return .noMatch }
             throw error
         }
     }
@@ -831,8 +850,8 @@ actor LastfmAPIClient {
             return try await request(queryItems: items) as T
         } catch let error as LastfmAPIError {
             // Permanent miss (bad name / not found) — a real "no data" answer.
-            // Anything else (transient API code, HTTP, network, decode) throws.
-            if case .api(let code, _) = error, !transientLastfmCodes.contains(code) { return nil }
+            // Anything else (a refused key, a transient code, HTTP, network, decode) throws, so nothing is saved for it.
+            if error.isGenuineMiss { return nil }
             throw error
         }
     }

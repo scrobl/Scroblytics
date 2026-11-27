@@ -164,6 +164,13 @@ final class TagStore {
             } catch is OfflineError {
                 // Switched to Offline mode: leave it flagged so going online syncs it.
                 return
+            } catch let error as LastfmAPIError where error.isKeyRefusal {
+                // The community sweep would be refused the same way, so stop it too. The next sync or launch tries again.
+                needsPersonalSync = false
+                queue.removeAll()
+                queued.removeAll()
+                fail(error.lookupsPausedMessage)
+                return
             } catch {
                 // Leave it flagged so the next launch/sync tries again; the community sweep carries on.
                 needsPersonalSync = false
@@ -188,6 +195,7 @@ final class TagStore {
                 for await result in group { collected.append(result) }
                 return collected
             }
+            var refusal: LastfmAPIError?
             for (target, result) in results {
                 switch result {
                 case .success(let tags):
@@ -196,10 +204,21 @@ final class TagStore {
                     // Switched to Offline mode mid-batch: put it back at the front, and don't call it a failure.
                     queue.insert(target, at: 0)
                     queued.insert(target.key)
+                case .failure(let error as LastfmAPIError) where error.isKeyRefusal:
+                    refusal = error
                 case .failure(let error):
                     failedThisRun += 1
                     Self.log.error("tag lookup failed after retries for \(target.key, privacy: .public): \(String(describing: error), privacy: .public)")
                 }
+            }
+            if let refusal {
+                // Every other request would be refused too: stop, keep what did resolve, and say why. The next sync or launch
+                // queues the rest again.
+                queue.removeAll()
+                queued.removeAll()
+                failedThisRun = 0
+                fail(refusal.lookupsPausedMessage)
+                break
             }
             remaining = queue.count
             report()
@@ -248,7 +267,7 @@ final class TagStore {
                 }
             } catch {
                 if EntityTagsEngine.isGenuineMiss(error) { return .success([]) }
-                if error is OfflineError { return .failure(error) }
+                if error is OfflineError || (error as? LastfmAPIError)?.isKeyRefusal == true { return .failure(error) }
                 if attempt == maxRetries || Task.isCancelled { return .failure(error) }
                 try? await Task.sleep(for: .seconds(delay + Double.random(in: 0...0.25)))
                 delay *= 2

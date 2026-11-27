@@ -62,6 +62,8 @@ SCENARIOS = {
     "rate-limited-long": "Every history request is rate-limited (error 29) for the first 90 seconds, then it recovers",
     "strict-rate": "More than 5 requests in any rolling second are rate-limited (error 29), as Last.fm does; 6,000 scrobbles",
     "rate-limited-forever": "Every history request is rate-limited (error 29), always",
+    "pro-required": "Every request is refused because the key's owner has no Last.fm Pro (error 33)",
+    "lookups-refused": "The history imports (50 scrobbles); popularity, tag and tracklist lookups are refused (error 33)",
     "timing": "10,000 scrobbles, no limits; with --latency-ms, every history page takes that long (to time an import)",
     "late-plays": "3,000 scrobbles an hour apart; /__inject adds new, late or deleted plays between syncs",
     "loved-dates": "50 scrobbles and 450 loved tracks, each with the date it was loved; /__love adds or removes loves between syncs",
@@ -90,6 +92,7 @@ ERRORS = {
     "suspended-key": (26, "Suspended API key - Access for your account has been suspended, please contact Last.fm", 403),
     "unknown-user": (6, "User not found", 404),
     "private": (17, "Login: User required to be logged in", 403),
+    "pro-required": (33, "Pro Required - The owner of this API key must have an active Pro subscription to call this method", 403),
 }
 
 
@@ -396,6 +399,10 @@ def build_handler(state):
                 return
             if not q.get("api_key") or not q.get("user") and method.startswith("user."):
                 self._error(10, "Invalid API key - You must be granted a valid key by last.fm", 403)
+                return
+
+            if state.scenario == "lookups-refused" and method not in ("user.getInfo", "user.getRecentTracks", "user.getLovedTracks"):
+                self._error(*ERRORS["pro-required"])
                 return
 
             if method == "user.getInfo":

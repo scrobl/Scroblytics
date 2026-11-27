@@ -157,6 +157,48 @@ enum BuiltInKeyChecks {
             check("a build without the pair says so and sends nothing", missing == LastfmAccountCheck.builtInMissing && seenKeys.value.count == before, missing)
             LastfmBuiltInKey.useForTesting(.pair(pair))
 
+            // MARK: A key whose owner has no Last.fm Pro (error 33): a failure, never a saved "nothing found"
+            let lookups = LastfmAPIClient(apiKey: ownKey, username: "someone", session: session)
+            let tracklists = FetchDescriptor<AlbumTracklistCacheEntry>()
+            @MainActor func savedTracklists() -> Int { (try? container.mainContext.fetchCount(tracklists)) ?? -1 }
+            let savedBefore = savedTracklists()
+            for code in [33, 10, 26, 2] {
+                reply(code, "Refused")
+                var thrown: [Int] = []
+                do { _ = try await lookups.fetchArtistPopularityStats(artist: "Artist A") } catch LastfmAPIError.api(let got, _) { thrown.append(got) } catch {}
+                do { _ = try await lookups.fetchAlbumPopularityStats(artist: "Artist A", album: "Album One") } catch LastfmAPIError.api(let got, _) { thrown.append(got) } catch {}
+                do { _ = try await lookups.fetchTrackPopularityStats(artist: "Artist A", track: "Track 1") } catch LastfmAPIError.api(let got, _) { thrown.append(got) } catch {}
+                do { _ = try await AlbumTurnoverEngine.getCachedTracklist(context: container.mainContext, client: lookups, artist: "Artist A", album: "Album \(code)") } catch LastfmAPIError.api(let got, _) { thrown.append(got) } catch {}
+                check("error \(code) fails popularity and tracklist lookups and saves nothing", thrown == [code, code, code, code] && savedTracklists() == savedBefore, "\(thrown), saved \(savedTracklists() - savedBefore)")
+                check("error \(code) is not taken as an answer", !LastfmAPIError.api(code: code, message: "").isGenuineMiss && !EntityTagsEngine.isGenuineMiss(LastfmAPIError.api(code: code, message: "")))
+            }
+            reply(6, "Not found")
+            var statsAnswered = false
+            do { statsAnswered = try await lookups.fetchArtistPopularityStats(artist: "Artist A") == nil } catch {}
+            let missList = try? await AlbumTurnoverEngine.getCachedTracklist(context: container.mainContext, client: lookups, artist: "Artist A", album: "Unknown Album")
+            var missWasAnswer = false
+            if case .noMatch? = missList { missWasAnswer = true }
+            check("'not found' is still an answer, and is saved", statsAnswered && missWasAnswer && savedTracklists() == savedBefore + 1, "\(statsAnswered) \(savedTracklists() - savedBefore)")
+            let proRequired = LastfmAPIError.api(code: 33, message: "Pro Required")
+            check("the codes that refuse the key", [10, 26, 33].allSatisfy { LastfmAPIError.api(code: $0, message: "").isKeyRefusal } && [4, 6, 17, 29].allSatisfy { !LastfmAPIError.api(code: $0, message: "").isKeyRefusal })
+            reply(33, "Pro Required")
+            let noProBuiltIn = invalidText(await LastfmAccountCheck.validate(username: "someone", apiKey: nil, session: session))
+            let noProOwn = invalidText(await LastfmAccountCheck.validate(username: "someone", apiKey: ownKey, session: session))
+            check("checking an account: the built-in key says it isn't the person's doing, an own key needs Pro", noProBuiltIn == LastfmAccountCheck.builtInKeyRefused && noProOwn.contains("Last.fm Pro") && noProOwn.contains("built-in key"), "\(noProOwn)")
+            installKeychain(saved: storedBuiltIn); _ = LastfmCredentialsStore.load()
+            check("a sync refused for want of Pro on the built-in key says so", describeSyncError(proRequired) == LastfmAccountCheck.builtInKeyRefused)
+            installKeychain(saved: try? LastfmCredentialsStore.encodedForStorage(ownAccount)); _ = LastfmCredentialsStore.load()
+            let noProSync = describeSyncError(proRequired)
+            check("…and on an own key it says Pro is needed and offers the built-in key", noProSync.contains("Last.fm Pro") && noProSync.contains("built-in key") && !noProSync.contains("error 33"), noProSync)
+            LastfmBuiltInKey.useForTesting(.unavailable)
+            check("without a built-in key it is not offered", !describeSyncError(proRequired).contains("built-in key"))
+            LastfmBuiltInKey.useForTesting(.pair(pair))
+            check("unrecognised and suspended keys no longer blame Pro", [10, 26].allSatisfy { !describeSyncError(LastfmAPIError.api(code: $0, message: "")).contains("Pro") })
+            let failure = HistoryStatus.Failure(error: proRequired)
+            check("a failed import offers Settings and the built-in key", failure.kind == .fixAccount && failure.keyRejected)
+            check("the status strip's line names the code", proRequired.lookupsPausedMessage.contains("error 33"))
+            answer.mutate { $0 = (200, #"{"user": {"name": "SomeOne", "playcount": "12"}}"#) }
+
             // MARK: What a failed sync says, and what is offered
             installKeychain(saved: storedBuiltIn); _ = LastfmCredentialsStore.load()
             let refusedError = LastfmAPIError.api(code: 10, message: "Invalid API key")

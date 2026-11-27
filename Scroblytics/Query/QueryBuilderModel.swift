@@ -543,8 +543,13 @@ final class QueryBuilderModel {
         }.value
         for (index, request) in requests.enumerated() {
             resolveProgress = "\(index + 1) of \(requests.count)"
-            // A transient failure is never cached by the engine, so a later Resolve retries it.
-            _ = try? await AlbumTurnoverEngine.getCachedTracklist(context: container.mainContext, client: client, artist: request.artist, album: request.album)
+            // A failure is never cached by the engine, so a later Resolve retries it. A refused key fails every request: stop.
+            do {
+                _ = try await AlbumTurnoverEngine.getCachedTracklist(context: container.mainContext, client: client, artist: request.artist, album: request.album)
+            } catch let error as LastfmAPIError where error.isKeyRefusal {
+                notice = describeSyncError(error)
+                break
+            } catch {}
             if index % 10 == 9 { refreshSnapshots() }
         }
         refreshSnapshots()

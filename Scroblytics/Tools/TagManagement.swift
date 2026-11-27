@@ -457,7 +457,7 @@ final class TagWriteRunner {
     // MARK: Per-op work
 
     private static func isAuthFailure(_ error: LastfmAPIError) -> Bool {
-        if case .api(let code, _) = error { return [4, 9, 10, 26].contains(code) }
+        if case .api(let code, _) = error { return error.isKeyRefusal || [4, 9].contains(code) }
         return false
     }
 

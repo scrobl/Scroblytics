@@ -205,7 +205,7 @@ enum EntityTagsEngine {
         if error is CancellationError || error is OfflineError || ConnectivityGate.isConnectivityError(error) { return true }
         if let api = error as? LastfmAPIError {
             if api.isRateLimit { return true }
-            if case .api(let code, _) = api { return [4, 9, 10, 26, 8, 11, 16].contains(code) }
+            if case .api(let code, _) = api { return api.isKeyRefusal || [4, 9, 8, 11, 16].contains(code) }
         }
         return false
     }

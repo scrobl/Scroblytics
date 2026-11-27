@@ -160,6 +160,22 @@ enum DetailChecks {
                 entries: [entry("Reprise", plays: 9, daysAgo: 1), entry("Reprise (Remastered)", plays: 2, daysAgo: 2)]
             )
             check("a title that appears twice on the tracklist is paired in order", twice[0].entry?.playcount == 9 && twice[2].entry?.playcount == 2 && twice[1].entry == nil, "\(twice.map { $0.entry?.playcount ?? -1 })")
+            // Two spellings of one listed song, tied, the plain one ranked first: the row gets the spelling it is listed under.
+            let spellings = AlbumTrackRows.merge(
+                tracklist: [.init(title: "Song Seven [Mono Version]", heardThisCycle: true)],
+                entries: [entry("Song Seven", plays: 1, daysAgo: 300), entry("Song Seven [Mono Version]", plays: 1, daysAgo: 200)]
+            )
+            check("the title spelled as on the tracklist takes the row, the other spelling is listed apart", spellings.map { $0.entry?.name ?? "none" } == ["Song Seven [Mono Version]", "Song Seven"] && spellings.map(\.kind) == [.listed, .extra], "\(spellings.map { $0.entry?.name ?? "none" })")
+            let bothListed = AlbumTrackRows.merge(
+                tracklist: [.init(title: "Song Eight", heardThisCycle: true), .init(title: "Song Eight (Live)", heardThisCycle: true)],
+                entries: [entry("Song Eight (Live)", plays: 7, daysAgo: 1), entry("song  eight", plays: 2, daysAgo: 2)]
+            )
+            check("two listed versions of a song each take their own plays, whatever the ranking, capitals and spacing aside", bothListed.map { $0.entry?.playcount ?? -1 } == [2, 7], "\(bothListed.map { $0.entry?.playcount ?? -1 })")
+            let exactLater = AlbumTrackRows.merge(
+                tracklist: [.init(title: "Song Nine (Remastered)", heardThisCycle: true), .init(title: "Song Nine", heardThisCycle: true)],
+                entries: [entry("Song Nine", plays: 3, daysAgo: 1)]
+            )
+            check("an exact title further down the list is not taken by an earlier look-alike", exactLater.map { $0.entry?.playcount ?? -1 } == [-1, 3], "\(exactLater.map { $0.entry?.playcount ?? -1 })")
             // Titles made only of symbols, as on an album whose tracks are "/=/" and "/=/=/": each keeps its own key and its own plays.
             let symbolKeys = ["/=/", "/=/=/", " /=/ ", "Song One", "夜に駆ける", "群青"].map { TextNormalization.normalizeTrackTitle($0) }
             check("a title of only symbols keeps a key of its own, apart from a longer one and unaffected by spaces", !symbolKeys[0].isEmpty && symbolKeys[0] != symbolKeys[1] && symbolKeys[0] == symbolKeys[2], "\(symbolKeys)")

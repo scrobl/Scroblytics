@@ -6,8 +6,8 @@ struct AlbumTrackRow: Identifiable, Hashable {
     enum Kind: Hashable {
         /// A track on the album's tracklist.
         case listed
-        /// A track that was played in the period but is not on the tracklist (a bonus or live version, a renamed title), or, when
-        /// no tracklist is known, any played track.
+        /// A track that was played in the period but has no row on the tracklist (a bonus or live version, a renamed title, a second
+        /// spelling of a listed track), or, when no tracklist is known, any played track.
         case extra
     }
 
@@ -79,23 +79,32 @@ enum AlbumTrackRows {
         let heardThisCycle: Bool?
     }
 
-    /// The tracklist in order, each track paired with its plays in the period (matched by normalized title; a title that appears
-    /// twice is paired in order), then every played track that matched nothing. With no tracklist, just the played tracks.
+    /// The tracklist in order, each track paired with its plays in the period, then every played track that got no row. A title
+    /// spelled as on the tracklist (capitals and spacing aside) takes its row first, so "Song [Mono Version]" is not given the plays
+    /// of "Song" while its own plays are listed apart; a row still empty then takes plays whose normalized title matches. A title
+    /// that appears twice is paired in order. With no tracklist, just the played tracks.
     static func merge(tracklist: [ListedTrack]?, entries: [TopChartEntry]) -> [AlbumTrackRow] {
         guard let tracklist, !tracklist.isEmpty else {
             return entries.map { AlbumTrackRow(id: "e\($0.id)", kind: .extra, position: nil, title: $0.name, entry: $0, heardThisCycle: nil) }
         }
-        var waiting: [String: [TopChartEntry]] = [:]
-        for entry in entries { waiting[TextNormalization.normalizeTrackTitleFolded(entry.name), default: []].append(entry) }
-        var rows: [AlbumTrackRow] = []
-        for (index, track) in tracklist.enumerated() {
-            let key = TextNormalization.normalizeTrackTitleFolded(track.title)
-            var matched: TopChartEntry?
-            if var queue = waiting[key], !queue.isEmpty {
-                matched = queue.removeFirst()
-                waiting[key] = queue
+        var matched = [TopChartEntry?](repeating: nil, count: tracklist.count)
+        /// Gives each still-empty row the best-ranked unclaimed play with the same key.
+        func claim(by key: (String) -> String) {
+            let taken = Set(matched.compactMap { $0?.id })
+            var waiting: [String: [TopChartEntry]] = [:]
+            for entry in entries where !taken.contains(entry.id) { waiting[key(entry.name), default: []].append(entry) }
+            for (index, track) in tracklist.enumerated() where matched[index] == nil {
+                let wanted = key(track.title)
+                if var queue = waiting[wanted], !queue.isEmpty {
+                    matched[index] = queue.removeFirst()
+                    waiting[wanted] = queue
+                }
             }
-            rows.append(AlbumTrackRow(id: "t\(index)", kind: .listed, position: index + 1, title: track.title, entry: matched, heardThisCycle: track.heardThisCycle))
+        }
+        claim(by: NameKeys.fold)
+        claim(by: TextNormalization.normalizeTrackTitleFolded)
+        var rows = tracklist.enumerated().map { index, track in
+            AlbumTrackRow(id: "t\(index)", kind: .listed, position: index + 1, title: track.title, entry: matched[index], heardThisCycle: track.heardThisCycle)
         }
         // Whatever is left over, in the order the plays were ranked.
         let claimed = Set(rows.compactMap { $0.entry?.id })

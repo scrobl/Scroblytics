@@ -203,7 +203,7 @@ struct AlbumTrackTable: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 // With a tracklist and the natural order, the unmatched plays are set apart under their own heading.
                 if hasTracklist, sort == .trackOrder, index == firstExtra {
-                    Text("Other tracks played, not matched to the tracklist")
+                    Text("Other tracks played")
                         .font(AppTypography.compactMetadata).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 6).padding(.horizontal, 8)

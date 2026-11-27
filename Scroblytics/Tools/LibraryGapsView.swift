@@ -77,6 +77,14 @@ struct LibraryGapsView: View {
     private static let toolId = "libraryGaps"
     /// A refresh on open is skipped if the saved check is newer than this.
     private static let autoRefreshAfter: TimeInterval = 3600
+    /// "Today at 3:05 PM", "Yesterday at …", otherwise the date and time.
+    private static let checkedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
 
     @Environment(\.modelContext) private var modelContext
     @Environment(LibraryGapBadgeStore.self) private var gapBadges
@@ -179,6 +187,10 @@ struct LibraryGapsView: View {
             .onChange(of: options.groupByArtist) { expandedArtists = [] }
         HStack(spacing: 10) {
             if isChecking { ProgressView().controlSize(.small) }
+            if let lastCheck {
+                Text("Last checked: \(Self.checkedFormatter.string(from: lastCheck.checkedAt))")
+                    .font(AppTypography.compactMetadata).foregroundStyle(.secondary).lineLimit(1)
+            }
             Button {
                 Task { await check() }
             } label: {
@@ -231,7 +243,7 @@ struct LibraryGapsView: View {
                 }
                 .font(AppTypography.contentTitle)
                 if let lastCheck {
-                    Text("\(plays.formatted()) plays between them · checked \(lastCheck.checkedAt.formatted(.relative(presentation: .named))) against \(lastCheck.libraryTrackCount.formatted()) library tracks")
+                    Text("\(plays.formatted()) plays between them · compared with \(lastCheck.libraryTrackCount.formatted()) library tracks")
                         .font(AppTypography.compactMetadata).fontWeight(.regular).foregroundStyle(.secondary)
                 }
                 if let errorMessage {

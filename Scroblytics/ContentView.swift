@@ -203,6 +203,7 @@ struct ContentView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 #if DEBUG
+                BuildStampStrip()
                 TestProfileStrip()
                 TestProfilesLaunchTrigger()
                 tourDriver

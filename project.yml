@@ -33,6 +33,24 @@ targets:
         INFOPLIST_FILE: Config/Info-extra.plist
         INFOPLIST_KEY_CFBundleDisplayName: Scroblytics
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+    postBuildScripts:
+      - name: Stamp debug build
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/.git/HEAD
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/build-stamp.txt
+        script: |
+          # Debug builds only: note the git branch and the build time, shown at the top of the app's window.
+          [ "${CONFIGURATION}" = "Debug" ] || exit 0
+          head=""
+          if [ -r "${SRCROOT}/.git/HEAD" ]; then IFS= read -r head < "${SRCROOT}/.git/HEAD"; fi
+          case "$head" in
+            "ref: refs/heads/"*) branch="${head#ref: refs/heads/}" ;;
+            "") branch="unknown branch" ;;
+            *) branch="no branch (commit $(printf '%.7s' "$head"))" ;;
+          esac
+          printf '%s\n%s\n' "$branch" "$(date +%s)" > "${SCRIPT_OUTPUT_FILE_0}"
 schemes:
   Scroblytics:
     build:

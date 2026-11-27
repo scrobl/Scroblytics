@@ -332,6 +332,7 @@
 		CC3B0E7E0FF75298A5ED4FD1 /* QueryCapChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEFAD2C4371248FE24587698 /* QueryCapChecks.swift */; };
 		CC694911B7969CFF319301F9 /* SyncSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C2AABE02B3FA2C61D7AE25 /* SyncSetupView.swift */; };
 		CC9D1B4A56DEDD221E457CC1 /* ShareProfileCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D64F7223BFEA111C35D60B6 /* ShareProfileCardView.swift */; };
+		CCCE8AA75ABE320D323F2D2C /* BuildStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474A1D8F44E57598BEB0A315 /* BuildStamp.swift */; };
 		CF2D6C7D306EF3AD006ABB24 /* RabbitHole.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D6C7C306EF3AD006ABB24 /* RabbitHole.swift */; };
 		CF2D6C7F306EF3FA006ABB24 /* RabbitHoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D6C7E306EF3FA006ABB24 /* RabbitHoleView.swift */; };
 		CF2D6C81306EFE2C006ABB24 /* AlbumTurnoversView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D6C80306EFE2C006ABB24 /* AlbumTurnoversView.swift */; };
@@ -557,6 +558,7 @@
 		46717EFEF903608806DDD52A /* TempoSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TempoSettingsView.swift; sourceTree = "<group>"; };
 		46BCAC3039EC0C789D327F59 /* EntityTagsSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityTagsSectionView.swift; sourceTree = "<group>"; };
 		4726F522DC2428E46AB9FD8E /* AskPatterns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskPatterns.swift; sourceTree = "<group>"; };
+		474A1D8F44E57598BEB0A315 /* BuildStamp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BuildStamp.swift; sourceTree = "<group>"; };
 		4868B3BF404B087A6B3860BF /* OfflineChecks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OfflineChecks.swift; sourceTree = "<group>"; };
 		49096B678D3666625628A026 /* QueryBuilderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryBuilderModel.swift; sourceTree = "<group>"; };
 		4ABEC7C605198B4546CB60A1 /* TrackDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrackDetailView.swift; sourceTree = "<group>"; };
@@ -939,6 +941,7 @@
 				32458EEEF751A768BE40C133 /* StoreLocationChecks.swift */,
 				2410BEA610A2B380C5CC7F1C /* StoreIntegrityChecks.swift */,
 				3D744605EDA27B96137807DD /* BackupScheduleChecks.swift */,
+				474A1D8F44E57598BEB0A315 /* BuildStamp.swift */,
 			);
 			path = Verification;
 			sourceTree = "<group>";
@@ -1624,6 +1627,7 @@
 			buildPhases = (
 				9814DCF134E1E6BC9FB3EAD3 /* Sources */,
 				C85D02D9D405F569E02E30C6 /* Resources */,
+				B26583A68A8BFF5FBE5E0837 /* Stamp debug build */,
 			);
 			buildRules = (
 			);
@@ -1680,6 +1684,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B26583A68A8BFF5FBE5E0837 /* Stamp debug build */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.git/HEAD",
+			);
+			name = "Stamp debug build";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/build-stamp.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Debug builds only: note the git branch and the build time, shown at the top of the app's window.\n[ \"${CONFIGURATION}\" = \"Debug\" ] || exit 0\nhead=\"\"\nif [ -r \"${SRCROOT}/.git/HEAD\" ]; then IFS= read -r head < \"${SRCROOT}/.git/HEAD\"; fi\ncase \"$head\" in\n  \"ref: refs/heads/\"*) branch=\"${head#ref: refs/heads/}\" ;;\n  \"\") branch=\"unknown branch\" ;;\n  *) branch=\"no branch (commit $(printf '%.7s' \"$head\"))\" ;;\nesac\nprintf '%s\\n%s\\n' \"$branch\" \"$(date +%s)\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		9814DCF134E1E6BC9FB3EAD3 /* Sources */ = {
@@ -2108,6 +2136,7 @@
 				0E1898843BB32DD1624C37CD /* BackupViews.swift in Sources */,
 				B28115E4FBEB9ED67881C923 /* StoreSafetyCopy.swift in Sources */,
 				A5F2E567B13210A57D8BA155 /* BackupScheduleChecks.swift in Sources */,
+				CCCE8AA75ABE320D323F2D2C /* BuildStamp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

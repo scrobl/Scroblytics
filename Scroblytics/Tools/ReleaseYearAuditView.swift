@@ -766,7 +766,7 @@ struct ReleaseYearAuditRowView: View {
     /// track differs only because the album's year does, which the row already says.
     private var showsTrackDetails: Bool { Self.showsTrackDetails(row) }
 
-    static func showsTrackDetails(_ row: ReleaseYearAudit.AlbumRow) -> Bool { row.musicVaries && !row.trackDifferences.isEmpty }
+    nonisolated static func showsTrackDetails(_ row: ReleaseYearAudit.AlbumRow) -> Bool { row.musicVaries && !row.trackDifferences.isEmpty }
 
     private var columns: some View {
         Group {

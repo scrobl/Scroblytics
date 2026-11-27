@@ -360,12 +360,12 @@ enum AppleMusicDetailsChecks {
         let scratch = UserDefaults(suiteName: "musicdetails-check-\(UUID().uuidString)")!
         let store = AppleMusicDetailsStore(defaults: scratch)
         check("the choice is off until made", !store.lengthWins && scratch.bool(forKey: AppleMusicDetailsStore.lengthWinsKey) == false)
-        var announced = 0
-        let token = NotificationCenter.default.addObserver(forName: DurationEngine.progressNotification, object: nil, queue: nil) { _ in announced += 1 }
+        let announced = KeychainChecks.LockedBox(0)
+        let token = NotificationCenter.default.addObserver(forName: DurationEngine.progressNotification, object: nil, queue: nil) { _ in announced.mutate { $0 += 1 } }
         store.setLengthWins(true)
         store.setLengthWins(true)
         NotificationCenter.default.removeObserver(token)
-        check("turning it on is remembered and tells the screens showing lengths (once)", store.lengthWins && scratch.bool(forKey: AppleMusicDetailsStore.lengthWinsKey) && announced == 1, "announced \(announced)")
+        check("turning it on is remembered and tells the screens showing lengths (once)", store.lengthWins && scratch.bool(forKey: AppleMusicDetailsStore.lengthWinsKey) && announced.value == 1, "announced \(announced.value)")
     }
 
     // MARK: Storage

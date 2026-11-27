@@ -14,7 +14,7 @@ enum NameCorrectionChecks {
     @MainActor
     static func runRealIfRequested(container: ModelContainer) {
         guard let spec = ProcessInfo.processInfo.environment["SCROBLYTICS_NAMECORRECTION_REAL"] else { return }
-        Task { @MainActor in
+        HeadlessTask.run("namecorrection-real") {
             var failures = 0
             func check(_ label: String, _ ok: Bool, _ detail: String = "") {
                 print((ok ? "PASS  " : "FAIL  ") + label + (detail.isEmpty || ok ? "" : "  [\(detail)]"))
@@ -71,7 +71,7 @@ enum NameCorrectionChecks {
     @MainActor
     static func runFinderIfRequested(container: ModelContainer) {
         guard let raw = ProcessInfo.processInfo.environment["SCROBLYTICS_NAMECORRECTION_FINDER"], let count = Int(raw) else { return }
-        Task { @MainActor in
+        HeadlessTask.run("namecorrection-finder") {
             let plays = try await ScrobbleHistoryLoader(modelContainer: container).load().snapshots
             let started = Date()
             let findings = NameCorrectionFinder.find(plays: plays, handled: [])

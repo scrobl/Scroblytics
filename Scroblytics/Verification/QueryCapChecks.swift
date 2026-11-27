@@ -1078,7 +1078,7 @@ enum QueryCapChecks {
         }
         let request = "show me the top 10 songs played on saturday mornings that hasn't been played since april 29th 2026"
         let translated = try? AskModelEngine.read(reply(conditions: lastPlayedBefore, sorts: playsDescending, limit: "10", caps: saturdayMornings("")), request: request, registry: .standard, context: .none, now: now, engine: "test", seconds: 0)
-        guard var spec = translated?.interpretation.spec else { check("the request is read", false); return }
+        guard let spec = translated?.interpretation.spec else { check("the request is read", false); return }
 
         func names(_ spec: QuerySpec) -> [String] {
             guard let validated = try? spec.validate(against: .standard) else { return ["invalid"] }

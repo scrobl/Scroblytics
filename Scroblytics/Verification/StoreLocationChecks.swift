@@ -121,7 +121,7 @@ enum StoreLocationChecks {
                 for index in 0..<25 { context.insert(LovedTrackEntry(cacheKey: "artist a\u{1F}track \(index)", artist: "Artist A", track: "Track \(index)")) }
                 try? context.save()
             }
-            check("the test database has data waiting in its log, as a live app's would", (try? manager.attributesOfItem(atPath: legacy.path + "-wal")[.size] as? Int).map { ($0 ?? 0) > 0 } ?? false)
+            check("the test database has data waiting in its log, as a live app's would", (try? manager.attributesOfItem(atPath: legacy.path + "-wal")[.size] as? Int).map { $0 > 0 } ?? false)
             let before = (main: hash(of: legacy), wal: hash(of: URL(fileURLWithPath: legacy.path + "-wal")))
             let migrateDefaults = freshDefaults()
             let migrated = StoreLocation.resolve(support: migrateHome, defaults: migrateDefaults)
